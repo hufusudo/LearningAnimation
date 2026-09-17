@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>置换-选择排序与最佳归并树 · 交互教学系统</title>
+
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['-apple-system', 'BlinkMacSystemFont', 'SF Pro Display', 'Segoe UI', 'Roboto', 'sans-serif'],
+            mono: ['JetBrains Mono', 'Fira Code', 'SF Mono', 'monospace'],
+            serif: ['Newsreader', 'Georgia', 'serif']
+          }
+        }
+      }
+    }
+  </script>
+
+  <!-- GSAP CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+
+  <!-- KaTeX CDN -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/contrib/auto-render.min.js"></script>
+
+  <!-- Google Fonts -->
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Newsreader:ital,opsz,wght@0,6..72,500;0,6..72,600;1,6..72,400&display=swap">
+
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="min-h-screen bg-[#FAF9F5] text-stone-900 antialiased selection:bg-amber-100 selection:text-amber-900 flex flex-col justify-between overflow-x-hidden">
+
+  <!-- ========================================================================= -->
+  <!-- 极简顶栏 HEADER                                                          -->
+  <!-- ========================================================================= -->
+  <header class="border-b border-[#E5E4DC] bg-[#FAF9F5]/90 backdrop-blur sticky top-0 z-40 px-6 py-2.5">
+    <div class="max-w-7xl mx-auto flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <a href="../index.html#ds" class="w-7 h-7 rounded-lg bg-stone-900 text-white flex items-center justify-center font-mono font-bold text-xs hover:bg-stone-800 transition-colors shadow-sm" title="返回数据结构展厅">
+          ←
+        </a>
+        <div>
+          <h1 class="text-base font-bold tracking-tight text-stone-900 flex items-center gap-2">
+            置换-选择排序与最佳归并树
+            <span class="text-xs font-mono font-normal px-2 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200">
+              408 核心考点 · 外部排序
+            </span>
+          </h1>
+        </div>
+      </div>
+
+      <!-- 快速锚点导航 -->
+      <nav class="flex items-center gap-2 text-xs font-mono">
+        <a href="#rs-section" class="px-2.5 py-1 rounded-md border border-[#E5E4DC] bg-white text-stone-600 hover:text-stone-900 hover:border-stone-400 transition-colors shadow-2xs">
+          置换-选择排序
+        </a>
+        <a href="#tree-section" class="px-2.5 py-1 rounded-md border border-[#E5E4DC] bg-white text-stone-600 hover:text-stone-900 hover:border-stone-400 transition-colors shadow-2xs">
+          最佳归并树
+        </a>
+      </nav>
+    </div>
+  </header>
+
+  <!-- ========================================================================= -->
+  <!-- 主体工作区 MAIN                                                          -->
+  <!-- ========================================================================= -->
+  <main class="flex-1 max-w-7xl w-full mx-auto px-4 md:px-6 py-5 flex flex-col gap-6">
+
+    <!-- ========================================================================= -->
+    <!-- SECTION 1: 置换-选择排序 (REPLACEMENT SELECTION SORT)                     -->
+    <!-- ========================================================================= -->
+    <section id="rs-section" class="card-panel p-5 flex flex-col gap-4">
+
+      <!-- Section Header & Controls -->
+      <div class="flex flex-wrap items-center justify-between gap-3 border-b border-[#E5E4DC] pb-3.5">
+        <div class="flex items-center gap-2">
+          <span class="w-2.5 h-2.5 rounded-full bg-emerald-600"></span>
+          <h2 class="text-base font-bold text-stone-900 tracking-tight">
+            置换-选择排序
+            <span class="font-mono text-xs text-stone-400 font-normal ml-1">Replacement Selection</span>
+          </h2>
+        </div>
+
+        <!-- Controls -->
+        <div class="flex flex-wrap items-center gap-2">
+          <button id="rs-btn-reset" class="ctl-btn">重置</button>
+          <button id="rs-btn-prev" class="ctl-btn">上一步</button>
+          <button id="rs-btn-play" class="btn-primary">
+            <span id="rs-play-icon">▶</span>
+            <span id="rs-play-label">自动播放</span>
+          </button>
+          <button id="rs-btn-next" class="ctl-btn font-semibold text-stone-900 border-stone-400">单步执行</button>
+
+          <div class="ctrl-group">
+            <span class="text-stone-400">速度:</span>
+            <input id="rs-speed" type="range" min="0.3" max="2.5" step="0.1" value="1.0" class="w-16 accent-stone-800 h-1 cursor-pointer">
+            <span id="rs-speed-val" class="w-7 text-stone-700 font-bold">1.0x</span>
+          </div>
+
+          <div class="ctrl-group">
+            <span class="text-stone-400">WA容量:</span>
+            <select id="rs-wa-cap" class="bg-transparent text-stone-900 font-bold outline-none cursor-pointer">
+              <option value="4">4</option>
+              <option value="5">5</option>
+              <option value="6" selected>6 (教材)</option>
+              <option value="7">7</option>
+              <option value="8">8</option>
+            </select>
+          </div>
+
+          <div class="h-4 w-px bg-stone-300 mx-0.5"></div>
+
+          <button class="rs-preset-btn btn-preset" data-preset="textbook">教材24数</button>
+          <button class="rs-preset-btn btn-preset" data-preset="nearly_sorted">近乎有序</button>
+          <button class="rs-preset-btn btn-preset" data-preset="reverse">逆序</button>
+        </div>
+      </div>
+
+      <!-- Main Dual Column Layout: Left Visualizer + Right Code Execution -->
+      <div class="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
+
+        <!-- Left: Visualizer Canvas (7 Cols) -->
+        <div class="lg:col-span-7 flex flex-col gap-4">
+
+          <!-- 1. Input Stream -->
+          <div class="bg-[#FAF9F5] border border-[#E5E4DC] rounded-xl p-3 flex flex-col gap-2">
+            <div class="flex items-center justify-between text-xs font-mono text-stone-500">
+              <span class="font-medium text-stone-700">待排输入流 (Input Stream)</span>
+              <span>剩余待读: <strong id="rs-input-count" class="text-stone-900 font-bold">24</strong></span>
+            </div>
+            <div id="rs-input-stream" class="flex items-center gap-1.5 overflow-x-auto min-h-[46px] p-1 scrollbar-thin">
+              <!-- Stream Nodes -->
+            </div>
+          </div>
+
+          <!-- 2. Decision Inspector & WA Heap -->
+          <div class="grid grid-cols-1 md:grid-cols-12 gap-3">
+
+            <!-- Inspector -->
+            <div id="rs-inspector-card" class="md:col-span-4 bg-[#FAF9F5] border border-[#E5E4DC] rounded-xl p-3 flex flex-col justify-between transition-all duration-300">
+              <div class="text-[11px] font-mono text-stone-500 flex items-center justify-between">
+                <span class="font-semibold text-stone-700">置换判定台</span>
+                <span id="rs-decision-tag" class="text-[10px] px-1.5 py-0.5 rounded bg-stone-200 text-stone-700 font-bold">比对中</span>
+              </div>
+
+              <div class="flex items-center justify-around my-2.5 font-mono">
+                <div class="flex flex-col items-center">
+                  <span class="text-[10px] text-stone-400">新元素 x</span>
+                  <div id="rs-x-val" class="w-10 h-10 rounded-lg bg-white border border-stone-300 flex items-center justify-center font-bold text-sm text-stone-900 shadow-2xs">--</div>
+                </div>
+                <div id="rs-op-symbol" class="text-base font-extrabold text-stone-400">?</div>
+                <div class="flex flex-col items-center">
+                  <span class="text-[10px] text-stone-400">LAST_KEY</span>
+                  <div id="rs-last-key-val" class="w-10 h-10 rounded-lg bg-white border border-amber-300 flex items-center justify-center font-bold text-sm text-amber-800 shadow-2xs">--</div>
+                </div>
+              </div>
+
+              <div id="rs-decision-desc" class="text-[11px] font-mono text-stone-500 text-center leading-tight">
+                等待读入与置换
+              </div>
+            </div>
+
+            <!-- WA Min-Heap Tree -->
+            <div class="md:col-span-8 bg-[#FAF9F5] border border-[#E5E4DC] rounded-xl p-3 flex flex-col justify-between relative min-h-[260px]">
+              <div class="flex items-center justify-between text-[11px] font-mono text-stone-500 border-b border-[#E5E4DC] pb-2">
+                <span class="font-semibold text-stone-700">工作区 WA 小顶堆 (活跃: <span id="rs-act-count" class="text-emerald-700 font-bold">6</span>, 冻结: <span id="rs-frz-count" class="text-rose-600 font-bold">0</span>)</span>
+                <div class="flex items-center gap-3">
+                  <span class="inline-flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>活跃堆</span>
+                  <span class="inline-flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full border border-dashed border-rose-500 bg-rose-200"></span>冻结区</span>
+                </div>
+              </div>
+
+              <!-- Tree Canvas -->
+              <div id="rs-heap-canvas" class="relative w-full h-[210px] flex items-center justify-center">
+                <svg id="rs-heap-svg" class="absolute inset-0 w-full h-full pointer-events-none"></svg>
+                <div id="rs-heap-nodes" class="relative z-10 w-full h-full"></div>
+              </div>
+            </div>
+
+          </div>
+
+          <!-- 3. Linear WA Slots -->
+          <div class="bg-[#FAF9F5] border border-[#E5E4DC] rounded-xl p-3 flex flex-col gap-2">
+            <div class="text-[11px] font-mono text-stone-500 flex items-center justify-between">
+              <span class="font-semibold text-stone-700">线性物理内存槽位 (WA[0 .. w-1])</span>
+              <span class="text-[10px] text-stone-400">左侧为主存活跃堆，右侧为顺延收缩的冻结区</span>
+            </div>
+            <div id="rs-wa-slots" class="grid grid-cols-6 gap-2">
+              <!-- Linear Slots -->
+            </div>
+          </div>
+
+          <!-- 4. Initial Runs Tracks -->
+          <div class="bg-[#FAF9F5] border border-[#E5E4DC] rounded-xl p-3 flex flex-col gap-2">
+            <div class="flex items-center justify-between text-xs font-mono text-stone-500">
+              <span class="font-semibold text-stone-700">生成的初始归并段 (Initial Runs)</span>
+              <button id="rs-btn-import-tree" class="px-2.5 py-1 bg-amber-50 hover:bg-amber-100 text-amber-800 rounded-lg border border-amber-300 text-[11px] font-medium transition-colors shadow-2xs flex items-center gap-1">
+                <span>导入下方最佳归并树</span> <span>&darr;</span>
+              </button>
+            </div>
+            <div id="rs-runs-tracks" class="flex flex-col gap-2 max-h-[140px] overflow-y-auto scrollbar-thin">
+              <!-- Run Tracks -->
+            </div>
+          </div>
+
+        </div>
+
+        <!-- Right: Live Code Execution & Variable Watcher (5 Cols) -->
+        <div class="lg:col-span-5 flex flex-col gap-3">
+
+          <!-- Current Step Note -->
+          <div id="rs-step-summary-card" class="bg-white border-l-4 border-l-amber-500 border border-[#E5E4DC] rounded-xl p-3.5 flex flex-col gap-1.5 shadow-sm">
+            <div class="flex items-center justify-between text-xs font-mono">
+              <span id="rs-step-title" class="font-bold text-amber-800">步骤执行</span>
+              <span id="rs-step-badge" class="px-2 py-0.5 rounded bg-stone-100 text-stone-500 font-bold text-[10px]">Step 0</span>
+            </div>
+            <p id="rs-step-detail" class="text-xs text-stone-700 leading-relaxed font-sans">
+              准备就绪，点击自动播放或单步执行。
+            </p>
+          </div>
+
+          <!-- Live Code Panel -->
+          <div class="code-container p-3 flex flex-col gap-2 shadow-2xs">
+            <div class="flex items-center justify-between text-xs font-mono text-stone-600 border-b border-[#E5E4DC] pb-2">
+              <span class="font-bold">置换-选择排序算法 (C++ / 伪代码)</span>
+              <span class="text-[10px] text-amber-700 font-bold flex items-center gap-1">
+                <span class="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span>
+                实时运行行
+              </span>
+            </div>
+
+            <!-- Code Lines with Live Highlighting -->
+            <pre class="font-mono text-xs overflow-x-auto leading-relaxed select-none" id="rs-code-block"><code class="flex flex-col">
+<span class="code-line" id="rs-line-1"><span class="line-num">01</span>while (heapSize > 0 || hasFrozen) {</span>
+<span class="code-line" id="rs-line-2"><span class="line-num">02</span>  if (heapSize == 0) { // 活跃堆空，当前段结束</span>
+<span class="code-line" id="rs-line-3"><span class="line-num">03</span>    endCurrentRun(); startNextRun();</span>
+<span class="code-line" id="rs-line-4"><span class="line-num">04</span>    unfreezeAll(); buildMinHeap(WA, w);</span>
+<span class="code-line" id="rs-line-5"><span class="line-num">05</span>  }</span>
+<span class="code-line" id="rs-line-6"><span class="line-num">06</span>  minVal = extractMin(WA); // 选出堆顶极小值</span>
+<span class="code-line" id="rs-line-7"><span class="line-num">07</span>  outputToRun(currentRun, minVal);</span>
+<span class="code-line" id="rs-line-8"><span class="line-num">08</span>  lastKey = minVal;</span>
+<span class="code-line" id="rs-line-9"><span class="line-num">09</span>  if (!inputStream.empty()) {</span>
+<span class="code-line" id="rs-line-10"><span class="line-num">10</span>    x = inputStream.readNext();</span>
+<span class="code-line" id="rs-line-11"><span class="line-num">11</span>    if (x >= lastKey) { // 归入当前段</span>
+<span class="code-line" id="rs-line-12"><span class="line-num">12</span>      WA[0] = x;</span>
+<span class="code-line" id="rs-line-13"><span class="line-num">13</span>      siftDown(WA, heapSize, 0);</span>
+<span class="code-line" id="rs-line-14"><span class="line-num">14</span>    } else { // 归入下一段 (冻结置底)</span>
+<span class="code-line" id="rs-line-15"><span class="line-num">15</span>      WA[0] = WA[heapSize - 1];</span>
+<span class="code-line" id="rs-line-16"><span class="line-num">16</span>      WA[heapSize - 1] = {x, FROZEN};</span>
+<span class="code-line" id="rs-line-17"><span class="line-num">17</span>      heapSize--;</span>
+<span class="code-line" id="rs-line-18"><span class="line-num">18</span>      siftDown(WA, heapSize, 0);</span>
+<span class="code-line" id="rs-line-19"><span class="line-num">19</span>    }</span>
+<span class="code-line" id="rs-line-20"><span class="line-num">20</span>  }</span>
+<span class="code-line" id="rs-line-21"><span class="line-num">21</span>}</span></code></pre>
+          </div>
+
+          <!-- Variable State Monitor -->
+          <div class="bg-white border border-[#E5E4DC] rounded-xl p-3 grid grid-cols-4 gap-2 font-mono text-xs shadow-2xs">
+            <div class="flex flex-col">
+              <span class="text-[10px] text-stone-400 font-sans">当前段</span>
+              <span id="rs-var-run" class="text-amber-800 font-bold">R1</span>
+            </div>
+            <div class="flex flex-col">
+              <span class="text-[10px] text-stone-400 font-sans">前驱极值</span>
+              <span id="rs-var-lastkey" class="text-stone-800 font-bold">-∞</span>
+            </div>
+            <div class="flex flex-col">
+              <span class="text-[10px] text-stone-400 font-sans">活跃堆大小</span>
+              <span id="rs-var-heapsize" class="text-emerald-700 font-bold">6</span>
+            </div>
+            <div class="flex flex-col">
+              <span class="text-[10px] text-stone-400 font-sans">新读入元素</span>
+              <span id="rs-var-x" class="text-stone-800 font-bold">--</span>
+            </div>
+          </div>
+
+        </div>
+
+      </div>
+
+    </section>
+
+
+    <!-- ========================================================================= -->
+    <!-- SECTION 2: 最佳归并树 (OPTIMAL MERGE TREE)                                -->
+    <!-- ========================================================================= -->
+    <section id="tree-section" class="card-panel p-5 flex flex-col gap-4">
+
+      <!-- Section Header & Controls -->
+      <div class="flex flex-wrap items-center justify-between gap-3 border-b border-[#E5E4DC] pb-3.5">
+        <div class="flex items-center gap-2">
+          <span class="w-2.5 h-2.5 rounded-full bg-amber-600"></span>
+          <h2 class="text-base font-bold text-stone-900 tracking-tight">
+            最佳归并树
+            <span class="font-mono text-xs text-stone-400 font-normal ml-1">Optimal Merge Tree</span>
+          </h2>
+        </div>
+
+        <!-- Mode Toggle & Controls -->
+        <div class="flex flex-wrap items-center gap-2">
+
+          <!-- Mode Tabs -->
+          <div class="flex items-center p-0.5 bg-stone-100 border border-stone-200 rounded-lg text-xs font-mono">
+            <button id="tree-tab-with" class="px-3 py-1 rounded-md transition-all bg-white text-stone-900 font-bold shadow-2xs">
+              补虚段 (最优)
+            </button>
+            <button id="tree-tab-without" class="px-3 py-1 rounded-md transition-all text-stone-500 hover:text-stone-900 font-medium">
+              不补虚段 (对照)
+            </button>
+          </div>
+
+          <button id="tree-btn-reset" class="ctl-btn">重置</button>
+          <button id="tree-btn-prev" class="ctl-btn">上一步</button>
+          <button id="tree-btn-play" class="btn-primary">
+            <span id="tree-play-icon">▶</span>
+            <span id="tree-play-label">自动建树</span>
+          </button>
+          <button id="tree-btn-next" class="ctl-btn font-semibold text-stone-900 border-stone-400">单步归并</button>
+
+          <div class="ctrl-group">
+            <span class="text-stone-400">速度:</span>
+            <input id="tree-speed" type="range" min="0.3" max="2.5" step="0.1" value="1.0" class="w-16 accent-stone-800 h-1 cursor-pointer">
+            <span id="tree-speed-val" class="w-7 text-stone-700 font-bold">1.0x</span>
+          </div>
+
+          <div class="ctrl-group">
+            <span class="text-stone-400">路数 (k):</span>
+            <select id="tree-k-val" class="bg-transparent text-stone-900 font-bold outline-none cursor-pointer">
+              <option value="2">k = 2</option>
+              <option value="3" selected>k = 3 (经典)</option>
+              <option value="4">k = 4</option>
+              <option value="5">k = 5</option>
+            </select>
+          </div>
+
+          <div class="h-4 w-px bg-stone-300 mx-0.5"></div>
+
+          <button class="tree-preset-btn btn-preset" data-treepreset="textbook_8">教材8段 (补1虚段)</button>
+          <button class="tree-preset-btn btn-preset" data-treepreset="textbook_9">教材9段 (补0虚段)</button>
+          <button class="tree-preset-btn btn-preset" data-treepreset="five_runs">5段3路</button>
+        </div>
+      </div>
+
+      <!-- Main Dual Column Layout: Left Visualizer Canvas + Right Live Code -->
+      <div class="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
+
+        <!-- Left: Visualizer Canvas (7 Cols) -->
+        <div class="lg:col-span-7 flex flex-col gap-4">
+
+          <!-- Candidate Forest Queue -->
+          <div class="bg-[#FAF9F5] border border-[#E5E4DC] rounded-xl p-3 flex flex-col gap-2">
+            <div class="flex items-center justify-between text-xs font-mono text-stone-500">
+              <span class="font-semibold text-stone-700">候选森林优先队列 (Forest Queue · 升序排列)</span>
+              <span>本轮拾取前 <strong id="tree-k-badge" class="text-amber-800 font-bold">3</strong> 棵极小子树</span>
+            </div>
+            <div id="tree-forest-queue" class="flex items-center gap-2 overflow-x-auto min-h-[50px] p-1 scrollbar-thin">
+              <!-- Forest Items -->
+            </div>
+          </div>
+
+          <!-- Dynamic Merge Tree Canvas -->
+          <div class="bg-[#FAF9F5] border border-[#E5E4DC] rounded-xl p-4 flex flex-col justify-between relative min-h-[360px]">
+            <div class="flex items-center justify-between text-xs font-mono text-stone-500 border-b border-[#E5E4DC] pb-2">
+              <span class="font-semibold text-stone-700">归并拓扑树形图 (FLIP 流体坐标补间)</span>
+              <div class="flex items-center gap-4 text-[11px]">
+                <span class="inline-flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-sm bg-amber-400 border border-amber-500"></span>真实段</span>
+                <span class="inline-flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-sm border border-dashed border-rose-500 bg-rose-100"></span>虚段(0)</span>
+                <span class="inline-flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-stone-300"></span>中间归并点</span>
+                <span class="inline-flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-stone-900"></span>最终根节点</span>
+              </div>
+            </div>
+
+            <!-- Canvas Container -->
+            <div id="tree-canvas-area" class="relative w-full h-[300px] flex items-center justify-center overflow-hidden">
+              <svg id="tree-canvas-svg" class="absolute inset-0 w-full h-full pointer-events-none"></svg>
+              <div id="tree-canvas-nodes" class="relative z-10 w-full h-full"></div>
+            </div>
+          </div>
+
+          <!-- Real-Time Metrics -->
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div class="bg-white border border-[#E5E4DC] rounded-xl p-3 font-mono text-xs flex flex-col gap-1 shadow-2xs">
+              <span class="text-stone-400 text-[10px] font-sans">虚段判定公式 (n-1)%(k-1)</span>
+              <span id="tree-metric-dummy" class="text-xs font-bold text-rose-700 truncate">(8-1)%2 = 1 ➔ 补1虚段</span>
+            </div>
+            <div class="bg-white border border-[#E5E4DC] rounded-xl p-3 font-mono text-xs flex flex-col gap-1 shadow-2xs">
+              <span class="text-stone-400 text-[10px] font-sans">带权路径长度 (WPL)</span>
+              <span id="tree-metric-wpl" class="text-xs font-bold text-amber-800">WPL = 163</span>
+            </div>
+            <div class="bg-white border border-[#E5E4DC] rounded-xl p-3 font-mono text-xs flex flex-col gap-1 shadow-2xs">
+              <span class="text-stone-400 text-[10px] font-sans">外存总 I/O 次数 (2 × WPL)</span>
+              <span id="tree-metric-io" class="text-xs font-bold text-stone-900 truncate">326 次读写 (节省 60)</span>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- Right: Live Code Execution & Variable Watcher (5 Cols) -->
+        <div class="lg:col-span-5 flex flex-col gap-3">
+
+          <!-- Current Step Summary Card -->
+          <div id="tree-step-summary-card" class="bg-white border-l-4 border-l-amber-500 border border-[#E5E4DC] rounded-xl p-3.5 flex flex-col gap-1.5 shadow-sm">
+            <div class="flex items-center justify-between text-xs font-mono">
+              <span id="tree-step-title" class="font-bold text-amber-800">归并步骤</span>
+              <span id="tree-step-badge" class="px-2 py-0.5 rounded bg-stone-100 text-stone-500 font-bold text-[10px]">Step 0</span>
+            </div>
+            <p id="tree-step-detail" class="text-xs text-stone-700 leading-relaxed font-sans">
+              准备就绪，点击自动建树或单步归并。
+            </p>
+          </div>
+
+          <!-- Live Code Panel -->
+          <div class="code-container p-3 flex flex-col gap-2 shadow-2xs">
+            <div class="flex items-center justify-between text-xs font-mono text-stone-600 border-b border-[#E5E4DC] pb-2">
+              <span class="font-bold">最佳归并树核心算法 (k-路哈夫曼建树)</span>
+              <span class="text-[10px] text-amber-700 font-bold flex items-center gap-1">
+                <span class="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span>
+                实时运行行
+              </span>
+            </div>
+
+            <!-- Code Lines with Live Highlighting -->
+            <pre class="font-mono text-xs overflow-x-auto leading-relaxed select-none" id="tree-code-block"><code class="flex flex-col">
+<span class="code-line" id="tree-line-1"><span class="line-num">01</span>u = (n - 1) % (k - 1);</span>
+<span class="code-line" id="tree-line-2"><span class="line-num">02</span>if (mode == WITH_DUMMY && u != 0) {</span>
+<span class="code-line" id="tree-line-3"><span class="line-num">03</span>  v = (k - 1) - u; // 需补充的虚段数量</span>
+<span class="code-line" id="tree-line-4"><span class="line-num">04</span>  addDummyRuns(v, weight = 0);</span>
+<span class="code-line" id="tree-line-5"><span class="line-num">05</span>}</span>
+<span class="code-line" id="tree-line-6"><span class="line-num">06</span>while (forest.size() > 1) {</span>
+<span class="code-line" id="tree-line-7"><span class="line-num">07</span>  sortAscending(forest); // 权值升序排列</span>
+<span class="code-line" id="tree-line-8"><span class="line-num">08</span>  children = extractMinNodes(forest, k);</span>
+<span class="code-line" id="tree-line-9"><span class="line-num">09</span>  parent = new Node(sum(children.weights));</span>
+<span class="code-line" id="tree-line-10"><span class="line-num">10</span>  parent.children = children;</span>
+<span class="code-line" id="tree-line-11"><span class="line-num">11</span>  forest.push(parent); // 新节点插回森林</span>
+<span class="code-line" id="tree-line-12"><span class="line-num">12</span>}</span>
+<span class="code-line" id="tree-line-13"><span class="line-num">13</span>root = forest[0];</span>
+<span class="code-line" id="tree-line-14"><span class="line-num">14</span>WPL = computeWPL(root); // Total I/O = 2 * WPL</span></code></pre>
+          </div>
+
+          <!-- Variable State Monitor -->
+          <div class="bg-white border border-[#E5E4DC] rounded-xl p-3 grid grid-cols-4 gap-2 font-mono text-xs shadow-2xs">
+            <div class="flex flex-col">
+              <span class="text-[10px] text-stone-400 font-sans">虚段模式</span>
+              <span id="tree-var-mode" class="text-stone-900 font-bold">WITH_DUMMY</span>
+            </div>
+            <div class="flex flex-col">
+              <span class="text-[10px] text-stone-400 font-sans">补虚段数 v</span>
+              <span id="tree-var-v" class="text-rose-600 font-bold">1</span>
+            </div>
+            <div class="flex flex-col">
+              <span class="text-[10px] text-stone-400 font-sans">森林规模</span>
+              <span id="tree-var-size" class="text-stone-800 font-bold">8</span>
+            </div>
+            <div class="flex flex-col">
+              <span class="text-[10px] text-stone-400 font-sans">当前 WPL</span>
+              <span id="tree-var-wpl" class="text-amber-800 font-bold">--</span>
+            </div>
+          </div>
+
+        </div>
+
+      </div>
+
+    </section>
+
+  </main>
+
+  <!-- ========================================================================= -->
+  <!-- 极简页脚 FOOTER                                                           -->
+  <!-- ========================================================================= -->
+  <footer class="border-t border-[#E5E4DC] py-3.5 px-6 text-center text-xs font-mono text-stone-400">
+    置换-选择排序与最佳归并树 · 计算机专业基础 408 数据结构 · 败者树与哈夫曼树可视化系统
+  </footer>
+
+  <!-- Custom JS -->
+  <script src="app.js"></script>
+</body>
+</html>

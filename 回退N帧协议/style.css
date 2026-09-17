@@ -1,0 +1,383 @@
+/* ==========================================================================
+   回退N帧 (GBN) 协议可视化系统 - 核心样式表 (Taste-Skill Light Editorial)
+   ========================================================================== */
+
+:root {
+  --bg-page: #FAF9F5;
+  --bg-card: #FFFFFF;
+  --border-subtle: #E5E4DC;
+  --border-focus: #D6D3CD;
+  --text-primary: #1C1917;
+  --text-muted: #78716C;
+  --text-subtle: #A8A29E;
+
+  /* GBN 状态标准配色 (Light Editorial) */
+  --state-acked-bg: #F4F3EE;
+  --state-acked-text: #78716C;
+  --state-acked-border: #D6D3CD;
+
+  --state-unack-bg: #EFF6FF;
+  --state-unack-text: #1D4ED8;
+  --state-unack-border: #93C5FD;
+
+  --state-usable-bg: #FEF3C7;
+  --state-usable-text: #B45309;
+  --state-usable-border: #FCD34D;
+
+  --state-outside-bg: #FAF9F5;
+  --state-outside-text: #A8A29E;
+  --state-outside-border: #E5E4DC;
+
+  --accent-ack: #059669;
+  --accent-loss: #DC2626;
+  --accent-timeout: #D97706;
+}
+
+body {
+  background-color: var(--bg-page);
+  color: var(--text-primary);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, sans-serif;
+}
+
+/* 字体定制 */
+.font-mono-num {
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+}
+.font-serif-math {
+  font-family: "Newsreader", Georgia, serif;
+}
+
+/* 卡片与边框 */
+.editorial-card {
+  background-color: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: 1rem;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02);
+}
+
+/* 按钮与交互控件 */
+.btn-control {
+  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.btn-control:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+.btn-control:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+/* 场景胶囊选项卡 */
+.scenario-tab {
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.scenario-tab.active {
+  background-color: #1C1917;
+  color: #FFFFFF;
+  border-color: #1C1917;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+/* 序列格子基础单元 */
+.seq-cell {
+  position: relative;
+  width: 44px;
+  height: 48px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.5rem;
+  border: 1.5px solid var(--border-subtle);
+  background: var(--state-outside-bg);
+  color: var(--state-outside-text);
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.875rem;
+  font-weight: 600;
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  flex-shrink: 0;
+  user-select: none;
+}
+
+.seq-cell.status-acked {
+  background: var(--state-acked-bg);
+  border-color: var(--state-acked-border);
+  color: var(--state-acked-text);
+}
+.seq-cell.status-unack {
+  background: var(--state-unack-bg);
+  border-color: var(--state-unack-border);
+  color: var(--state-unack-text);
+  box-shadow: 0 2px 6px rgba(59, 130, 246, 0.15);
+}
+.seq-cell.status-usable {
+  background: var(--state-usable-bg);
+  border-color: var(--state-usable-border);
+  color: var(--state-usable-text);
+}
+.seq-cell.status-outside {
+  background: #FAF9F5;
+  border-color: #E5E4DC;
+  color: #A8A29E;
+}
+
+/* 接收方期望格子高亮 */
+.seq-cell.status-expected {
+  background: #ECFDF5;
+  border-color: #34D399;
+  color: #047857;
+  box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.2);
+}
+
+/* 滑动窗口范围框覆盖 */
+.window-slider-bracket {
+  position: absolute;
+  top: -6px;
+  bottom: -6px;
+  border: 2px solid #2563EB;
+  border-radius: 0.75rem;
+  background: rgba(37, 99, 235, 0.04);
+  pointer-events: none;
+  transition: all 0.35s cubic-bezier(0.2, 0.9, 0.3, 1);
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15);
+}
+
+.receiver-slider-bracket {
+  position: absolute;
+  top: -6px;
+  bottom: -6px;
+  border: 2px solid #059669;
+  border-radius: 0.75rem;
+  background: rgba(5, 150, 105, 0.04);
+  pointer-events: none;
+  transition: all 0.35s cubic-bezier(0.2, 0.9, 0.3, 1);
+  box-shadow: 0 0 0 2px rgba(5, 150, 105, 0.15);
+}
+
+/* 定时器圆形进度条 */
+.timer-dial circle {
+  transition: stroke-dashoffset 0.1s linear;
+}
+
+/* 信道交互报文微卡片 */
+.flying-packet {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.35rem 0.65rem;
+  border-radius: 9999px;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.75rem;
+  font-weight: 700;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+  cursor: pointer;
+  user-select: none;
+  transition: box-shadow 0.15s ease;
+  z-index: 25;
+}
+.flying-packet:hover {
+  transform: translate(-50%, -50%) scale(1.12);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.2);
+}
+.flying-packet.type-data {
+  background: #2563EB;
+  color: #FFFFFF;
+  border: 1px solid #1D4ED8;
+}
+.flying-packet.type-ack {
+  background: #059669;
+  color: #FFFFFF;
+  border: 1px solid #047857;
+}
+
+/* 显眼报文丢失动画 (红爆闪 + 下沉消除) */
+.flying-packet.is-dropping {
+  background: #DC2626 !important;
+  color: #FFFFFF !important;
+  border: 2px solid #FEE2E2 !important;
+  z-index: 50 !important;
+  animation: packetDropExplosion 0.9s cubic-bezier(0.2, 0.8, 0.2, 1) forwards !important;
+}
+
+@keyframes packetDropExplosion {
+  0% { transform: translate(-50%, -50%) scale(1); box-shadow: 0 0 0 rgba(220, 38, 38, 0); }
+  25% { transform: translate(-50%, -50%) scale(1.4) rotate(-6deg); box-shadow: 0 0 24px rgba(220, 38, 38, 0.9); }
+  50% { transform: translate(-50%, -50%) scale(1.2) rotate(6deg); opacity: 1; }
+  75% { transform: translate(-50%, -50%) translateY(16px) scale(0.9) rotate(-10deg); opacity: 0.7; }
+  100% { transform: translate(-50%, -50%) translateY(36px) scale(0.3) rotate(25deg); opacity: 0; }
+}
+
+/* 重新发送帧的显眼跑道样式 */
+.flying-packet.retransmit {
+  background: linear-gradient(135deg, #EA580C, #C2410C) !important;
+  border: 1.5px solid #FED7AA !important;
+  color: #FFFFFF !important;
+  box-shadow: 0 0 16px rgba(234, 88, 12, 0.6) !important;
+  animation: retransmitPacketPulse 1s ease-in-out infinite alternate;
+}
+@keyframes retransmitPacketPulse {
+  from { transform: translate(-50%, -50%) scale(1); }
+  to { transform: translate(-50%, -50%) scale(1.08); }
+}
+
+/* 连续接收后单个累积确认 ACK 的显眼高亮样式 */
+.flying-packet.cumulative-batch {
+  background: linear-gradient(135deg, #059669, #047857) !important;
+  border: 2px solid #A7F3D0 !important;
+  color: #FFFFFF !important;
+  box-shadow: 0 0 18px rgba(5, 150, 105, 0.6) !important;
+  padding: 0.45rem 0.9rem !important;
+  font-size: 0.8rem !important;
+  animation: batchAckPulse 1.2s ease-in-out infinite alternate;
+}
+@keyframes batchAckPulse {
+  from { box-shadow: 0 0 10px rgba(5, 150, 105, 0.4); }
+  to { box-shadow: 0 0 24px rgba(5, 150, 105, 0.9); }
+}
+
+/* 接收方丢弃失序帧的剧烈震颤动画 */
+.discard-shake {
+  animation: discardShake 0.65s cubic-bezier(0.36, 0.07, 0.19, 0.97) both;
+}
+@keyframes discardShake {
+  10%, 90% { transform: translate3d(-3px, 0, 0); }
+  20%, 80% { transform: translate3d(5px, 0, 0); }
+  30%, 50%, 70% { transform: translate3d(-6px, 0, 0); }
+  40%, 60% { transform: translate3d(6px, 0, 0); }
+}
+
+/* 发送方丢失帧格子显眼呼吸红光 */
+.seq-cell.status-lost {
+  background: #FEF2F2 !important;
+  border-color: #EF4444 !important;
+  color: #DC2626 !important;
+  animation: cellLostGlow 1s ease-in-out infinite alternate !important;
+}
+@keyframes cellLostGlow {
+  from { box-shadow: 0 0 4px rgba(239, 68, 68, 0.4); border-color: #EF4444; }
+  to { box-shadow: 0 0 16px rgba(239, 68, 68, 0.95); border-color: #B91C1C; transform: scale(1.04); }
+}
+
+/* 发送方回退重传时窗口单元格显眼扫光 */
+.seq-cell.status-retransmit {
+  background: #FFFBEB !important;
+  border-color: #D97706 !important;
+  color: #B45309 !important;
+  animation: cellRetransmitGlow 0.8s ease-in-out infinite alternate !important;
+}
+@keyframes cellRetransmitGlow {
+  from { box-shadow: 0 0 4px rgba(217, 119, 6, 0.4); }
+  to { box-shadow: 0 0 18px rgba(217, 119, 6, 0.95); border-color: #B45309; transform: scale(1.04); }
+}
+
+/* 收到重复帧接收方显眼标紫丢弃动画 */
+.flying-packet.duplicate-discard {
+  background: linear-gradient(135deg, #8B5CF6, #6D28D9) !important;
+  border: 2px solid #EDE9FE !important;
+  color: #FFFFFF !important;
+  box-shadow: 0 0 24px rgba(139, 92, 246, 0.95) !important;
+  z-index: 50 !important;
+  animation: duplicatePacketPurpleDrop 0.9s cubic-bezier(0.2, 0.8, 0.2, 1) forwards !important;
+}
+@keyframes duplicatePacketPurpleDrop {
+  0% { transform: translate(-50%, -50%) scale(1); box-shadow: 0 0 0 rgba(139, 92, 246, 0); }
+  25% { transform: translate(-50%, -50%) scale(1.4) rotate(-6deg); box-shadow: 0 0 28px rgba(139, 92, 246, 0.95); }
+  50% { transform: translate(-50%, -50%) scale(1.2) rotate(6deg); opacity: 1; }
+  75% { transform: translate(-50%, -50%) translateY(16px) scale(0.9) rotate(-10deg); opacity: 0.7; }
+  100% { transform: translate(-50%, -50%) translateY(36px) scale(0.3) rotate(25deg); opacity: 0; }
+}
+
+/* 飞行中的重复帧与补偿 ACK 样式 */
+.flying-packet.is-duplicate {
+  background: linear-gradient(135deg, #7C3AED, #5B21B6) !important;
+  border: 1.5px dashed #DDD6FE !important;
+  color: #FFFFFF !important;
+}
+.flying-packet.is-compensation {
+  background: linear-gradient(135deg, #8B5CF6, #6D28D9) !important;
+  border: 1.5px solid #DDD6FE !important;
+  color: #FFFFFF !important;
+  box-shadow: 0 0 16px rgba(139, 92, 246, 0.7) !important;
+}
+
+/* 接收方重复帧单元格标紫呼吸动画 */
+.seq-cell.status-duplicate-discard {
+  background: #F5F3FF !important;
+  border-color: #8B5CF6 !important;
+  color: #6D28D9 !important;
+  animation: cellPurplePulse 0.9s ease-in-out infinite alternate !important;
+}
+@keyframes cellPurplePulse {
+  from { box-shadow: 0 0 4px rgba(139, 92, 246, 0.4); border-color: #A78BFA; }
+  to { box-shadow: 0 0 18px rgba(139, 92, 246, 0.95); border-color: #7C3AED; transform: scale(1.05); }
+}
+
+/* 时空阶梯图样式 */
+#spacetime-canvas {
+  background: #FFFFFF;
+  border-radius: 0.75rem;
+  border: 1px solid var(--border-subtle);
+}
+
+/* 自定义滚动条 */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #F4F3EE;
+}
+::-webkit-scrollbar-thumb {
+  background: #D6D3CD;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #A8A29E;
+}
+
+/* Obsidian Callout 样式 */
+.callout {
+  border-radius: 0.75rem;
+  padding: 0.875rem 1rem;
+  border-left-width: 4px;
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  margin-bottom: 0.75rem;
+}
+.callout-title {
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.35rem;
+  font-size: 0.85rem;
+}
+
+.callout-tip {
+  background-color: #ECFDF5;
+  border-left-color: #059669;
+  color: #064E3B;
+}
+.callout-tip .callout-title { color: #047857; }
+
+.callout-note {
+  background-color: #F0F9FF;
+  border-left-color: #0284C7;
+  color: #0C4A6E;
+}
+.callout-note .callout-title { color: #0369A1; }
+
+.callout-important {
+  background-color: #F5F3FF;
+  border-left-color: #7C3AED;
+  color: #4C1D95;
+}
+.callout-important .callout-title { color: #6D28D9; }
+
+.callout-warning {
+  background-color: #FFFBEB;
+  border-left-color: #D97706;
+  color: #78350F;
+}
+.callout-warning .callout-title { color: #B45309; }

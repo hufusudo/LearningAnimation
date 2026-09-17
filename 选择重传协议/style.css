@@ -1,0 +1,380 @@
+/* ==========================================================================
+   选择重传 (SR) 协议可视化系统 - 核心样式表 (Taste-Skill Light Editorial)
+   ========================================================================== */
+
+:root {
+  --bg-page: #FAF9F5;
+  --bg-card: #FFFFFF;
+  --border-subtle: #E5E4DC;
+  --border-focus: #D6D3CD;
+  --text-primary: #1C1917;
+  --text-muted: #78716C;
+  --text-subtle: #A8A29E;
+
+  /* SR 状态标准配色 (Light Editorial) */
+  --state-acked-bg: #F4F3EE;
+  --state-acked-text: #78716C;
+  --state-acked-border: #D6D3CD;
+
+  --state-unack-bg: #EFF6FF;
+  --state-unack-text: #1D4ED8;
+  --state-unack-border: #93C5FD;
+
+  /* SR 关键特色：接收方乱序缓存状态 */
+  --state-buffered-bg: #FAF5FF;
+  --state-buffered-text: #7E22CE;
+  --state-buffered-border: #C084FC;
+
+  --state-usable-bg: #FEF3C7;
+  --state-usable-text: #B45309;
+  --state-usable-border: #FCD34D;
+
+  --state-outside-bg: #FAF9F5;
+  --state-outside-text: #A8A29E;
+  --state-outside-border: #E5E4DC;
+
+  --state-retransmit-bg: #FFF7ED;
+  --state-retransmit-text: #C2410C;
+  --state-retransmit-border: #FDBA74;
+
+  --state-lost-bg: #FEF2F2;
+  --state-lost-text: #DC2626;
+  --state-lost-border: #FCA5A5;
+
+  --accent-ack: #059669;
+  --accent-loss: #DC2626;
+  --accent-timeout: #D97706;
+  --accent-buffer: #7E22CE;
+}
+
+body {
+  background-color: var(--bg-page);
+  color: var(--text-primary);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, sans-serif;
+}
+
+/* 字体定制 */
+.font-mono-num {
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+}
+.font-serif-math {
+  font-family: "Newsreader", Georgia, serif;
+}
+
+/* 卡片与边框 */
+.editorial-card {
+  background-color: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: 1rem;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02);
+}
+
+/* 按钮与交互控件 */
+.btn-control {
+  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.btn-control:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+.btn-control:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+/* 场景胶囊选项卡 */
+.scenario-tab {
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.scenario-tab.active {
+  background-color: #1C1917;
+  color: #FFFFFF;
+  border-color: #1C1917;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+/* 序列格子基础单元 */
+.seq-cell {
+  position: relative;
+  width: 44px;
+  height: 48px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.5rem;
+  border: 1.5px solid var(--border-subtle);
+  background: var(--state-outside-bg);
+  color: var(--state-outside-text);
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.875rem;
+  font-weight: 600;
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  flex-shrink: 0;
+  user-select: none;
+}
+
+/* 序列格子各种状态修饰 */
+.seq-cell.status-acked {
+  background: var(--state-acked-bg);
+  border-color: var(--state-acked-border);
+  color: var(--state-acked-text);
+}
+
+.seq-cell.status-unack {
+  background: var(--state-unack-bg);
+  border-color: var(--state-unack-border);
+  color: var(--state-unack-text);
+  box-shadow: 0 1px 4px rgba(37, 99, 235, 0.08);
+}
+
+.seq-cell.status-buffered {
+  background: var(--state-buffered-bg);
+  border-color: var(--state-buffered-border);
+  color: var(--state-buffered-text);
+  box-shadow: 0 0 0 2px rgba(192, 132, 252, 0.25), 0 2px 6px rgba(126, 34, 206, 0.12);
+  animation: pulseBuffer 2s infinite ease-in-out;
+}
+
+@keyframes pulseBuffer {
+  0%, 100% {
+    box-shadow: 0 0 0 2px rgba(192, 132, 252, 0.25);
+  }
+  50% {
+    box-shadow: 0 0 0 4px rgba(192, 132, 252, 0.45);
+  }
+}
+
+.seq-cell.status-usable {
+  background: var(--state-usable-bg);
+  border-color: var(--state-usable-border);
+  color: var(--state-usable-text);
+}
+
+.seq-cell.status-outside {
+  background: var(--state-outside-bg);
+  border-color: var(--state-outside-border);
+  color: var(--state-outside-text);
+}
+
+.seq-cell.status-expected {
+  background: #ECFDF5;
+  border-color: #6EE7B7;
+  color: #047857;
+  box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.2);
+}
+
+.seq-cell.status-lost {
+  background: var(--state-lost-bg) !important;
+  border-color: var(--state-lost-border) !important;
+  color: var(--state-lost-text) !important;
+  animation: pulseLost 1.2s infinite ease-in-out;
+}
+
+@keyframes pulseLost {
+  0%, 100% {
+    box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.3);
+  }
+  50% {
+    box-shadow: 0 0 0 5px rgba(239, 68, 68, 0.5);
+  }
+}
+
+.seq-cell.status-retransmit {
+  background: var(--state-retransmit-bg) !important;
+  border-color: var(--state-retransmit-border) !important;
+  color: var(--state-retransmit-text) !important;
+  box-shadow: 0 0 0 2px rgba(249, 115, 22, 0.35);
+}
+
+/* 滑动窗口包围框 (Bracket) */
+.window-slider-bracket {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border: 2px solid #2563EB;
+  border-radius: 0.75rem;
+  background: rgba(37, 99, 235, 0.04);
+  pointer-events: none;
+  transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1), width 0.35s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.25s ease;
+  z-index: 10;
+}
+
+.receiver-slider-bracket {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border: 2px solid #059669;
+  border-radius: 0.75rem;
+  background: rgba(5, 150, 105, 0.04);
+  pointer-events: none;
+  transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1), width 0.35s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.25s ease;
+  z-index: 10;
+}
+
+/* 飞行报文胶囊 */
+.inflight-packet {
+  position: absolute;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: 9999px;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 11px;
+  font-weight: 600;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  cursor: pointer;
+  user-select: none;
+  transition: transform 0.1s ease, box-shadow 0.15s ease;
+  z-index: 20;
+}
+
+.inflight-packet:hover {
+  transform: scale(1.08);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.inflight-packet.packet-data {
+  background: #EFF6FF;
+  border: 1px solid #93C5FD;
+  color: #1D4ED8;
+}
+
+.inflight-packet.packet-ack {
+  background: #ECFDF5;
+  border: 1px solid #6EE7B7;
+  color: #047857;
+}
+
+.inflight-packet.packet-nak {
+  background: #FFF1F2 !important;
+  border: 1.5px solid #F43F5E !important;
+  color: #BE123C !important;
+  box-shadow: 0 2px 10px rgba(244, 63, 94, 0.25) !important;
+  font-weight: 700;
+  animation: pulseNak 1.5s infinite;
+}
+
+@keyframes pulseNak {
+  0%, 100% {
+    box-shadow: 0 2px 10px rgba(244, 63, 94, 0.25);
+  }
+  50% {
+    box-shadow: 0 0 0 3px rgba(244, 63, 94, 0.35);
+  }
+}
+
+.inflight-packet.packet-corrupted {
+  background: #FEF3C7 !important;
+  border: 1.5px dashed #D97706 !important;
+  color: #B45309 !important;
+  animation: glitchCorrupt 1.2s infinite ease-in-out;
+}
+
+@keyframes glitchCorrupt {
+  0%, 100% {
+    transform: rotate(0deg);
+  }
+  25% {
+    transform: rotate(-2deg) scale(1.02);
+  }
+  75% {
+    transform: rotate(2deg) scale(0.98);
+  }
+}
+
+.inflight-packet.packet-retransmit {
+  background: #FFF7ED !important;
+  border: 1px solid #FDBA74 !important;
+  color: #C2410C !important;
+  box-shadow: 0 2px 10px rgba(249, 115, 22, 0.25) !important;
+}
+
+.inflight-packet.is-dropping {
+  background: #FEF2F2 !important;
+  border-color: #F87171 !important;
+  color: #DC2626 !important;
+  animation: dropExplosion 0.8s forwards ease-out;
+}
+
+@keyframes dropExplosion {
+  0% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  40% {
+    transform: scale(1.35) rotate(-6deg);
+    opacity: 0.95;
+    background: #DC2626;
+    color: white;
+  }
+  100% {
+    transform: scale(0.4) rotate(15deg);
+    opacity: 0;
+  }
+}
+
+/* 多定时器微卡片 */
+.timer-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  border-radius: 8px;
+  border: 1px solid #E5E4DC;
+  background: #FAF9F5;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 11px;
+  transition: all 0.2s ease;
+}
+
+.timer-chip.active {
+  border-color: #FCD34D;
+  background: #FFFBEB;
+  color: #B45309;
+}
+
+.timer-chip.timeout {
+  border-color: #FCA5A5;
+  background: #FEF2F2;
+  color: #DC2626;
+  animation: pulseTimer 1s infinite;
+}
+
+@keyframes pulseTimer {
+  0%, 100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.05);
+  }
+}
+
+/* 接收方批量交付震颤高亮动效 */
+.cascade-delivery-glow {
+  animation: deliveryGlow 1.2s ease-out;
+}
+
+@keyframes deliveryGlow {
+  0% {
+    background: rgba(16, 185, 129, 0.35);
+  }
+  100% {
+    background: transparent;
+  }
+}
+
+/* 自定义滚动条 */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #D6D3CD;
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #A8A29E;
+}

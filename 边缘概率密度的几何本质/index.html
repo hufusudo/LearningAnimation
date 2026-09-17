@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>边缘概率密度的几何本质 · 切片面积与侧向投影 | Visualizer Lab</title>
+
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['-apple-system', 'BlinkMacSystemFont', 'SF Pro Display', 'Segoe UI', 'Roboto', 'sans-serif'],
+            serif: ['Newsreader', 'Georgia', 'serif'],
+            mono: ['JetBrains Mono', 'Fira Code', 'SF Mono', 'monospace']
+          },
+          colors: {
+            stone: {
+              50: '#FAF9F5',
+              100: '#F4F3EE',
+              200: '#E5E4DC',
+              300: '#D6D3CD',
+              400: '#A8A29E',
+              500: '#78716C',
+              600: '#57534E',
+              700: '#44403C',
+              800: '#292524',
+              900: '#1C1917'
+            }
+          }
+        }
+      }
+    }
+  </script>
+
+  <!-- Three.js & OrbitControls -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+
+  <!-- GSAP for smooth continuous animations -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+
+  <!-- KaTeX for formula rendering -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+
+  <!-- Custom Stylesheet -->
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="h-screen flex flex-col bg-[#FAF9F5] text-stone-900 selection:bg-amber-100 selection:text-amber-900 overflow-hidden">
+
+  <!-- Top Header Navigation -->
+  <header class="h-14 flex-shrink-0 bg-[#FAF9F5]/90 backdrop-blur border-b border-[#E5E4DC] px-4 lg:px-6 flex items-center justify-between gap-3 z-30">
+    <!-- Brand / Title -->
+    <div class="flex items-center gap-3">
+      <a href="../index.html" class="flex items-center gap-1.5 text-xs font-mono text-stone-500 hover:text-stone-900 transition-colors py-1 px-2 rounded-md hover:bg-stone-200/60">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path></svg>
+        <span>展厅门户</span>
+      </a>
+      <div class="h-4 w-[1px] bg-stone-300"></div>
+      <div class="w-7 h-7 rounded-lg bg-stone-900 text-white flex items-center justify-center font-mono font-bold text-xs">
+        f<sub>X</sub>
+      </div>
+      <div>
+        <h1 class="text-sm font-semibold tracking-tight text-stone-900 flex items-center gap-2">
+          边缘概率密度的几何本质
+          <span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-emerald-100/70 text-emerald-800 border border-emerald-200">切片截面面积 = 边缘密度</span>
+        </h1>
+      </div>
+    </div>
+
+    <!-- Preset Selector Tabs -->
+    <div class="flex items-center bg-[#EBEAE3] p-0.5 rounded-xl border border-[#DCDAD0] text-xs font-medium overflow-x-auto">
+      <button id="tab-preset-normal" class="tab-btn active px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5">
+        <span class="w-2 h-2 rounded-full bg-blue-500"></span>
+        <span>二维正态 (钟形山峰)</span>
+      </button>
+      <button id="tab-preset-triangle" class="tab-btn px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 text-stone-600 hover:text-stone-900">
+        <span class="w-2 h-2 rounded-full bg-amber-500"></span>
+        <span>三角形均匀 (考研经典)</span>
+      </button>
+      <button id="tab-preset-ramp" class="tab-btn px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 text-stone-600 hover:text-stone-900">
+        <span class="w-2 h-2 rounded-full bg-indigo-500"></span>
+        <span>斜坡分布 (f=x+y)</span>
+      </button>
+    </div>
+
+    <!-- Right Actions -->
+    <div class="flex items-center gap-2">
+      <button id="btn-reset-cam" title="重置视角" class="px-2.5 py-1.5 rounded-lg border border-[#E5E4DC] hover:border-stone-400 bg-white text-xs font-mono text-stone-600 hover:text-stone-900 transition-colors flex items-center gap-1 shadow-sm">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+        <span>重置视角</span>
+      </button>
+      <button id="btn-toggle-explain" class="lg:hidden px-2.5 py-1.5 rounded-lg border border-[#E5E4DC] bg-white text-xs font-medium text-stone-700">
+        笔记看板
+      </button>
+    </div>
+  </header>
+
+  <!-- Main Content Layout -->
+  <main class="flex-1 flex flex-col lg:flex-row min-h-0 overflow-hidden relative">
+
+    <!-- Left / Center: 3D Visualization Canvas Area -->
+    <section class="flex-1 relative flex flex-col min-h-0 overflow-hidden">
+      <!-- Canvas Hook -->
+      <div id="canvas-container" class="flex-1 w-full h-full cursor-grab active:cursor-grabbing"></div>
+
+      <!-- Top-Left Overlay: Live Equation & Area HUD Card -->
+      <div class="absolute top-3 left-3 pointer-events-none z-10 max-w-sm">
+        <div class="editorial-card p-3 pointer-events-auto bg-white/95 backdrop-blur shadow-sm border border-[#E5E4DC]">
+          <div class="flex items-center justify-between gap-2 mb-1.5">
+            <span id="hud-model-badge" class="subtle-badge bg-blue-50 text-blue-700 border-blue-200">
+              二维正态分布 N(0, 0, 1, 1, ρ)
+            </span>
+            <span class="text-[11px] font-mono text-emerald-600 font-semibold">● 实时三维切片</span>
+          </div>
+
+          <div class="space-y-1 text-xs font-mono">
+            <div class="flex items-center gap-2">
+              <span class="text-indigo-600 font-semibold w-16">联合密度:</span>
+              <span id="hud-joint-formula" class="text-stone-700 truncate">f(x, y) 概率山峰</span>
+            </div>
+            <div class="flex items-center gap-2">
+              <span class="text-teal-600 font-semibold w-16">当前切片:</span>
+              <span id="hud-slice-formula" class="text-stone-700 truncate">平面 x = 0.50</span>
+            </div>
+            <div class="flex items-center gap-2">
+              <span class="text-amber-600 font-semibold w-16">截面面积:</span>
+              <span id="hud-area-val" class="font-bold text-amber-700">A(x₀) = 0.3521</span>
+            </div>
+            <div class="flex items-center gap-2">
+              <span class="text-rose-600 font-semibold w-16">边缘密度:</span>
+              <span id="hud-marginal-val" class="font-bold text-stone-900">f_X(x₀) = 0.3521</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Top-Right Overlay: Layer Visibility Controls -->
+      <div class="absolute top-3 right-3 z-10 pointer-events-none">
+        <div class="editorial-card px-3 py-2 pointer-events-auto bg-white/95 backdrop-blur shadow-sm border border-[#E5E4DC] flex flex-wrap items-center gap-2 text-xs">
+          <span class="text-stone-400 font-mono text-[11px] mr-1">几何图层:</span>
+
+          <label class="flex items-center gap-1.5 cursor-pointer select-none text-stone-700 hover:text-stone-900">
+            <input type="checkbox" id="layer-joint-surf" checked class="rounded border-stone-300 text-indigo-600 focus:ring-0">
+            <span class="flex items-center gap-1">
+              <span class="legend-dot bg-indigo-500"></span>联合曲面 f(x,y)
+            </span>
+          </label>
+
+          <label class="flex items-center gap-1.5 cursor-pointer select-none text-stone-700 hover:text-stone-900">
+            <input type="checkbox" id="layer-slice-plane" checked class="rounded border-stone-300 text-teal-600 focus:ring-0">
+            <span class="flex items-center gap-1">
+              <span class="legend-dot bg-teal-600"></span>活动切片面
+            </span>
+          </label>
+
+          <label class="flex items-center gap-1.5 cursor-pointer select-none text-stone-700 hover:text-stone-900">
+            <input type="checkbox" id="layer-slice-area" checked class="rounded border-stone-300 text-amber-500 focus:ring-0">
+            <span class="flex items-center gap-1">
+              <span class="legend-dot bg-amber-500"></span>截面面积 A
+            </span>
+          </label>
+
+          <label class="flex items-center gap-1.5 cursor-pointer select-none text-stone-700 hover:text-stone-900">
+            <input type="checkbox" id="layer-marginal-wall" checked class="rounded border-stone-300 text-rose-600 focus:ring-0">
+            <span class="flex items-center gap-1">
+              <span class="legend-dot bg-rose-600"></span>侧壁边缘投影
+            </span>
+          </label>
+
+          <label class="flex items-center gap-1.5 cursor-pointer select-none text-stone-700 hover:text-stone-900">
+            <input type="checkbox" id="layer-conditional" checked class="rounded border-stone-300 text-blue-600 focus:ring-0">
+            <span class="flex items-center gap-1">
+              <span class="legend-dot bg-blue-600"></span>条件分布归一化
+            </span>
+          </label>
+        </div>
+      </div>
+
+      <!-- Bottom Floating Control Bar -->
+      <div class="absolute bottom-4 left-1/2 -translate-x-1/2 z-10 w-[95%] max-w-2xl">
+        <div class="editorial-card px-4 py-3 bg-white/95 backdrop-blur shadow-md border border-[#E5E4DC] flex flex-col gap-2.5">
+          <!-- Row 1: Direction & Play -->
+          <div class="flex items-center justify-between gap-3 text-xs">
+            <div class="flex items-center gap-2">
+              <span class="text-stone-500 font-mono text-[11px]">切片方向:</span>
+              <div class="flex items-center bg-[#EBEAE3] p-0.5 rounded-lg border border-[#DCDAD0] text-[11px] font-medium">
+                <button id="btn-cut-x" class="cut-toggle-btn active px-2.5 py-1 rounded-md transition-all">
+                  沿 X 轴切片 → 求 f<sub>X</sub>(x)
+                </button>
+                <button id="btn-cut-y" class="cut-toggle-btn px-2.5 py-1 rounded-md transition-all text-stone-600 hover:text-stone-900">
+                  沿 Y 轴切片 → 求 f<sub>Y</sub>(y)
+                </button>
+              </div>
+            </div>
+
+            <!-- Auto Cruise Button -->
+            <button id="btn-play-scan" class="px-3 py-1.5 rounded-lg bg-stone-900 text-white font-medium hover:bg-stone-800 transition-colors flex items-center gap-1.5 shadow-sm">
+              <svg id="play-icon" class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+              <span id="play-text">自动扫描切片</span>
+            </button>
+          </div>
+
+          <!-- Row 2: Sliders -->
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4 items-center pt-2 border-t border-[#EFEFE9]">
+            <!-- Slice Position Slider -->
+            <div class="flex flex-col gap-1">
+              <div class="flex items-center justify-between text-xs">
+                <span id="label-slider-slice" class="text-stone-600 font-medium flex items-center gap-1.5">
+                  <span class="w-2 h-2 rounded-full bg-teal-600"></span>
+                  切片位置 $x_0$ (截面截线)
+                </span>
+                <span id="val-slice" class="font-mono text-stone-800 font-semibold">0.50</span>
+              </div>
+              <input id="slider-slice" type="range" min="-2.5" max="2.5" step="0.02" value="0.50" class="cursor-pointer">
+            </div>
+
+            <!-- Secondary Param Slider (e.g. correlation rho) -->
+            <div id="container-param2" class="flex flex-col gap-1">
+              <div class="flex items-center justify-between text-xs">
+                <span id="label-param2" class="text-stone-600 font-medium flex items-center gap-1.5">
+                  <span class="w-2 h-2 rounded-full bg-indigo-600"></span>
+                  相关系数 $\rho$ (山峰倾斜度)
+                </span>
+                <span id="val-param2" class="font-mono text-stone-800 font-semibold">0.50</span>
+              </div>
+              <input id="slider-param2" type="range" min="-0.8" max="0.8" step="0.05" value="0.50" class="cursor-pointer">
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Right: Mathematical Explanation & Step-by-Step Derivation Panel -->
+    <aside id="explain-panel" class="w-full lg:w-[480px] xl:w-[520px] flex-shrink-0 bg-white border-l border-[#E5E4DC] flex flex-col h-full overflow-hidden shadow-sm z-20">
+      <!-- Panel Header -->
+      <div class="p-3.5 border-b border-[#E5E4DC] bg-[#FAF9F5] flex items-center justify-between">
+        <div>
+          <h2 id="panel-title" class="text-sm font-bold text-stone-900 flex items-center gap-1.5">
+            <svg class="w-4 h-4 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path></svg>
+            <span>边缘概率密度的几何本质与消参解析</span>
+          </h2>
+          <p class="text-[11px] text-stone-500 mt-0.5">从三维立体切片面积到一维边缘密度投影</p>
+        </div>
+        <span class="text-[10px] font-mono text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200 font-medium">
+          Cavalieri 截面原理
+        </span>
+      </div>
+
+      <!-- Panel Scrollable Body -->
+      <div id="dynamic-derivation-content" class="flex-1 overflow-y-auto p-4 space-y-4 text-stone-700 text-xs leading-relaxed">
+        <!-- Injected dynamically via app.js -->
+      </div>
+    </aside>
+  </main>
+
+  <!-- Application Logic -->
+  <script src="app.js"></script>
+</body>
+</html>

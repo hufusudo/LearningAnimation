@@ -1,0 +1,309 @@
+/* 
+ * 离散分配内存管理 (分页、分段、段页式) 演示系统
+ * 遵循 Taste-Skill Light Editorial 浅色纸质美学规范
+ */
+
+:root {
+  --bg-warm: #FAF9F5;
+  --bg-card: #FFFFFF;
+  --border-light: #E5E4DC;
+  --border-card: #ECEBE4;
+  --text-primary: #1C1917;
+  --text-secondary: #78716C;
+  --text-muted: #A8A29E;
+  
+  /* 分页配色 (蓝色系) */
+  --page-accent: #2563EB;
+  --page-soft: #EFF6FF;
+  --page-border: #BFDBFE;
+
+  /* 分段配色 (琥珀/橙色系) */
+  --seg-accent: #D97706;
+  --seg-soft: #FFFBEB;
+  --seg-border: #FDE68A;
+
+  /* 段页式配色 (紫色系) */
+  --segpage-accent: #7C3AED;
+  --segpage-soft: #F5F3FF;
+  --segpage-border: #DDD6FE;
+}
+
+body {
+  background-color: var(--bg-warm);
+  color: var(--text-primary);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  overflow-x: hidden;
+}
+
+/* 纸质卡片微拟物 */
+.card-panel {
+  background-color: var(--bg-card);
+  border: 1px solid var(--border-light);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02), 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+.card-subtle {
+  background-color: #FAF9F6;
+  border: 1px solid var(--border-card);
+}
+
+/* 控制按钮风格 */
+.ctl-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.375rem 0.75rem;
+  border-radius: 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  border: 1px solid var(--border-light);
+  background-color: #FFFFFF;
+  color: var(--text-primary);
+  transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+  cursor: pointer;
+  user-select: none;
+}
+.ctl-btn:hover:not(:disabled) {
+  background-color: #F5F4EE;
+  border-color: #D6D3D1;
+  transform: translateY(-1px);
+}
+.ctl-btn:active:not(:disabled) {
+  transform: translateY(0);
+}
+.ctl-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* 标签切换按键 */
+.tab-btn {
+  padding: 0.45rem 0.85rem;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  border-radius: 0.5rem;
+  border: 1px solid transparent;
+  color: var(--text-secondary);
+  transition: all 0.18s ease;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+}
+.tab-btn:hover {
+  color: var(--text-primary);
+  background-color: rgba(0, 0, 0, 0.03);
+}
+.tab-btn.active {
+  background-color: #FFFFFF;
+  color: var(--text-primary);
+  border-color: var(--border-light);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+/* 隐藏标识专用徽章 (Hidden Badge) */
+.badge-hidden {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  padding: 0.1rem 0.35rem;
+  border-radius: 9999px;
+  font-size: 0.625rem;
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 600;
+  background-color: #FEF3C7;
+  color: #B45309;
+  border: 1px dashed #F59E0B;
+  letter-spacing: -0.02em;
+  position: relative;
+  cursor: help;
+}
+.badge-hidden::after {
+  content: "硬件按数组索引直接寻址，内存无实际存储字段";
+  position: absolute;
+  bottom: 130%;
+  left: 50%;
+  transform: translateX(-50%);
+  background-color: #1C1917;
+  color: #F5F5F4;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.6875rem;
+  font-family: sans-serif;
+  border-radius: 0.375rem;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+  z-index: 60;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.15);
+}
+.badge-hidden:hover::after {
+  opacity: 1;
+}
+
+/* 双重同步高亮核心动画 (Dual Synchronous Glow Animation) */
+@keyframes dualGlowPulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.85);
+    transform: scale(1);
+  }
+  30% {
+    box-shadow: 0 0 0 8px rgba(245, 158, 11, 0.45), 0 0 25px rgba(245, 158, 11, 0.7);
+    transform: scale(1.04);
+    background-color: #FEF3C7 !important;
+    border-color: #F59E0B !important;
+  }
+  70% {
+    box-shadow: 0 0 0 14px rgba(245, 158, 11, 0), 0 0 16px rgba(245, 158, 11, 0.35);
+    transform: scale(1.02);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(245, 158, 11, 0);
+    transform: scale(1);
+  }
+}
+
+.dual-highlight-active {
+  animation: dualGlowPulse 1.25s cubic-bezier(0.2, 0.8, 0.2, 1) forwards !important;
+  z-index: 40 !important;
+  position: relative;
+}
+
+/* 飞行动画元素 (Flying element overlay) */
+#flying-overlay-container {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 999;
+  overflow: hidden;
+}
+
+.flying-chip {
+  position: absolute;
+  pointer-events: none;
+  border-radius: 0.5rem;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.2), 0 4px 10px rgba(0, 0, 0, 0.12);
+  z-index: 1000;
+  will-change: transform, opacity;
+}
+
+/* 物理内存页框格点 */
+.memory-frame-cell {
+  position: relative;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.memory-frame-cell.occupied {
+  background-color: #F0FDF4;
+  border-color: #86EFAC;
+}
+
+/* 内核区高地址特别标识 */
+.kernel-zone-bg {
+  background: linear-gradient(180deg, #FBF8EF 0%, #F5F1E4 100%);
+  border-bottom: 2px dashed #D6D3D1;
+}
+
+/* 步骤指示胶囊 */
+.step-pill {
+  padding: 0.3rem 0.65rem;
+  font-size: 0.75rem;
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 500;
+  border-radius: 9999px;
+  border: 1px solid var(--border-light);
+  background-color: #FFFFFF;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  transition: all 0.2s ease;
+  cursor: pointer;
+  user-select: none;
+}
+.step-pill:hover {
+  background-color: #F5F4EE;
+  color: var(--text-primary);
+}
+.step-pill.active {
+  background-color: #1C1917;
+  color: #FFFFFF;
+  border-color: #1C1917;
+  font-weight: 600;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+.step-pill.completed {
+  background-color: #ECFDF5;
+  color: #047857;
+  border-color: #A7F3D0;
+}
+
+/* SVG 连线画布 */
+#connection-svg-layer {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 25;
+}
+
+.glow-line {
+  fill: none;
+  stroke: #F59E0B;
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  stroke-dasharray: 6 4;
+  animation: energyFlow 1.2s linear infinite;
+  filter: drop-shadow(0 0 5px rgba(245, 158, 11, 0.6));
+}
+
+@keyframes energyFlow {
+  to {
+    stroke-dashoffset: -20;
+  }
+}
+
+.font-mono {
+  font-family: 'JetBrains Mono', monospace;
+}
+
+/* 分段存储管理：严格物理空间比例图形样式 */
+.segment-block {
+  box-sizing: border-box;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+}
+
+.segment-pattern-code {
+  background-color: #FFFDF9;
+  background-image: repeating-linear-gradient(45deg, rgba(217, 119, 6, 0.035), rgba(217, 119, 6, 0.035) 6px, transparent 6px, transparent 12px);
+}
+
+.segment-pattern-data {
+  background-color: #F8FCF9;
+  background-image: repeating-linear-gradient(-45deg, rgba(16, 185, 129, 0.035), rgba(16, 185, 129, 0.035) 6px, transparent 6px, transparent 12px);
+}
+
+.segment-pattern-stack {
+  background-color: #FAF8FE;
+  background-image: repeating-linear-gradient(45deg, rgba(124, 58, 237, 0.035), rgba(124, 58, 237, 0.035) 6px, transparent 6px, transparent 12px);
+}
+
+/* 段内逻辑偏移标尺 (Segment Offset Ruler) */
+.segment-ruler {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 22px;
+  border-right: 1px solid rgba(0, 0, 0, 0.08);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  align-items: center;
+  padding: 3px 0;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 8px;
+  color: #A8A29E;
+  background-color: rgba(0, 0, 0, 0.015);
+  pointer-events: none;
+  user-select: none;
+}

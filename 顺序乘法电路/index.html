@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>顺序乘法电路与 [ACC, MQ] 移位机制可视化 | Sequential Multiplier Visualizer</title>
+
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['-apple-system', 'BlinkMacSystemFont', 'SF Pro Display', 'Segoe UI', 'Roboto', 'sans-serif'],
+            serif: ['Newsreader', 'Georgia', 'serif'],
+            mono: ['JetBrains Mono', 'Fira Code', 'SF Mono', 'monospace']
+          },
+          colors: {
+            stone: {
+              50: '#FAF9F5',
+              100: '#F5F4EE',
+              200: '#E5E4DC',
+              300: '#D6D3CD',
+              400: '#A8A29E',
+              500: '#78716C',
+              600: '#57534E',
+              700: '#44403C',
+              800: '#292524',
+              900: '#1C1917'
+            }
+          }
+        }
+      }
+    }
+  </script>
+
+  <!-- GSAP CDN for 60fps smooth continuous tweens -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+
+  <!-- Custom Stylesheet -->
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="min-h-screen flex flex-col font-sans selection:bg-amber-100 selection:text-amber-900 bg-[#FAF9F5]">
+
+  <!-- Top Navigation Header -->
+  <header class="sticky top-0 z-30 bg-[#FAF9F5]/95 backdrop-blur border-b border-[#E5E4DC] px-4 lg:px-8 py-3 flex flex-wrap items-center justify-between gap-4">
+    <div class="flex items-center gap-3">
+      <a href="../index.html" class="w-8 h-8 rounded-lg bg-stone-900 text-white flex items-center justify-center font-mono font-bold text-xs shadow-sm hover:bg-stone-700 transition-colors" title="返回实验室目录">
+        &larr;
+      </a>
+      <div>
+        <h1 class="text-base font-semibold text-stone-900 tracking-tight flex items-center gap-2">
+          顺序乘法电路与 [ACC, MQ] 连续移位可视化
+          <span class="px-2 py-0.5 text-[11px] font-mono font-normal rounded-full bg-indigo-50 text-indigo-800 border border-indigo-200">
+            原码一位乘 · 经典电路拓扑
+          </span>
+        </h1>
+        <p class="text-xs text-stone-500 font-mono">
+          Sequential Multiplier Circuit · Continuous Bit Shifting & Control Counter
+        </p>
+      </div>
+    </div>
+
+    <!-- Quick Formula Preset & Reset -->
+    <div class="flex items-center gap-3">
+      <div class="flex items-center gap-2 bg-white px-3 py-1.5 rounded-lg border border-stone-200 text-xs shadow-sm">
+        <span class="text-stone-500 font-medium font-mono">预设算式:</span>
+        <select id="formula-select" class="bg-transparent font-mono font-semibold text-stone-900 focus:outline-none cursor-pointer">
+          <option value="13x11">13 × 11 = 143 (1101 × 1011)</option>
+          <option value="5x3">5 × 3 = 15 (0101 × 0011)</option>
+          <option value="7x6">7 × 6 = 42 (0111 × 0110)</option>
+          <option value="9x13">9 × 13 = 117 (1001 × 1101)</option>
+          <option value="15x15">15 × 15 = 225 (1111 × 1111)</option>
+        </select>
+      </div>
+
+      <button id="btn-reset" class="px-3 py-1.5 rounded-lg border border-stone-200 bg-white hover:bg-stone-100 text-xs font-mono text-stone-700 transition flex items-center gap-1">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+        复位 (Reset)
+      </button>
+    </div>
+  </header>
+
+  <!-- Main Container -->
+  <main class="flex-1 max-w-6xl w-full mx-auto p-4 lg:p-6 flex flex-col gap-4">
+
+    <!-- Top Playback Controls & Cycle Steps Bar -->
+    <div class="card-panel p-4 flex flex-col gap-3">
+      <div class="flex flex-wrap items-center justify-between gap-4">
+        <!-- Playback Actions -->
+        <div class="flex items-center gap-2">
+          <button id="btn-play-pause" class="px-4 py-2 rounded-xl bg-stone-900 hover:bg-stone-800 text-white font-mono text-xs font-semibold flex items-center gap-1.5 shadow-sm transition">
+            <span id="play-icon">▶</span>
+            <span id="play-text">自动连续演示</span>
+          </button>
+          <button id="btn-step-prev" class="px-3 py-2 rounded-xl bg-stone-100 hover:bg-stone-200 text-stone-800 font-mono text-xs transition flex items-center gap-1">
+            ◀ 上一微步
+          </button>
+          <button id="btn-step-next" class="px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-mono text-xs font-semibold transition flex items-center gap-1 shadow-sm">
+            单步推进 (Next Micro-Step) ▶
+          </button>
+        </div>
+
+        <!-- Animation Speed Slider -->
+        <div class="flex items-center gap-2 bg-stone-100/80 px-3 py-1.5 rounded-xl border border-stone-200 text-xs">
+          <span class="text-stone-500 font-mono">动画速率:</span>
+          <input id="speed-slider" type="range" min="0.4" max="2.0" step="0.1" value="1.0" class="w-20 accent-indigo-600 cursor-pointer">
+          <span id="speed-val" class="font-mono text-stone-800 font-bold w-8">1.0x</span>
+        </div>
+
+        <!-- Custom Operand Inputs -->
+        <div class="flex items-center gap-2 text-xs font-mono">
+          <span class="text-stone-500">自定义 X, Y:</span>
+          <input id="input-x" type="number" min="0" max="15" value="13" class="w-12 px-1.5 py-1 text-center font-bold bg-white border border-stone-300 rounded focus:outline-indigo-500" title="被乘数 X (0~15)">
+          <span class="text-stone-400">×</span>
+          <input id="input-y" type="number" min="0" max="15" value="11" class="w-12 px-1.5 py-1 text-center font-bold bg-white border border-stone-300 rounded focus:outline-indigo-500" title="乘数 Y (0~15)">
+          <button id="btn-apply-custom" class="px-2.5 py-1 bg-stone-200 hover:bg-stone-300 text-stone-800 rounded font-semibold transition">应用</button>
+        </div>
+      </div>
+
+      <!-- Iteration Timeline Steps -->
+      <div class="pt-2 border-t border-stone-100 flex items-center justify-between gap-1 overflow-x-auto pb-1" id="timeline-container">
+        <!-- Dynamically injected: Step 0, Step 1, Step 2, Step 3, Step 4, Done -->
+      </div>
+    </div>
+
+    <!-- Active Step Status Banner -->
+    <div class="bg-indigo-50/80 border border-indigo-200 rounded-xl px-4 py-3 flex flex-col md:flex-row items-start md:items-center justify-between gap-2 text-xs font-mono shadow-sm">
+      <div class="flex flex-col gap-0.5">
+        <div class="flex items-center gap-2">
+          <span class="w-2.5 h-2.5 rounded-full bg-indigo-600 animate-pulse"></span>
+          <span id="status-step-title" class="font-bold text-indigo-950 text-sm">第 1 拍 · 步骤 1/4 (检测 MQ₀ = 1)</span>
+        </div>
+        <div id="status-step-action" class="text-indigo-900 leading-relaxed">
+          探针检测到 MQ₀ = 1 → 控制逻辑发出加法命令 (+) → ALU 执行 ACC + X 并更新 ACC 与 Cout
+        </div>
+      </div>
+      <div class="flex items-center gap-3 self-end md:self-center">
+        <div class="text-right">
+          <span class="text-[10px] text-indigo-500 block">算式进度与最终积</span>
+          <span id="status-math-result" class="font-bold text-indigo-900 text-sm">
+            13 × 11 = 143 (0x8F)
+          </span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Multiplier Circuit SVG Visualizer (Directly replicating reference image) -->
+    <div class="card-panel p-4 flex flex-col items-center justify-center bg-white relative overflow-hidden shadow-sm">
+      
+      <!-- SVG Drawing Area -->
+      <svg id="circuit-svg" viewBox="0 0 960 580" class="w-full h-auto max-h-[640px]" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <!-- Hatch Pattern for MQ0 bit -->
+          <pattern id="hatch-mq0" width="8" height="8" patternTransform="rotate(45 0 0)" patternUnits="userSpaceOnUse">
+            <line x1="0" y1="0" x2="0" y2="8" stroke="#0D9488" stroke-width="2.5" opacity="0.35" />
+          </pattern>
+
+          <!-- Marker Arrows -->
+          <marker id="arrow-black" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
+            <path d="M1,1 L7,4 L1,7 Z" fill="#1E293B" />
+          </marker>
+          <marker id="arrow-blue" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
+            <path d="M1,1 L7,4 L1,7 Z" fill="#2563EB" />
+          </marker>
+          <marker id="arrow-green" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
+            <path d="M1,1 L7,4 L1,7 Z" fill="#059669" />
+          </marker>
+          <marker id="arrow-red" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
+            <path d="M1,1 L7,4 L1,7 Z" fill="#EF4444" />
+          </marker>
+
+          <!-- Drop Shadow -->
+          <filter id="shadow-box" x="-10%" y="-10%" width="120%" height="120%">
+            <feDropShadow dx="0" dy="3" stdDeviation="3" flood-color="#000000" flood-opacity="0.12"/>
+          </filter>
+        </defs>
+
+        <!-- ============================================================ -->
+        <!-- 1. FEEDBACK WIRES & BUS TRUNKS (Placed in background) -->
+        <!-- ============================================================ -->
+
+        <!-- ACC feedback loop wire back to ALU left input -->
+        <!-- Path: (280, 90) -> up to 40 -> left to 30 -> down to 445 -> right to 240 -> up to (240, 400) -->
+        <path id="wire-acc-loop" d="M 280,90 L 280,40 L 30,40 L 30,445 L 240,445 L 240,400" class="wire-path" marker-end="url(#arrow-black)"/>
+
+        <!-- ALU Cout output wire to Cout box -->
+        <!-- Path: from ALU top-left (205, 280) -> left to 50 -> up to 60 -> right to 100 -> down to (100, 90) -->
+        <path id="wire-alu-cout" d="M 205,280 L 50,280 L 50,60 L 100,60 L 100,90" class="wire-path" marker-end="url(#arrow-black)"/>
+
+        <!-- ALU Sum output wire to ACC -->
+        <!-- Path: from ALU top (300, 270) -> straight UP into ACC (300, 145) -->
+        <path id="wire-alu-sum" d="M 300,270 L 300,145" class="wire-path" marker-end="url(#arrow-black)"/>
+
+        <!-- X output wire to ALU right input -->
+        <!-- Path: from X top (360, 470) -> straight UP into ALU right port (360, 400) -->
+        <path id="wire-x-to-alu" d="M 360,470 L 360,400" class="wire-path" marker-end="url(#arrow-black)"/>
+
+        <!-- Control Logic '+' Add Enable wire to ALU -->
+        <!-- Path: from Control Unit left (490, 350) -> left to ALU (430, 350) -->
+        <path id="wire-ctrl-add" d="M 490,350 L 430,350" class="wire-path-ctrl" marker-end="url(#arrow-red)"/>
+        <text x="460" y="340" class="font-mono text-xl font-bold fill-stone-900" text-anchor="middle">+</text>
+
+        <!-- Control Logic 'EN, >>' Shift Enable Thick Wire to ACC and MQ -->
+        <!-- Path: from (580, 290) -> up to 210 -> branch to MQ (580, 145) and branch left to (360, 210) -> up to ACC (360, 145) -->
+        <path id="wire-ctrl-shift" d="M 580,290 L 580,145 M 580,210 L 360,210 L 360,145" class="wire-path-ctrl" stroke-width="4" marker-end="url(#arrow-black)"/>
+        <text x="470" y="200" class="font-mono text-lg font-extrabold fill-stone-900">EN、 >></text>
+
+        <!-- MQ0 Probe wire downwards to Control Unit -->
+        <!-- Path: from MQ bit 0 bottom (725, 145) -> down to Control Unit top (725, 290) -->
+        <path id="wire-mq0-probe" d="M 725,145 L 725,290" class="wire-path-ctrl" marker-end="url(#arrow-green)"/>
+        <text x="745" y="225" class="font-mono text-base font-bold fill-emerald-700">MQ₀=1?</text>
+
+        <!-- CLK Clock Input wire into Control Unit from bottom -->
+        <!-- Path: from bottom (620, 520) -> straight UP into Control Unit (620, 420) -->
+        <path id="wire-clk" d="M 620,520 L 620,420" class="wire-path" marker-end="url(#arrow-black)"/>
+        <text x="645" y="485" class="font-mono text-sm font-extrabold fill-stone-900">CLK</text>
+
+        <!-- Arrow between Cout and ACC -->
+        <path d="M 130,117 L 180,117" class="wire-path" marker-end="url(#arrow-black)"/>
+
+        <!-- Arrow between ACC and MQ -->
+        <path d="M 420,117 L 490,117" class="wire-path" marker-end="url(#arrow-black)"/>
+
+        <!-- ============================================================ -->
+        <!-- 2. REGISTERS & HARDWARE CHIPS (Placed in foreground) -->
+        <!-- ============================================================ -->
+
+        <!-- 2.1 Cout (Purple Box) -->
+        <g id="comp-cout">
+          <text x="100" y="75" class="font-mono text-lg font-bold fill-purple-600" text-anchor="middle">C<tspan font-size="12" dy="4">out</tspan></text>
+          <rect x="70" y="90" width="60" height="55" rx="6" fill="#8B5CF6" stroke="#6D28D9" stroke-width="2" filter="url(#shadow-box)"/>
+          <text id="val-cout" x="100" y="118" class="svg-bit-text">0</text>
+        </g>
+
+        <!-- Dot marker '.' between Cout and ACC -->
+        <text x="155" y="130" class="font-mono text-2xl font-bold fill-stone-900">.</text>
+
+        <!-- 2.2 ACC (Cyan-Blue 4-Bit Register) -->
+        <g id="comp-acc">
+          <text x="300" y="75" class="font-mono text-xl font-bold fill-sky-600" text-anchor="middle">ACC</text>
+          <g filter="url(#shadow-box)">
+            <!-- Cell A3 -->
+            <rect id="cell-acc-3" x="180" y="90" width="60" height="55" rx="4" fill="#0284C7" stroke="#0369A1" stroke-width="1.5" class="svg-bit-cell"/>
+            <text id="val-acc-3" x="210" y="118" class="svg-bit-text">1</text>
+            <!-- Cell A2 -->
+            <rect id="cell-acc-2" x="240" y="90" width="60" height="55" rx="4" fill="#0284C7" stroke="#0369A1" stroke-width="1.5" class="svg-bit-cell"/>
+            <text id="val-acc-2" x="270" y="118" class="svg-bit-text">0</text>
+            <!-- Cell A1 -->
+            <rect id="cell-acc-1" x="300" y="90" width="60" height="55" rx="4" fill="#0284C7" stroke="#0369A1" stroke-width="1.5" class="svg-bit-cell"/>
+            <text id="val-acc-1" x="330" y="118" class="svg-bit-text">0</text>
+            <!-- Cell A0 -->
+            <rect id="cell-acc-0" x="360" y="90" width="60" height="55" rx="4" fill="#0284C7" stroke="#0369A1" stroke-width="1.5" class="svg-bit-cell"/>
+            <text id="val-acc-0" x="390" y="118" class="svg-bit-text">1</text>
+          </g>
+        </g>
+
+        <!-- 2.3 MQ (Teal-Green 4-Bit Register) -->
+        <g id="comp-mq">
+          <text x="610" y="75" class="font-mono text-xl font-bold fill-emerald-600" text-anchor="middle">MQ</text>
+          <g filter="url(#shadow-box)">
+            <!-- Cell M3 -->
+            <rect id="cell-mq-3" x="490" y="90" width="60" height="55" rx="4" fill="#059669" stroke="#047857" stroke-width="1.5" class="svg-bit-cell"/>
+            <text id="val-mq-3" x="520" y="118" class="svg-bit-text">1</text>
+            <!-- Cell M2 -->
+            <rect id="cell-mq-2" x="550" y="90" width="60" height="55" rx="4" fill="#059669" stroke="#047857" stroke-width="1.5" class="svg-bit-cell"/>
+            <text id="val-mq-2" x="580" y="118" class="svg-bit-text">1</text>
+            <!-- Cell M1 -->
+            <rect id="cell-mq-1" x="610" y="90" width="60" height="55" rx="4" fill="#059669" stroke="#047857" stroke-width="1.5" class="svg-bit-cell"/>
+            <text id="val-mq-1" x="640" y="118" class="svg-bit-text">1</text>
+            <!-- Cell M0 (Hatched Background for Detection) -->
+            <rect id="cell-mq-0" x="670" y="90" width="60" height="55" rx="4" fill="#CCFBF1" stroke="#0D9488" stroke-width="2" class="svg-bit-cell"/>
+            <rect x="670" y="90" width="60" height="55" rx="4" fill="url(#hatch-mq0)" opacity="0.6" pointer-events="none"/>
+            <text id="val-mq-0" x="700" y="118" class="svg-bit-text" fill="#0F766E">0</text>
+          </g>
+        </g>
+
+        <!-- 2.4 ALU (Classic Golden Trapezoid / V-Shape) -->
+        <g id="comp-alu">
+          <polygon id="alu-body" points="200,270 170,390 430,390 400,270 320,310 280,310" class="svg-alu-body"/>
+          <text x="300" y="350" class="font-mono text-2xl font-extrabold fill-stone-900" text-anchor="middle">ALU</text>
+        </g>
+
+        <!-- 2.5 Control Logic & Counter Box (Vibrant Red) -->
+        <g id="comp-ctrl">
+          <rect id="ctrl-box" x="490" y="290" width="260" height="130" rx="10" class="svg-ctrl-box"/>
+          <text x="620" y="335" class="font-sans text-xl font-extrabold fill-white" text-anchor="middle">控制逻辑</text>
+          <text id="ctrl-counter-text" x="620" y="380" class="font-mono text-2xl font-black fill-white" text-anchor="middle">计数器C<tspan font-size="16" dy="4">n</tspan><tspan dy="-4"> = 3</tspan></text>
+        </g>
+
+        <!-- 2.6 Multiplicand Register X (Dark Slate 4-Bit) -->
+        <g id="comp-x">
+          <!-- Dot marker '.' on left of X -->
+          <text x="145" y="505" class="font-mono text-2xl font-bold fill-stone-800">.</text>
+          <text x="125" y="502" class="font-mono text-xl font-bold fill-slate-700">X</text>
+          <g filter="url(#shadow-box)">
+            <rect id="cell-x-3" x="180" y="470" width="60" height="55" rx="4" fill="#334155" stroke="#1E293B" stroke-width="1.5" class="svg-bit-cell"/>
+            <text id="val-x-3" x="210" y="498" class="svg-bit-text">1</text>
+
+            <rect id="cell-x-2" x="240" y="470" width="60" height="55" rx="4" fill="#334155" stroke="#1E293B" stroke-width="1.5" class="svg-bit-cell"/>
+            <text id="val-x-2" x="270" y="498" class="svg-bit-text">1</text>
+
+            <rect id="cell-x-1" x="300" y="470" width="60" height="55" rx="4" fill="#334155" stroke="#1E293B" stroke-width="1.5" class="svg-bit-cell"/>
+            <text id="val-x-1" x="330" y="498" class="svg-bit-text">0</text>
+
+            <rect id="cell-x-0" x="360" y="470" width="60" height="55" rx="4" fill="#334155" stroke="#1E293B" stroke-width="1.5" class="svg-bit-cell"/>
+            <text id="val-x-0" x="390" y="498" class="svg-bit-text">1</text>
+          </g>
+        </g>
+
+        <!-- Floating Sliding Bits Layer (for continuous GSAP interpolation) -->
+        <g id="sliding-bits-layer" pointer-events="none">
+          <!-- Injected dynamically during shift/add animations -->
+        </g>
+      </svg>
+    </div>
+
+    <!-- Core Principle & Math Breakdown Cards (Clean & Focused) -->
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <!-- Principle 1: Why Combined Shift -->
+      <div class="card-panel p-4 flex flex-col gap-2 bg-white">
+        <div class="flex items-center gap-2 text-xs font-bold text-stone-900 font-mono">
+          <span class="w-6 h-6 rounded bg-amber-100 text-amber-800 flex items-center justify-center text-xs">1</span>
+          为什么 ACC 和 MQ 要联合右移？—— 寄存器复用
+        </div>
+        <p class="text-xs text-stone-600 leading-relaxed font-sans">
+          $n$ 位数相乘产生 $2n$ 位积。MQ 初始存满乘数，每步右移消耗掉 1 位已用过的乘数，腾出 1 位高位空位；ACC 产生的低位部分积刚好<strong>无缝移入 MQ 空出的高位</strong>。$n$ 步后，ACC 保存高 $n$ 位、MQ 保存低 $n$ 位，拼接即为完整结果，<strong>无需额外设计昂贵的 $2n$ 位大寄存器</strong>。
+        </p>
+      </div>
+
+      <!-- Principle 2: Why Shift Right Instead of Left -->
+      <div class="card-panel p-4 flex flex-col gap-2 bg-white">
+        <div class="flex items-center gap-2 text-xs font-bold text-stone-900 font-mono">
+          <span class="w-6 h-6 rounded bg-indigo-100 text-indigo-800 flex items-center justify-center text-xs">2</span>
+          为什么部分积向右移位？—— 位权等效对齐
+        </div>
+        <p class="text-xs text-stone-600 leading-relaxed font-sans">
+          手算乘法是<strong>被乘数依次向左移位（位权 $\times 2$）</strong>再累加，需要 $2n$ 位加法器；硬件乘法器反其道而行之：<strong>保持被乘数不动，将已累加的部分积向右移位（位权 $\div 2$）</strong>，相对位权与手算完全等价，只需一个<strong>固定 $n$ 位的普通加法器</strong>即可完成运算。
+        </p>
+      </div>
+    </div>
+
+  </main>
+
+  <!-- Footer -->
+  <footer class="border-t border-[#E5E4DC] py-4 px-6 text-center text-xs font-mono text-stone-400">
+    Sequential Multiplier Circuit Demonstration · Taste-Skill Minimalist Design
+  </footer>
+
+  <!-- Application JS -->
+  <script src="app.js"></script>
+</body>
+</html>

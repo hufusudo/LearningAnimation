@@ -1,0 +1,470 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VLAN 工作原理与 802.1Q 帧动画演示</title>
+
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['-apple-system', 'BlinkMacSystemFont', 'SF Pro Display', 'Segoe UI', 'Roboto', 'sans-serif'],
+            mono: ['JetBrains Mono', 'Fira Code', 'monospace']
+          }
+        }
+      }
+    }
+  </script>
+
+  <!-- GSAP CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+
+  <!-- Custom CSS -->
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="min-h-screen bg-[#FAF9F5] text-stone-900 flex flex-col justify-between antialiased selection:bg-stone-200">
+
+  <!-- ============================================================ -->
+  <!-- 极简顶栏 Header -->
+  <!-- ============================================================ -->
+  <header class="border-b border-[#E5E4DC] bg-[#FAF9F5]/90 backdrop-blur sticky top-0 z-30 px-6 py-2.5">
+    <div class="max-w-7xl mx-auto flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <a href="../index.html#cs" class="w-7 h-7 rounded-lg bg-stone-900 text-white flex items-center justify-center font-mono font-bold text-xs hover:bg-stone-800 transition-colors shadow-sm" title="返回学科展厅">
+          ←
+        </a>
+        <h1 class="text-base font-bold tracking-tight text-stone-900">
+          VLAN 工作原理与 802.1Q 帧流动机制
+        </h1>
+      </div>
+
+      <!-- 帧颜色图例 -->
+      <div class="flex items-center gap-4 text-xs font-mono">
+        <span class="inline-flex items-center gap-1.5 font-medium text-stone-700">
+          <span class="w-3.5 h-3.5 rounded bg-red-500 shadow-sm inline-block"></span>
+          标准以太网 MAC 帧 (红色方块)
+        </span>
+        <span class="inline-flex items-center gap-1.5 font-medium text-emerald-700">
+          <span class="w-3.5 h-3.5 rounded bg-emerald-600 shadow-sm inline-block"></span>
+          802.1Q 标记帧 (绿色方块 · 带 Tag)
+        </span>
+      </div>
+    </div>
+  </header>
+
+  <!-- ============================================================ -->
+  <!-- 主舞台 -->
+  <!-- ============================================================ -->
+  <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-3.5 space-y-3.5">
+
+    <!-- 1. 顶部：802.1Q 帧格式（对齐原图） -->
+    <section class="bg-white border border-[#E5E4DC] rounded-xl p-3.5 shadow-sm space-y-2.5">
+      <div class="flex flex-wrap items-center justify-between gap-2 text-xs font-mono">
+        <div class="flex items-center gap-2 font-bold text-stone-900">
+          <span class="w-2 h-2 rounded-full bg-indigo-600"></span>
+          <span>802.1Q 帧格式</span>
+          <span class="text-stone-400 font-normal">| 由于扩展了首部，以太网最大帧长从 1518B 变为 1522B</span>
+        </div>
+        <div class="text-stone-500 text-[11px]">
+          <span>载荷计算: 最小帧长 64B &rarr; 数据 42B~1500B (或 46B~1500B / 68B)</span>
+        </div>
+      </div>
+
+      <!-- 802.1Q 结构条 -->
+      <div class="overflow-x-auto pb-1">
+        <div class="min-w-[760px] space-y-1.5 select-none font-mono text-xs text-center">
+          
+          <!-- 第一层：整体字段 -->
+          <div class="grid grid-cols-12 gap-1">
+            <div class="col-span-2 bg-stone-100 border border-stone-200 rounded p-1">
+              <div class="text-[10px] text-stone-400 font-medium">6B</div>
+              <div class="font-bold text-stone-800">目的地址</div>
+            </div>
+            <div class="col-span-2 bg-stone-100 border border-stone-200 rounded p-1">
+              <div class="text-[10px] text-stone-400 font-medium">6B</div>
+              <div class="font-bold text-stone-800">源地址</div>
+            </div>
+            <div class="col-span-3 bg-amber-50 border-2 border-amber-400 rounded p-1 ring-1 ring-amber-300">
+              <div class="text-[10px] text-amber-700 font-bold">4B 扩展首部</div>
+              <div class="font-bold text-amber-900">VLAN 标记 (Tag)</div>
+            </div>
+            <div class="col-span-1 bg-stone-100 border border-stone-200 rounded p-1">
+              <div class="text-[10px] text-stone-400 font-medium">2B</div>
+              <div class="font-bold text-stone-800">类型</div>
+            </div>
+            <div class="col-span-3 bg-stone-100 border border-stone-200 rounded p-1">
+              <div class="text-[10px] text-stone-400 font-medium">42B ~ 1500B</div>
+              <div class="font-bold text-stone-800">数据 (Data)</div>
+            </div>
+            <div class="col-span-1 bg-stone-100 border border-stone-200 rounded p-1">
+              <div class="text-[10px] text-stone-400 font-medium">4B</div>
+              <div class="font-bold text-stone-800">FCS</div>
+            </div>
+          </div>
+
+          <!-- 第二层：4B VLAN 标记内部展开 -->
+          <div class="grid grid-cols-12 gap-1 pt-0.5">
+            <div class="col-start-5 col-span-3 bg-amber-100/70 border border-amber-300 rounded p-1 text-left">
+              <div class="text-[10px] text-amber-800 font-semibold mb-0.5">802.1Q 标记类型 (TPID, 2B):</div>
+              <div class="font-mono text-emerald-800 bg-white/90 px-1 py-0.5 rounded border border-amber-200 text-[10px] font-bold text-center">
+                0x8100 · 1000 0001 0000 0000
+              </div>
+            </div>
+
+            <div class="col-span-4 bg-amber-100/70 border border-amber-300 rounded p-1 text-left">
+              <div class="text-[10px] text-amber-800 font-semibold mb-0.5">标记控制信息 (TCI, 2B):</div>
+              <div class="grid grid-cols-4 gap-1 text-center text-[10px]">
+                <div class="bg-white/90 border border-amber-200 rounded p-0.5">
+                  <div class="text-stone-400 text-[9px]">3bit</div>
+                  <div class="font-bold text-stone-800">PRI</div>
+                </div>
+                <div class="bg-white/90 border border-amber-200 rounded p-0.5">
+                  <div class="text-stone-400 text-[9px]">1bit</div>
+                  <div class="font-bold text-stone-800">CFI</div>
+                </div>
+                <div class="col-span-2 bg-indigo-50 border border-indigo-400 rounded p-0.5">
+                  <div class="text-indigo-600 text-[9px] font-bold">12bit (0~4095)</div>
+                  <div class="font-bold text-indigo-950">VID (所属VLAN)</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </section>
+
+    <!-- 2. 中部：双交换机拓扑动画主舞台 (内部宽敞空间) -->
+    <section class="bg-white border border-[#E5E4DC] rounded-xl p-4 shadow-sm space-y-3 relative overflow-hidden">
+      
+      <!-- 拓扑画布容器 -->
+      <div class="relative w-full min-h-[520px] bg-[#FAF9F5] rounded-xl border border-stone-200 p-3 select-none" id="canvas-container">
+        
+        <!-- ==================== 顶部双交换机 (内部空间扩大) ==================== -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-8 md:gap-14 pt-1">
+          
+          <!-- 交换机 1 (内部大空间 + 交换矩阵) -->
+          <div class="bg-white border-2 border-stone-300 rounded-2xl p-3.5 shadow-sm relative switch-box flex flex-col justify-between min-h-[260px]" id="switch-1">
+            
+            <!-- 顶栏：交换机名称与 Trunk 端口 -->
+            <div class="flex items-center justify-between pb-2 border-b border-stone-200">
+              <div class="flex items-center gap-2">
+                <span class="w-2.5 h-2.5 rounded-full bg-blue-600 animate-pulse"></span>
+                <span class="font-bold text-sm font-mono text-stone-900">交换机 1 (Switch 1)</span>
+              </div>
+              
+              <!-- Trunk 端口 P8 置于右上角，方便直连 Switch 2 -->
+              <div class="port-badge px-2.5 py-1 rounded-lg border-2 border-emerald-500 bg-emerald-50 flex items-center gap-1.5 shadow-sm cursor-pointer" id="sw1-p8" title="Port 8 (Trunk 模式, 允许放行 VLAN 10, 20)">
+                <span class="text-[10px] text-emerald-800 font-bold">P8(Trunk)</span>
+                <span class="text-[10px] font-mono px-1 rounded bg-emerald-200 text-emerald-900 font-bold">VID: 10, 20</span>
+              </div>
+            </div>
+
+            <!-- 中部：宽敞的交换机内部处理空间 (Switching Fabric) -->
+            <div class="switch-interior rounded-xl border border-dashed border-stone-300 p-3 my-2 flex-1 flex flex-col justify-center items-center relative overflow-hidden bg-slate-50/40" id="sw1-interior">
+              <div class="text-[10px] font-mono text-stone-400 font-semibold mb-1 flex items-center gap-1">
+                <span>交换矩阵与内部总线 (Fabric)</span>
+                <span>·</span>
+                <span class="text-indigo-600">Access 进打Tag · 出剥Tag</span>
+              </div>
+              
+              <!-- 内部核心处理动效指示锚点 -->
+              <div class="w-12 h-12 rounded-xl border border-indigo-200 bg-indigo-50/70 flex items-center justify-center font-mono text-[10px] font-bold text-indigo-700 shadow-sm relative" id="sw1-center">
+                <span>VLAN</span>
+                <span class="absolute -bottom-4 text-[9px] text-stone-400 font-normal">交换核心</span>
+              </div>
+            </div>
+
+            <!-- 底栏：Access 端口排布 -->
+            <div>
+              <div class="flex justify-between items-center text-[10px] font-mono text-stone-400 mb-1 px-1">
+                <span>Access 端口区 (下连主机):</span>
+                <span>P1~P4: VID 10 | P5~P7: VID 20</span>
+              </div>
+              <div class="grid grid-cols-7 gap-1 text-center font-mono text-xs">
+                <div class="port-badge p-1 rounded border border-blue-300 bg-blue-50/90" id="sw1-p1" title="Port 1 (Access, PVID=10, 连主机 A)">
+                  <div class="text-[9px] text-stone-500 font-semibold">P1</div>
+                  <div class="text-[10px] font-bold text-blue-700">VID:10</div>
+                </div>
+                <div class="port-badge p-1 rounded border border-blue-300 bg-blue-50/90" id="sw1-p2" title="Port 2 (Access, PVID=10, 连主机 B)">
+                  <div class="text-[9px] text-stone-500 font-semibold">P2</div>
+                  <div class="text-[10px] font-bold text-blue-700">VID:10</div>
+                </div>
+                <div class="port-badge p-1 rounded border border-blue-200 bg-blue-50/70" id="sw1-p3" title="Port 3 (Access, PVID=10)">
+                  <div class="text-[9px] text-stone-400">P3</div>
+                  <div class="text-[10px] font-bold text-blue-600">VID:10</div>
+                </div>
+                <div class="port-badge p-1 rounded border border-blue-200 bg-blue-50/70" id="sw1-p4" title="Port 4 (Access, PVID=10)">
+                  <div class="text-[9px] text-stone-400">P4</div>
+                  <div class="text-[10px] font-bold text-blue-600">VID:10</div>
+                </div>
+                <div class="port-badge p-1 rounded border border-amber-300 bg-amber-50/90" id="sw1-p5" title="Port 5 (Access, PVID=20, 连主机 C)">
+                  <div class="text-[9px] text-stone-500 font-semibold">P5</div>
+                  <div class="text-[10px] font-bold text-amber-700">VID:20</div>
+                </div>
+                <div class="port-badge p-1 rounded border border-amber-300 bg-amber-50/90" id="sw1-p6" title="Port 6 (Access, PVID=20, 连主机 D)">
+                  <div class="text-[9px] text-stone-500 font-semibold">P6</div>
+                  <div class="text-[10px] font-bold text-amber-700">VID:20</div>
+                </div>
+                <div class="port-badge p-1 rounded border border-amber-200 bg-amber-50/70" id="sw1-p7" title="Port 7 (Access, PVID=20)">
+                  <div class="text-[9px] text-stone-400">P7</div>
+                  <div class="text-[10px] font-bold text-amber-600">VID:20</div>
+                </div>
+              </div>
+            </div>
+
+          </div>
+
+          <!-- 交换机 2 (内部大空间 + 交换矩阵) -->
+          <div class="bg-white border-2 border-stone-300 rounded-2xl p-3.5 shadow-sm relative switch-box flex flex-col justify-between min-h-[260px]" id="switch-2">
+            
+            <!-- 顶栏：交换机名称与 Trunk 端口 -->
+            <div class="flex items-center justify-between pb-2 border-b border-stone-200">
+              <!-- Trunk 端口 P1 置于左上角，直对 Switch 1 的 P8 -->
+              <div class="port-badge px-2.5 py-1 rounded-lg border-2 border-emerald-500 bg-emerald-50 flex items-center gap-1.5 shadow-sm cursor-pointer" id="sw2-p1" title="Port 1 (Trunk 模式, 允许放行 VLAN 10, 20)">
+                <span class="text-[10px] text-emerald-800 font-bold">P1(Trunk)</span>
+                <span class="text-[10px] font-mono px-1 rounded bg-emerald-200 text-emerald-900 font-bold">VID: 10, 20</span>
+              </div>
+
+              <div class="flex items-center gap-2">
+                <span class="font-bold text-sm font-mono text-stone-900">交换机 2 (Switch 2)</span>
+                <span class="w-2.5 h-2.5 rounded-full bg-emerald-600 animate-pulse"></span>
+              </div>
+            </div>
+
+            <!-- 中部：宽敞的交换机内部处理空间 (Switching Fabric) -->
+            <div class="switch-interior rounded-xl border border-dashed border-stone-300 p-3 my-2 flex-1 flex flex-col justify-center items-center relative overflow-hidden bg-slate-50/40" id="sw2-interior">
+              <div class="text-[10px] font-mono text-stone-400 font-semibold mb-1 flex items-center gap-1">
+                <span>交换矩阵与内部总线 (Fabric)</span>
+                <span>·</span>
+                <span class="text-indigo-600">解析 802.1Q 标签 · 转发分发</span>
+              </div>
+              
+              <!-- 内部核心处理动效指示锚点 -->
+              <div class="w-12 h-12 rounded-xl border border-indigo-200 bg-indigo-50/70 flex items-center justify-center font-mono text-[10px] font-bold text-indigo-700 shadow-sm relative" id="sw2-center">
+                <span>VLAN</span>
+                <span class="absolute -bottom-4 text-[9px] text-stone-400 font-normal">交换核心</span>
+              </div>
+            </div>
+
+            <!-- 底栏：Access 端口排布 -->
+            <div>
+              <div class="flex justify-between items-center text-[10px] font-mono text-stone-400 mb-1 px-1">
+                <span>Access 端口区 (下连主机):</span>
+                <span>P2~P3: VID 10 | P4~P6: VID 20</span>
+              </div>
+              <div class="grid grid-cols-5 gap-1.5 text-center font-mono text-xs">
+                <div class="port-badge p-1 rounded border border-blue-300 bg-blue-50/90" id="sw2-p2" title="Port 2 (Access, PVID=10, 连主机 E)">
+                  <div class="text-[9px] text-stone-500 font-semibold">P2</div>
+                  <div class="text-[10px] font-bold text-blue-700">VID:10</div>
+                </div>
+                <div class="port-badge p-1 rounded border border-blue-200 bg-blue-50/70" id="sw2-p3" title="Port 3 (Access, PVID=10)">
+                  <div class="text-[9px] text-stone-400">P3</div>
+                  <div class="text-[10px] font-bold text-blue-600">VID:10</div>
+                </div>
+                <div class="port-badge p-1 rounded border border-amber-300 bg-amber-50/90" id="sw2-p4" title="Port 4 (Access, PVID=20, 连主机 F)">
+                  <div class="text-[9px] text-stone-500 font-semibold">P4</div>
+                  <div class="text-[10px] font-bold text-amber-700">VID:20</div>
+                </div>
+                <div class="port-badge p-1 rounded border border-amber-200 bg-amber-50/70" id="sw2-p5" title="Port 5 (Access, PVID=20)">
+                  <div class="text-[9px] text-stone-400">P5</div>
+                  <div class="text-[10px] font-bold text-amber-600">VID:20</div>
+                </div>
+                <div class="port-badge p-1 rounded border border-amber-200 bg-amber-50/70" id="sw2-p6" title="Port 6 (Access, PVID=20)">
+                  <div class="text-[9px] text-stone-400">P6</div>
+                  <div class="text-[10px] font-bold text-amber-600">VID:20</div>
+                </div>
+              </div>
+            </div>
+
+          </div>
+
+        </div>
+
+        <!-- ==================== 下方主机终端 (VLAN-10 / VLAN-20) ==================== -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-8 md:gap-14 pt-4">
+          
+          <!-- 交换机 1 下挂主机 -->
+          <div class="grid grid-cols-12 gap-3">
+            <!-- VLAN-10 (A, B) -->
+            <div class="col-span-7 border-2 border-dashed border-blue-400 bg-blue-50/30 rounded-xl p-2.5 space-y-1.5" id="vlan-box-10-sw1">
+              <div class="flex items-center justify-between text-xs font-mono">
+                <span class="font-bold text-blue-800 bg-blue-100 px-1.5 py-0.5 rounded text-[11px]">VLAN-10 广播域</span>
+                <span class="text-blue-600 font-semibold text-[11px]">VID:10</span>
+              </div>
+              <div class="grid grid-cols-4 gap-1.5 text-center font-mono">
+                <!-- Host A -->
+                <div class="host-card p-1.5 rounded-lg bg-white border-2 border-red-400 shadow-sm relative cursor-pointer" id="host-A">
+                  <div class="w-6 h-6 mx-auto mb-0.5 rounded bg-stone-900 text-white flex items-center justify-center text-xs font-bold">A</div>
+                  <div class="text-[11px] font-bold text-stone-900">主机 A</div>
+                  <span class="absolute -top-2 -right-1 px-1 rounded-full bg-red-500 text-white text-[8px] font-bold">源发送</span>
+                </div>
+                <!-- Host B -->
+                <div class="host-card p-1.5 rounded-lg bg-white border border-stone-300 shadow-sm relative cursor-pointer" id="host-B">
+                  <div class="w-6 h-6 mx-auto mb-0.5 rounded bg-stone-100 text-stone-800 flex items-center justify-center text-xs font-bold border border-stone-200">B</div>
+                  <div class="text-[11px] font-bold text-stone-900">主机 B</div>
+                </div>
+                <!-- PC 3 (P3) -->
+                <div class="host-card p-1.5 rounded-lg bg-white border border-stone-300 shadow-sm relative cursor-pointer text-center" id="host-A2">
+                  <div class="w-6 h-6 mx-auto mb-0.5 rounded bg-stone-100 text-stone-700 flex items-center justify-center text-[10px] font-bold border border-stone-200">3</div>
+                  <div class="text-[11px] font-bold text-stone-800">终端 3</div>
+                </div>
+                <!-- PC 4 (P4) -->
+                <div class="host-card p-1.5 rounded-lg bg-white border border-stone-300 shadow-sm relative cursor-pointer text-center" id="host-A3">
+                  <div class="w-6 h-6 mx-auto mb-0.5 rounded bg-stone-100 text-stone-700 flex items-center justify-center text-[10px] font-bold border border-stone-200">4</div>
+                  <div class="text-[11px] font-bold text-stone-800">终端 4</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- VLAN-20 (C, D) -->
+            <div class="col-span-5 border-2 border-dashed border-amber-400 bg-amber-50/30 rounded-xl p-2.5 space-y-1.5" id="vlan-box-20-sw1">
+              <div class="flex items-center justify-between text-xs font-mono">
+                <span class="font-bold text-amber-800 bg-amber-100 px-1.5 py-0.5 rounded text-[11px]">VLAN-20</span>
+                <span class="text-amber-700 font-semibold text-[11px]">VID:20</span>
+              </div>
+              <div class="grid grid-cols-3 gap-1.5 text-center font-mono">
+                <!-- Host C -->
+                <div class="host-card p-1.5 rounded-lg bg-white border border-stone-300 shadow-sm cursor-pointer" id="host-C">
+                  <div class="w-6 h-6 mx-auto mb-0.5 rounded bg-stone-100 text-stone-800 flex items-center justify-center text-xs font-bold border border-stone-200">C</div>
+                  <div class="text-[11px] font-bold text-stone-900">主机 C</div>
+                </div>
+                <!-- Host D -->
+                <div class="host-card p-1.5 rounded-lg bg-white border border-stone-300 shadow-sm cursor-pointer" id="host-D">
+                  <div class="w-6 h-6 mx-auto mb-0.5 rounded bg-stone-100 text-stone-800 flex items-center justify-center text-xs font-bold border border-stone-200">D</div>
+                  <div class="text-[11px] font-bold text-stone-900">主机 D</div>
+                </div>
+                <!-- PC 7 -->
+                <div class="host-card p-1.5 rounded-lg bg-white border border-stone-300 shadow-sm cursor-pointer text-center" id="host-C2">
+                  <div class="w-6 h-6 mx-auto mb-0.5 rounded bg-stone-100 text-stone-700 flex items-center justify-center text-[10px] font-bold border border-stone-200">7</div>
+                  <div class="text-[11px] font-bold text-stone-800">终端 7</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 交换机 2 下挂主机 -->
+          <div class="grid grid-cols-12 gap-3">
+            <!-- VLAN-10 (E) -->
+            <div class="col-span-5 border-2 border-dashed border-blue-400 bg-blue-50/30 rounded-xl p-2.5 space-y-1.5" id="vlan-box-10-sw2">
+              <div class="flex items-center justify-between text-xs font-mono">
+                <span class="font-bold text-blue-800 bg-blue-100 px-1.5 py-0.5 rounded text-[11px]">VLAN-10 广播域</span>
+                <span class="text-blue-600 font-semibold text-[11px]">VID:10</span>
+              </div>
+              <div class="grid grid-cols-2 gap-2 text-center font-mono">
+                <!-- Host E -->
+                <div class="host-card p-1.5 rounded-lg bg-white border-2 border-emerald-400 shadow-sm relative cursor-pointer" id="host-E">
+                  <div class="w-6 h-6 mx-auto mb-0.5 rounded bg-emerald-700 text-white flex items-center justify-center text-xs font-bold">E</div>
+                  <div class="text-[11px] font-bold text-stone-900">主机 E</div>
+                  <span class="absolute -top-2 -right-1 px-1 rounded-full bg-emerald-500 text-white text-[8px] font-bold">目标</span>
+                </div>
+                <!-- PC E2 (P3) -->
+                <div class="host-card p-1.5 rounded-lg bg-white border border-stone-300 shadow-sm relative cursor-pointer text-center" id="host-E2">
+                  <div class="w-6 h-6 mx-auto mb-0.5 rounded bg-stone-100 text-stone-700 flex items-center justify-center text-[10px] font-bold border border-stone-200">E2</div>
+                  <div class="text-[11px] font-bold text-stone-800">终端 E2</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- VLAN-20 (F) -->
+            <div class="col-span-7 border-2 border-dashed border-amber-400 bg-amber-50/30 rounded-xl p-2.5 space-y-1.5" id="vlan-box-20-sw2">
+              <div class="flex items-center justify-between text-xs font-mono">
+                <span class="font-bold text-amber-800 bg-amber-100 px-1.5 py-0.5 rounded text-[11px]">VLAN-20</span>
+                <span class="text-amber-700 font-semibold text-[11px]">VID:20</span>
+              </div>
+              <div class="grid grid-cols-3 gap-1.5 text-center font-mono">
+                <!-- Host F -->
+                <div class="host-card p-1.5 rounded-lg bg-white border border-stone-300 shadow-sm cursor-pointer" id="host-F">
+                  <div class="w-6 h-6 mx-auto mb-0.5 rounded bg-stone-100 text-stone-800 flex items-center justify-center text-xs font-bold border border-stone-200">F</div>
+                  <div class="text-[11px] font-bold text-stone-900">主机 F</div>
+                </div>
+                <!-- PC F2 -->
+                <div class="p-1.5 rounded-lg bg-white/70 border border-stone-200 text-center" id="host-F2">
+                  <div class="w-6 h-6 mx-auto mb-0.5 rounded bg-stone-100 text-stone-400 flex items-center justify-center text-[9px]">PC</div>
+                  <div class="text-[10px] text-stone-500">终端 F2</div>
+                </div>
+                <!-- PC F3 -->
+                <div class="p-1.5 rounded-lg bg-white/70 border border-stone-200 text-center" id="host-F3">
+                  <div class="w-6 h-6 mx-auto mb-0.5 rounded bg-stone-100 text-stone-400 flex items-center justify-center text-[9px]">PC</div>
+                  <div class="text-[10px] text-stone-500">终端 F3</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- ==================== SVG 物理连线与平滑动画飞行图层 ==================== -->
+        <svg class="absolute inset-0 w-full h-full pointer-events-none z-20" id="topology-svg">
+          <!-- 交换机内部与外部物理线路 -->
+          <g id="svg-links" stroke-linecap="round"></g>
+          <!-- 动态飞行与平滑渐变报文 -->
+          <g id="svg-packets"></g>
+          <!-- 阻断隔离符号图层 -->
+          <g id="svg-isolations"></g>
+        </svg>
+
+      </div>
+
+      <!-- ============================================================ -->
+      <!-- 极简控制面板与即时单行进度条 -->
+      <!-- ============================================================ -->
+      <div class="flex flex-wrap items-center justify-between gap-3 pt-1">
+        
+        <!-- 播放控制按键 -->
+        <div class="flex items-center gap-2">
+          <button id="btn-play" class="px-4 py-1.5 rounded-lg bg-stone-900 text-white text-xs font-mono font-semibold hover:bg-stone-800 transition-colors flex items-center gap-2 shadow-sm">
+            <span id="play-icon">▶</span>
+            <span id="play-text">播放动画</span>
+          </button>
+
+          <button id="btn-reset" class="px-3 py-1.5 rounded-lg border border-[#E5E4DC] bg-white text-stone-700 text-xs font-mono font-medium hover:bg-stone-50 transition-colors shadow-sm">
+            ↺ 重新开始
+          </button>
+
+          <button id="btn-prev" class="px-2.5 py-1.5 rounded-lg border border-[#E5E4DC] bg-white text-stone-700 text-xs font-mono font-medium hover:bg-stone-50 transition-colors shadow-sm">
+            ◀ 上一步
+          </button>
+
+          <button id="btn-next" class="px-2.5 py-1.5 rounded-lg border border-[#E5E4DC] bg-white text-stone-700 text-xs font-mono font-medium hover:bg-stone-50 transition-colors shadow-sm">
+            下一步 ▶
+          </button>
+        </div>
+
+        <!-- 动画即时状态条 (简洁核心说明) -->
+        <div class="flex-1 min-w-[280px] bg-stone-50 border border-stone-200 rounded-lg px-3 py-1.5 flex items-center justify-between text-xs font-mono">
+          <div class="flex items-center gap-2">
+            <span class="w-2 h-2 rounded-full bg-red-500 animate-pulse" id="status-dot"></span>
+            <span class="font-bold text-stone-800" id="step-desc">
+              准备就绪：观察从主机 A 出发、经双交换机流转至主机 E 的全过程
+            </span>
+          </div>
+          <span class="text-stone-400 text-[11px] font-bold" id="step-badge">1 / 4</span>
+        </div>
+
+        <!-- 速率调节 -->
+        <div class="flex items-center gap-1 text-xs font-mono">
+          <button class="speed-btn px-2 py-1 rounded border border-[#E5E4DC] bg-white text-stone-700" data-speed="0.7">0.7x</button>
+          <button class="speed-btn active px-2 py-1 rounded border border-stone-900 bg-stone-900 text-white" data-speed="1.0">1.0x</button>
+          <button class="speed-btn px-2 py-1 rounded border border-[#E5E4DC] bg-white text-stone-700" data-speed="1.5">1.5x</button>
+        </div>
+
+      </div>
+
+    </section>
+
+  </main>
+
+  <!-- 极简页脚 -->
+  <footer class="border-t border-[#E5E4DC] py-2.5 px-6 text-center text-xs font-mono text-stone-400">
+    VLAN Principle & IEEE 802.1Q Animation Showcase · 计算机专业基础 408
+  </footer>
+
+  <!-- Custom JS -->
+  <script src="app.js"></script>
+</body>
+</html>

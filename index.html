@@ -1,0 +1,1095 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>可视化实验室</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Newsreader:ital,opsz,wght@0,6..72,500;0,6..72,600;1,6..72,400&display=swap">
+  <style>
+    :root {
+      --bg-page: #FAF9F5;
+      --border-main: #E5E4DC;
+      --border-subtle: #EFEFE9;
+    }
+    body {
+      background-color: var(--bg-page);
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, sans-serif;
+    }
+    .card-project {
+      background: #FFFFFF;
+      border: 1px solid #E5E4DC;
+      transition: all 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    .card-project:hover {
+      border-color: #A8A29E;
+      transform: translateY(-2px);
+      box-shadow: 0 10px 24px -4px rgba(0, 0, 0, 0.06);
+    }
+    .card-discipline {
+      background: #FFFFFF;
+      border: 1px solid #E5E4DC;
+      transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+      cursor: pointer;
+    }
+    .card-discipline:hover {
+      border-color: #78716C;
+      transform: translateY(-3px);
+      box-shadow: 0 12px 28px -6px rgba(0, 0, 0, 0.08);
+    }
+    .pill-btn {
+      transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    .pill-btn.active {
+      background: #1C1917;
+      color: #FFFFFF;
+      border-color: #1C1917;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+    }
+  </style>
+</head>
+<body class="min-h-screen text-stone-900 flex flex-col justify-between antialiased">
+
+  <!-- Header -->
+  <header class="border-b border-[#E5E4DC] bg-[#FAF9F5]/90 backdrop-blur sticky top-0 z-30 px-6 lg:px-12 py-4">
+    <div class="max-w-6xl mx-auto flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <a href="#hub" id="brand-link" class="w-8 h-8 rounded-lg bg-stone-900 text-white flex items-center justify-center font-mono font-bold text-xs hover:bg-stone-800 transition-colors">
+          VL
+        </a>
+        <h1 class="text-base font-semibold tracking-tight text-stone-900">
+          可视化实验室
+        </h1>
+      </div>
+
+      <!-- Quick Nav in Header -->
+      <div class="flex items-center gap-3">
+        <nav id="header-nav" class="hidden md:flex items-center gap-1.5 text-xs font-mono">
+          <button onclick="switchView('hub')" id="nav-hub" class="pill-btn active px-3 py-1.5 rounded-lg border border-transparent">
+            学科大厅
+          </button>
+          <button onclick="switchView('all')" id="nav-all" class="pill-btn px-3 py-1.5 rounded-lg border border-[#E5E4DC] text-stone-600 hover:text-stone-900 bg-white">
+            全部模块 (14)
+          </button>
+        </nav>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Container -->
+  <main class="flex-1 max-w-6xl w-full mx-auto px-6 lg:px-12 py-8">
+
+    <!-- ============================================================ -->
+    <!-- VIEW 1: 学科大厅 (DISCIPLINE HUB / 一级入口) -->
+    <!-- ============================================================ -->
+    <section id="view-hub" class="space-y-8">
+      <!-- Hub Hero Banner -->
+      <div class="flex items-center justify-between gap-4 pb-4 border-b border-[#E5E4DC]">
+        <h2 class="text-xl md:text-2xl font-bold tracking-tight text-stone-900">
+          选择学科进入专题演示
+        </h2>
+        <span class="text-xs font-mono text-stone-500 whitespace-nowrap">6 大学科门类 · 15 个独立系统</span>
+      </div>
+
+      <!-- Discipline Cards Grid (2x3 or 3x2 responsive) -->
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+
+        <!-- Discipline Card 1: Higher Mathematics (高等数学) -->
+        <div onclick="switchView('math')" class="card-discipline rounded-2xl p-6 flex flex-col justify-between gap-5 group relative overflow-hidden">
+          <div class="absolute top-0 right-0 w-28 h-28 bg-blue-50/60 rounded-full blur-2xl -mr-8 -mt-8 pointer-events-none"></div>
+
+          <div class="flex flex-col gap-4 relative z-10">
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-2.5">
+                <div class="w-9 h-9 rounded-xl bg-blue-600 text-white flex items-center justify-center font-serif text-base font-bold shadow-sm">
+                  ∫dx
+                </div>
+                <div>
+                  <h3 class="text-lg font-bold text-stone-900 group-hover:text-blue-600 transition-colors">
+                    高等数学
+                  </h3>
+                </div>
+              </div>
+              <span class="text-xs font-mono text-blue-600 font-semibold bg-blue-50 px-2 py-0.5 rounded border border-blue-200 whitespace-nowrap flex-shrink-0">
+                3 个模块
+              </span>
+            </div>
+
+            <!-- Module Names List -->
+            <div class="space-y-2 pt-1">
+              <div class="flex items-center gap-2 text-xs text-stone-800 font-medium py-1.5 px-2.5 rounded-lg bg-stone-50 border border-stone-200/80 group-hover:border-blue-200 transition-colors">
+                <span class="w-1.5 h-1.5 rounded-full bg-blue-500 flex-shrink-0"></span>
+                <span class="truncate">空间直线间距离与直线在平面上的投影</span>
+              </div>
+              <div class="flex items-center gap-2 text-xs text-stone-800 font-medium py-1.5 px-2.5 rounded-lg bg-stone-50 border border-stone-200/80 group-hover:border-blue-200 transition-colors">
+                <span class="w-1.5 h-1.5 rounded-full bg-blue-500 flex-shrink-0"></span>
+                <span class="truncate">旋转曲面与锥面方程求解几何直观</span>
+              </div>
+              <div class="flex items-center gap-2 text-xs text-stone-800 font-medium py-1.5 px-2.5 rounded-lg bg-stone-50 border border-stone-200/80 group-hover:border-blue-200 transition-colors">
+                <span class="w-1.5 h-1.5 rounded-full bg-blue-500 flex-shrink-0"></span>
+                <span class="truncate">柯西中值定理几何直观与交互可视化</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="pt-3.5 border-t border-[#ECEBE4] flex items-center justify-between font-mono text-xs text-stone-500 relative z-10">
+            <span class="text-stone-400">Higher Mathematics</span>
+            <span class="text-stone-900 font-semibold group-hover:text-blue-600 group-hover:translate-x-1 transition-all inline-flex items-center gap-1">
+              进入学科展厅 &rarr;
+            </span>
+          </div>
+        </div>
+
+        <!-- Discipline Card 2: Probability & Statistics (概率论与数理统计) -->
+        <div onclick="switchView('prob')" class="card-discipline rounded-2xl p-6 flex flex-col justify-between gap-5 group relative overflow-hidden">
+          <div class="absolute top-0 right-0 w-28 h-28 bg-emerald-50/60 rounded-full blur-2xl -mr-8 -mt-8 pointer-events-none"></div>
+
+          <div class="flex flex-col gap-4 relative z-10">
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-2.5">
+                <div class="w-9 h-9 rounded-xl bg-emerald-700 text-white flex items-center justify-center font-serif text-base font-bold shadow-sm">
+                  P(X)
+                </div>
+                <div>
+                  <h3 class="text-lg font-bold text-stone-900 group-hover:text-emerald-700 transition-colors">
+                    概率论与数理统计
+                  </h3>
+                </div>
+              </div>
+              <span class="text-xs font-mono text-emerald-600 font-semibold bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200 whitespace-nowrap flex-shrink-0">
+                2 个模块
+              </span>
+            </div>
+
+            <!-- Module Names List -->
+            <div class="space-y-2 pt-1">
+              <div class="flex items-center gap-2 text-xs text-stone-800 font-medium py-1.5 px-2.5 rounded-lg bg-stone-50 border border-stone-200/80 group-hover:border-emerald-200 transition-colors">
+                <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 flex-shrink-0"></span>
+                <span class="truncate">边缘概率密度的几何本质与切片面积直观</span>
+              </div>
+              <div class="flex items-center gap-2 text-xs text-stone-800 font-medium py-1.5 px-2.5 rounded-lg bg-stone-50 border border-stone-200/80 group-hover:border-emerald-200 transition-colors">
+                <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 flex-shrink-0"></span>
+                <span class="truncate">条件概率与条件密度的几何直观</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="pt-3.5 border-t border-[#ECEBE4] flex items-center justify-between font-mono text-xs text-stone-500 relative z-10">
+            <span class="text-stone-400">Probability & Statistics</span>
+            <span class="text-stone-900 font-semibold group-hover:text-emerald-700 group-hover:translate-x-1 transition-all inline-flex items-center gap-1">
+              进入学科展厅 &rarr;
+            </span>
+          </div>
+        </div>
+
+        <!-- Discipline Card 3: Data Structures (数据结构) -->
+        <div onclick="switchView('ds')" class="card-discipline rounded-2xl p-6 flex flex-col justify-between gap-5 group relative overflow-hidden">
+          <div class="absolute top-0 right-0 w-28 h-28 bg-amber-50/60 rounded-full blur-2xl -mr-8 -mt-8 pointer-events-none"></div>
+
+          <div class="flex flex-col gap-4 relative z-10">
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-2.5">
+                <div class="w-9 h-9 rounded-xl bg-amber-600 text-white flex items-center justify-center font-mono text-sm font-bold shadow-sm">
+                  DS
+                </div>
+                <div>
+                  <h3 class="text-lg font-bold text-stone-900 group-hover:text-amber-700 transition-colors">
+                    数据结构
+                  </h3>
+                </div>
+              </div>
+              <span class="text-xs font-mono text-amber-700 font-semibold bg-amber-50 px-2 py-0.5 rounded border border-amber-200 whitespace-nowrap flex-shrink-0">
+                1 个模块
+              </span>
+            </div>
+
+            <!-- Module Names List -->
+            <div class="space-y-2 pt-1">
+              <div class="flex items-center gap-2 text-xs text-stone-800 font-medium py-1.5 px-2.5 rounded-lg bg-stone-50 border border-stone-200/80 group-hover:border-amber-200 transition-colors">
+                <span class="w-1.5 h-1.5 rounded-full bg-amber-500 flex-shrink-0"></span>
+                <span class="truncate">置换-选择排序与最佳归并树可视化</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="pt-3.5 border-t border-[#ECEBE4] flex items-center justify-between font-mono text-xs text-stone-500 relative z-10">
+            <span class="text-stone-400">Data Structures</span>
+            <span class="text-stone-900 font-semibold group-hover:text-amber-700 group-hover:translate-x-1 transition-all inline-flex items-center gap-1">
+              进入学科展厅 &rarr;
+            </span>
+          </div>
+        </div>
+
+        <!-- Discipline Card 4: Computer Organization (计算机组成原理) -->
+        <div onclick="switchView('co')" class="card-discipline rounded-2xl p-6 flex flex-col justify-between gap-5 group relative overflow-hidden">
+          <div class="absolute top-0 right-0 w-28 h-28 bg-rose-50/60 rounded-full blur-2xl -mr-8 -mt-8 pointer-events-none"></div>
+
+          <div class="flex flex-col gap-4 relative z-10">
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-2.5">
+                <div class="w-9 h-9 rounded-xl bg-rose-600 text-white flex items-center justify-center font-mono text-xs font-bold shadow-sm">
+                  CPU
+                </div>
+                <div>
+                  <h3 class="text-lg font-bold text-stone-900 group-hover:text-rose-700 transition-colors">
+                    计算机组成原理
+                  </h3>
+                </div>
+              </div>
+              <span class="text-xs font-mono text-rose-700 font-semibold bg-rose-50 px-2 py-0.5 rounded border border-rose-200 whitespace-nowrap flex-shrink-0">
+                2 个模块
+              </span>
+            </div>
+
+            <!-- Module Names List -->
+            <div class="space-y-2 pt-1">
+              <div class="flex items-center gap-2 text-xs text-stone-800 font-medium py-1.5 px-2.5 rounded-lg bg-stone-50 border border-stone-200/80 group-hover:border-rose-200 transition-colors">
+                <span class="w-1.5 h-1.5 rounded-full bg-rose-500 flex-shrink-0"></span>
+                <span class="truncate">单总线 CPU 数据通路与微操作时钟演进</span>
+              </div>
+              <div class="flex items-center gap-2 text-xs text-stone-800 font-medium py-1.5 px-2.5 rounded-lg bg-stone-50 border border-stone-200/80 group-hover:border-rose-200 transition-colors">
+                <span class="w-1.5 h-1.5 rounded-full bg-rose-500 flex-shrink-0"></span>
+                <span class="truncate">顺序乘法电路与 [ACC, MQ] 移位机制</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="pt-3.5 border-t border-[#ECEBE4] flex items-center justify-between font-mono text-xs text-stone-500 relative z-10">
+            <span class="text-stone-400">Computer Organization</span>
+            <span class="text-stone-900 font-semibold group-hover:text-rose-700 group-hover:translate-x-1 transition-all inline-flex items-center gap-1">
+              进入学科展厅 &rarr;
+            </span>
+          </div>
+        </div>
+
+        <!-- Discipline Card 5: Operating Systems (计算机操作系统) -->
+        <div onclick="switchView('os')" class="card-discipline rounded-2xl p-6 flex flex-col justify-between gap-5 group relative overflow-hidden">
+          <div class="absolute top-0 right-0 w-28 h-28 bg-purple-50/60 rounded-full blur-2xl -mr-8 -mt-8 pointer-events-none"></div>
+
+          <div class="flex flex-col gap-4 relative z-10">
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-2.5">
+                <div class="w-9 h-9 rounded-xl bg-purple-600 text-white flex items-center justify-center font-mono text-xs font-bold shadow-sm">
+                  OS
+                </div>
+                <div>
+                  <h3 class="text-lg font-bold text-stone-900 group-hover:text-purple-700 transition-colors">
+                    计算机操作系统
+                  </h3>
+                </div>
+              </div>
+              <span class="text-xs font-mono text-purple-700 font-semibold bg-purple-50 px-2 py-0.5 rounded border border-purple-200 whitespace-nowrap flex-shrink-0">
+                3 个模块
+              </span>
+            </div>
+
+            <!-- Module Names List -->
+            <div class="space-y-2 pt-1">
+              <div class="flex items-center gap-2 text-xs text-stone-800 font-medium py-1.5 px-2.5 rounded-lg bg-stone-50 border border-stone-200/80 group-hover:border-purple-200 transition-colors">
+                <span class="w-1.5 h-1.5 rounded-full bg-purple-500 flex-shrink-0"></span>
+                <span class="truncate">操作系统引导流程可视化</span>
+              </div>
+              <div class="flex items-center gap-2 text-xs text-stone-800 font-medium py-1.5 px-2.5 rounded-lg bg-stone-50 border border-stone-200/80 group-hover:border-purple-200 transition-colors">
+                <span class="w-1.5 h-1.5 rounded-full bg-purple-500 flex-shrink-0"></span>
+                <span class="truncate">伙伴系统动态分区内存分配算法</span>
+              </div>
+              <div class="flex items-center gap-2 text-xs text-stone-800 font-medium py-1.5 px-2.5 rounded-lg bg-stone-50 border border-stone-200/80 group-hover:border-purple-200 transition-colors">
+                <span class="w-1.5 h-1.5 rounded-full bg-purple-500 flex-shrink-0"></span>
+                <span class="truncate">离散分配内存管理（分页/分段/段页式）</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="pt-3.5 border-t border-[#ECEBE4] flex items-center justify-between font-mono text-xs text-stone-500 relative z-10">
+            <span class="text-stone-400">Operating Systems</span>
+            <span class="text-stone-900 font-semibold group-hover:text-purple-700 group-hover:translate-x-1 transition-all inline-flex items-center gap-1">
+              进入学科展厅 &rarr;
+            </span>
+          </div>
+        </div>
+
+        <!-- Discipline Card 6: Computer Networks (计算机网络) -->
+        <div onclick="switchView('net')" class="card-discipline rounded-2xl p-6 flex flex-col justify-between gap-5 group relative overflow-hidden">
+          <div class="absolute top-0 right-0 w-28 h-28 bg-sky-50/60 rounded-full blur-2xl -mr-8 -mt-8 pointer-events-none"></div>
+
+          <div class="flex flex-col gap-4 relative z-10">
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-2.5">
+                <div class="w-9 h-9 rounded-xl bg-sky-600 text-white flex items-center justify-center font-mono text-xs font-bold shadow-sm">
+                  NET
+                </div>
+                <div>
+                  <h3 class="text-lg font-bold text-stone-900 group-hover:text-sky-700 transition-colors">
+                    计算机网络
+                  </h3>
+                </div>
+              </div>
+              <span class="text-xs font-mono text-sky-700 font-semibold bg-sky-50 px-2 py-0.5 rounded border border-sky-200 whitespace-nowrap flex-shrink-0">
+                4 个模块
+              </span>
+            </div>
+
+            <!-- Module Names List -->
+            <div class="space-y-2 pt-1">
+              <div class="flex items-center gap-2 text-xs text-stone-800 font-medium py-1.5 px-2.5 rounded-lg bg-stone-50 border border-stone-200/80 group-hover:border-sky-200 transition-colors">
+                <span class="w-1.5 h-1.5 rounded-full bg-sky-500 flex-shrink-0"></span>
+                <span class="truncate">回退N帧 (GBN) 滑动窗口协议工作机制</span>
+              </div>
+              <div class="flex items-center gap-2 text-xs text-stone-800 font-medium py-1.5 px-2.5 rounded-lg bg-stone-50 border border-stone-200/80 group-hover:border-sky-200 transition-colors">
+                <span class="w-1.5 h-1.5 rounded-full bg-sky-500 flex-shrink-0"></span>
+                <span class="truncate">选择重传 (SR) 滑动窗口协议工作机制</span>
+              </div>
+              <div class="flex items-center gap-2 text-xs text-stone-800 font-medium py-1.5 px-2.5 rounded-lg bg-stone-50 border border-stone-200/80 group-hover:border-sky-200 transition-colors">
+                <span class="w-1.5 h-1.5 rounded-full bg-sky-500 flex-shrink-0"></span>
+                <span class="truncate">以太网 VLAN 划分与 802.1Q 帧封装机制</span>
+              </div>
+              <div class="flex items-center gap-2 text-xs text-stone-800 font-medium py-1.5 px-2.5 rounded-lg bg-stone-50 border border-stone-200/80 group-hover:border-sky-200 transition-colors">
+                <span class="w-1.5 h-1.5 rounded-full bg-sky-500 flex-shrink-0"></span>
+                <span class="truncate">以太网交换机自学习与帧转发表机制</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="pt-3.5 border-t border-[#ECEBE4] flex items-center justify-between font-mono text-xs text-stone-500 relative z-10">
+            <span class="text-stone-400">Computer Networks</span>
+            <span class="text-stone-900 font-semibold group-hover:text-sky-700 group-hover:translate-x-1 transition-all inline-flex items-center gap-1">
+              进入学科展厅 &rarr;
+            </span>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Bottom Jump Links to All Projects & 408 Overall -->
+      <div class="pt-6 flex flex-wrap items-center justify-center gap-4 text-center border-t border-[#E5E4DC]">
+        <button onclick="switchView('all')" class="text-xs font-mono text-stone-500 hover:text-stone-900 transition-colors inline-flex items-center gap-1 py-1.5 px-3 rounded-lg hover:bg-stone-200/50">
+          <span>展开全部 15 个独立演示卡片</span>
+          <span>&darr;</span>
+        </button>
+        <span class="text-stone-300">|</span>
+        <button onclick="switchView('cs')" class="text-xs font-mono text-indigo-600 hover:text-indigo-900 transition-colors inline-flex items-center gap-1 py-1.5 px-3 rounded-lg hover:bg-indigo-50">
+          <span>计算机408统考全科综合展厅 (10 个模块)</span>
+          <span>&rarr;</span>
+        </button>
+      </div>
+    </section>
+
+    <!-- ============================================================ -->
+    <!-- VIEW 2: 学科专属展厅 (DISCIPLINE SHOWCASE / 二级演示列表) -->
+    <!-- ============================================================ -->
+    <section id="view-discipline" class="hidden space-y-6">
+
+      <!-- Breadcrumbs & Back Bar -->
+      <div class="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-[#E5E4DC]">
+        <div class="flex items-center gap-2 text-xs font-mono">
+          <button onclick="switchView('hub')" class="flex items-center gap-1 text-stone-500 hover:text-stone-900 transition-colors py-1 px-2 rounded hover:bg-stone-200/60 font-semibold">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path></svg>
+            <span>返回学科大厅</span>
+          </button>
+          <span class="text-stone-300">/</span>
+          <span id="breadcrumb-title" class="font-semibold text-stone-900">高等数学</span>
+        </div>
+
+        <!-- Discipline Switcher Pill Bar -->
+        <div class="flex flex-wrap items-center bg-[#EBEAE3] p-0.5 rounded-xl border border-[#DCDAD0] text-xs font-medium gap-0.5">
+          <button onclick="switchView('all')" id="btn-tab-all" class="pill-btn px-2.5 py-1 rounded-lg text-stone-600 hover:text-stone-900">
+            全部 (15)
+          </button>
+          <button onclick="switchView('math')" id="btn-tab-math" class="pill-btn px-2.5 py-1 rounded-lg text-stone-600 hover:text-stone-900">
+            高等数学 (3)
+          </button>
+          <button onclick="switchView('prob')" id="btn-tab-prob" class="pill-btn px-2.5 py-1 rounded-lg text-stone-600 hover:text-stone-900">
+            概率统计 (2)
+          </button>
+          <button onclick="switchView('ds')" id="btn-tab-ds" class="pill-btn px-2.5 py-1 rounded-lg text-stone-600 hover:text-stone-900">
+            数据结构 (1)
+          </button>
+          <button onclick="switchView('co')" id="btn-tab-co" class="pill-btn px-2.5 py-1 rounded-lg text-stone-600 hover:text-stone-900">
+            计组原理 (2)
+          </button>
+          <button onclick="switchView('os')" id="btn-tab-os" class="pill-btn px-2.5 py-1 rounded-lg text-stone-600 hover:text-stone-900">
+            操作系统 (3)
+          </button>
+          <button onclick="switchView('net')" id="btn-tab-net" class="pill-btn px-2.5 py-1 rounded-lg text-stone-600 hover:text-stone-900">
+            计算机网络 (4)
+          </button>
+          <button onclick="switchView('cs')" id="btn-tab-cs" class="pill-btn px-2.5 py-1 rounded-lg text-stone-600 hover:text-stone-900">
+            408全科 (10)
+          </button>
+        </div>
+      </div>
+
+      <!-- Discipline Header Info -->
+      <div id="discipline-header-card" class="p-5 rounded-2xl border bg-white flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+          <div class="flex items-center gap-2 mb-1">
+            <span id="discipline-badge" class="px-2 py-0.5 rounded text-[11px] font-mono font-semibold bg-blue-50 text-blue-700 border border-blue-200">
+              高等数学
+            </span>
+            <span id="discipline-count" class="text-xs font-mono text-stone-400">共 3 个独立演示模块</span>
+          </div>
+          <h2 id="discipline-title" class="text-xl font-bold tracking-tight text-stone-900">
+            高等数学
+          </h2>
+          <p id="discipline-desc" class="text-xs text-stone-600 mt-1 max-w-2xl leading-relaxed hidden"></p>
+        </div>
+        <button onclick="switchView('hub')" class="self-start md:self-auto text-xs font-mono text-stone-600 hover:text-stone-900 border border-stone-200 hover:border-stone-400 bg-stone-50 py-1.5 px-3 rounded-lg transition-colors flex items-center gap-1 shadow-sm">
+          <span>&larr; 返回学科大厅</span>
+        </button>
+      </div>
+
+      <!-- Cards Grid (Filtered Dynamically) -->
+      <div id="projects-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 pt-2">
+
+        <!-- ==================== HIGHER MATH CARDS ==================== -->
+
+        <!-- Card: Distance Between Lines -->
+        <a href="空间直线间距离/index.html" data-discipline="math" class="card-project rounded-2xl p-6 flex flex-col justify-between gap-6 group">
+          <div class="flex flex-col gap-3">
+            <div class="flex items-center justify-between">
+              <span class="px-2.5 py-1 rounded-md text-[11px] font-mono font-semibold bg-blue-50 text-blue-700 border border-blue-200">
+                高等数学
+              </span>
+              <span class="text-xs font-mono text-emerald-600 font-medium flex items-center gap-1">
+                <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
+                60fps 3D 拖拽
+              </span>
+            </div>
+
+            <h3 class="text-lg font-semibold text-stone-900 group-hover:text-blue-600 transition-colors">
+              空间直线间距离与直线在平面上的投影
+            </h3>
+
+            <p class="text-xs text-stone-600 leading-relaxed">
+              两直线位置关系（平行/相交/重合/异面）实时判别与距离计算，三层理解：公垂线段最小值定义、平行六面体高 d = V/S、过 L₁ 作 π ∥ L₂ 的降维平面法，及正交投影平面交线 L′ = π ∩ π′。
+            </p>
+          </div>
+
+          <div class="pt-4 border-t border-[#ECEBE4] flex items-center justify-between font-mono text-xs text-stone-500">
+            <span>d = |(P₂−P₁)·(s₁×s₂)| / |s₁×s₂|</span>
+            <span class="text-stone-900 font-medium group-hover:translate-x-1 transition-transform inline-flex items-center gap-1">
+              进入演示 &rarr;
+            </span>
+          </div>
+        </a>
+
+        <!-- Card: Surfaces of Revolution & Cones -->
+        <a href="旋转曲面方程求解/index.html" data-discipline="math" class="card-project rounded-2xl p-6 flex flex-col justify-between gap-6 group">
+          <div class="flex flex-col gap-3">
+            <div class="flex items-center justify-between">
+              <span class="px-2.5 py-1 rounded-md text-[11px] font-mono font-semibold bg-blue-50 text-blue-700 border border-blue-200">
+                高等数学
+              </span>
+              <span class="text-xs font-mono text-emerald-600 font-medium flex items-center gap-1">
+                <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
+                考研真题与锥面
+              </span>
+            </div>
+
+            <h3 class="text-lg font-semibold text-stone-900 group-hover:text-blue-600 transition-colors">
+              旋转曲面与锥面方程求解几何直观
+            </h3>
+
+            <p class="text-xs text-stone-600 leading-relaxed">
+              严格对照考点笔记：§8.1 母线非坐标面（单叶双曲面生成）、§8.2 斜轴旋转（考研数一真题：L₁ 绕 L₂ 生成二次圆锥面）以及 §9 锥面及其方程（顶点·母线·准线、开方正负号辨析与齐次性定理）。
+            </p>
+          </div>
+
+          <div class="pt-4 border-t border-[#ECEBE4] flex items-center justify-between font-mono text-xs text-stone-500">
+            <span>s·(M-M₁) = 0 ∩ |P₀M| = |P₀M₁|</span>
+            <span class="text-stone-900 font-medium group-hover:translate-x-1 transition-transform inline-flex items-center gap-1">
+              进入演示 &rarr;
+            </span>
+          </div>
+        </a>
+
+        <!-- Card: Cauchy's Mean Value Theorem -->
+        <a href="柯西中值定理几何理解/index.html" data-discipline="math" class="card-project rounded-2xl p-6 flex flex-col justify-between gap-6 group">
+          <div class="flex flex-col gap-3">
+            <div class="flex items-center justify-between">
+              <span class="px-2.5 py-1 rounded-md text-[11px] font-mono font-semibold bg-blue-50 text-blue-700 border border-blue-200">
+                高等数学
+              </span>
+              <span class="text-xs font-mono text-emerald-600 font-medium flex items-center gap-1">
+                <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
+                60fps 连续互动
+              </span>
+            </div>
+
+            <h3 class="text-lg font-semibold text-stone-900 group-hover:text-blue-600 transition-colors">
+              柯西中值定理几何直观与交互可视化
+            </h3>
+
+            <p class="text-xs text-stone-600 leading-relaxed">
+              平面参数曲线视角（X=g(t), Y=f(t)）：割线与切线平行性动态探索、一键捕捉中值点 ξ、罗尔辅助函数 F(t) 极值联动及微积分中值定理大一统谱系。
+            </p>
+          </div>
+
+          <div class="pt-4 border-t border-[#ECEBE4] flex items-center justify-between font-mono text-xs text-stone-500">
+            <span>[f(b)-f(a)]/[g(b)-g(a)] = f'(ξ)/g'(ξ)</span>
+            <span class="text-stone-900 font-medium group-hover:translate-x-1 transition-transform inline-flex items-center gap-1">
+              进入演示 &rarr;
+            </span>
+          </div>
+        </a>
+
+        <!-- ==================== PROBABILITY CARDS ==================== -->
+
+        <!-- Card: Marginal Probability Density -->
+        <a href="边缘概率密度的几何本质/index.html" data-discipline="prob" class="card-project rounded-2xl p-6 flex flex-col justify-between gap-6 group">
+          <div class="flex flex-col gap-3">
+            <div class="flex items-center justify-between">
+              <span class="px-2.5 py-1 rounded-md text-[11px] font-mono font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200">
+                概率论与数理统计
+              </span>
+              <span class="text-xs font-mono text-emerald-600 font-medium flex items-center gap-1">
+                <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
+                3D切片与投影
+              </span>
+            </div>
+
+            <h3 class="text-lg font-semibold text-stone-900 group-hover:text-emerald-700 transition-colors">
+              边缘概率密度的几何本质与切片面积直观
+            </h3>
+
+            <p class="text-xs text-stone-600 leading-relaxed">
+              基于祖暅原理 (Cavalieri's Principle)：三维联合密度曲面 z=f(x,y) 切片横截面面积 A(x₀) 严格等于边缘概率密度 f_X(x₀)。涵盖高斯山峰、三角形域均匀分布（考研经典）与斜坡分布，侧壁投影与条件分布归一化实时联动。
+            </p>
+          </div>
+
+          <div class="pt-4 border-t border-[#ECEBE4] flex items-center justify-between font-mono text-xs text-stone-500">
+            <span>f_X(x) = ∫ f(x,y)dy = A(x) · ∫A(x)dx=1</span>
+            <span class="text-stone-900 font-medium group-hover:translate-x-1 transition-transform inline-flex items-center gap-1">
+              进入演示 &rarr;
+            </span>
+          </div>
+        </a>
+
+        <!-- Card: Conditional Probability and PDF -->
+        <a href="条件概率与条件密度的几何直观/index.html" data-discipline="prob" class="card-project rounded-2xl p-6 flex flex-col justify-between gap-6 group">
+          <div class="flex flex-col gap-3">
+            <div class="flex items-center justify-between">
+              <span class="px-2.5 py-1 rounded-md text-[11px] font-mono font-semibold bg-blue-50 text-blue-800 border border-blue-200">
+                概率论与数理统计
+              </span>
+              <span class="text-xs font-mono text-blue-600 font-medium flex items-center gap-1">
+                <span class="w-2 h-2 rounded-full bg-blue-500"></span>
+                切片·归一化·回归线
+              </span>
+            </div>
+
+            <h3 class="text-lg font-semibold text-stone-900 group-hover:text-blue-700 transition-colors">
+              条件概率与条件概率密度的几何直观
+            </h3>
+
+            <p class="text-xs text-stone-600 leading-relaxed">
+              三维联合曲面截交切片与面积归一化拉伸（除以截面面积 A=f_Y 使总积分为1）；微元薄板 Δy 几何极限消去厚度解构零测度事件悖论；高斯曲面回归直线 E[X|Y] 滑动与方差收缩机制实时交互。
+            </p>
+          </div>
+
+          <div class="pt-4 border-t border-[#ECEBE4] flex items-center justify-between font-mono text-xs text-stone-500">
+            <span>f_{X|Y}(x|y₀) = f(x,y₀) / f_Y(y₀)</span>
+            <span class="text-stone-900 font-medium group-hover:translate-x-1 transition-transform inline-flex items-center gap-1">
+              进入演示 &rarr;
+            </span>
+          </div>
+        </a>
+
+        <!-- ==================== COMPUTER ORGANIZATION CARDS ==================== -->
+
+        <!-- Card: Single-Bus CPU Data Path -->
+        <a href="单总线CPU数据通路/index.html" data-discipline="co" class="card-project rounded-2xl p-6 flex flex-col justify-between gap-6 group">
+          <div class="flex flex-col gap-3">
+            <div class="flex items-center justify-between">
+              <span class="px-2.5 py-1 rounded-md text-[11px] font-mono font-semibold bg-rose-50 text-rose-700 border border-rose-200">
+                计算机组成原理
+              </span>
+              <span class="text-xs font-mono text-rose-600 font-medium flex items-center gap-1">
+                <span class="w-2 h-2 rounded-full bg-rose-500"></span>
+                60fps 动态数据流
+              </span>
+            </div>
+
+            <h3 class="text-lg font-semibold text-stone-900 group-hover:text-rose-700 transition-colors">
+              单总线 CPU 数据通路与微操作时钟演进
+            </h3>
+
+            <p class="text-xs text-stone-600 leading-relaxed">
+              内外总线物理隔离、PC专用自增 MUX、按字节编址主存、MAR/双向MDR中继、暂存器Y/Z破除单总线冲突及加法指令全周期微操作控制信号矩阵演进。
+            </p>
+          </div>
+
+          <div class="pt-4 border-t border-[#ECEBE4] flex items-center justify-between font-mono text-xs text-stone-500">
+            <span>(PC)→MAR, 1→R, (ACC)+(Y)→Z</span>
+            <span class="text-stone-900 font-medium group-hover:translate-x-1 transition-transform inline-flex items-center gap-1">
+              进入演示 &rarr;
+            </span>
+          </div>
+        </a>
+
+        <!-- Card: Sequential Multiplier Datapath -->
+        <a href="顺序乘法电路/index.html" data-discipline="co" class="card-project rounded-2xl p-6 flex flex-col justify-between gap-6 group">
+          <div class="flex flex-col gap-3">
+            <div class="flex items-center justify-between">
+              <span class="px-2.5 py-1 rounded-md text-[11px] font-mono font-semibold bg-rose-50 text-rose-700 border border-rose-200">
+                计算机组成原理
+              </span>
+              <span class="text-xs font-mono text-rose-600 font-medium flex items-center gap-1">
+                <span class="w-2 h-2 rounded-full bg-rose-500"></span>
+                移位与控制电路
+              </span>
+            </div>
+
+            <h3 class="text-lg font-semibold text-stone-900 group-hover:text-rose-700 transition-colors">
+              顺序乘法电路与 [ACC, MQ] 移位机制
+            </h3>
+
+            <p class="text-xs text-stone-600 leading-relaxed">
+              ACC/MQ 联合右移物理动效、MQ₀ 探针状态检测、步数计数器递减（C=4→0）、为什么联合右移（寄存器复用与位权等效对齐原理）直观演示。
+            </p>
+          </div>
+
+          <div class="pt-4 border-t border-[#ECEBE4] flex items-center justify-between font-mono text-xs text-stone-500">
+            <span>[ACC, MQ] >> 1, MQ0? ACC+X : ACC+0</span>
+            <span class="text-stone-900 font-medium group-hover:translate-x-1 transition-transform inline-flex items-center gap-1">
+              进入演示 &rarr;
+            </span>
+          </div>
+        </a>
+
+        <!-- ==================== OPERATING SYSTEMS CARDS ==================== -->
+
+        <!-- Card: OS Boot Chain -->
+        <a href="操作系统引导流程/index.html" data-discipline="os" class="card-project rounded-2xl p-6 flex flex-col justify-between gap-6 group">
+          <div class="flex flex-col gap-3">
+            <div class="flex items-center justify-between">
+              <span class="px-2.5 py-1 rounded-md text-[11px] font-mono font-semibold bg-purple-50 text-purple-700 border border-purple-200">
+                计算机操作系统
+              </span>
+              <span class="text-xs font-mono text-purple-600 font-medium flex items-center gap-1">
+                <span class="w-2 h-2 rounded-full bg-purple-500"></span>
+                GSAP 时间轴
+              </span>
+            </div>
+
+            <h3 class="text-lg font-semibold text-stone-900 group-hover:text-purple-700 transition-colors">
+              操作系统引导流程可视化
+            </h3>
+
+            <p class="text-xs text-stone-600 leading-relaxed">
+              从 ROM 中 BIOS 取指、INT 13H 读取磁盘引导扇区 MBR、扫描分区表定位活动分区、读入分区引导记录 DBR，到 OS 内核镜像调入主存高地址区的完整接力链路动画。
+            </p>
+          </div>
+
+          <div class="pt-4 border-t border-[#ECEBE4] flex items-center justify-between font-mono text-xs text-stone-500">
+            <span>ROM → MBR → DBR → Kernel @ 0x100000+</span>
+            <span class="text-stone-900 font-medium group-hover:translate-x-1 transition-transform inline-flex items-center gap-1">
+              进入演示 &rarr;
+            </span>
+          </div>
+        </a>
+
+        <!-- Card: Buddy System Dynamic Partitioning -->
+        <a href="伙伴系统动态分区/index.html" data-discipline="os" class="card-project rounded-2xl p-6 flex flex-col justify-between gap-6 group">
+          <div class="flex flex-col gap-3">
+            <div class="flex items-center justify-between">
+              <span class="px-2.5 py-1 rounded-md text-[11px] font-mono font-semibold bg-purple-50 text-purple-700 border border-purple-200">
+                计算机操作系统
+              </span>
+              <span class="text-xs font-mono text-purple-600 font-medium flex items-center gap-1">
+                <span class="w-2 h-2 rounded-full bg-purple-500"></span>
+                GSAP 动态切分与伙伴链表
+              </span>
+            </div>
+
+            <h3 class="text-lg font-semibold text-stone-900 group-hover:text-purple-700 transition-colors">
+              伙伴系统动态分区内存分配算法
+            </h3>
+
+            <p class="text-xs text-stone-600 leading-relaxed">
+              二叉树折半切分与伙伴块生成、空闲双向链表数组动态迁移、进程等额/非整幂申请占用、内部碎片分析与伙伴地址异或合并机制。
+            </p>
+          </div>
+
+          <div class="pt-4 border-t border-[#ECEBE4] flex items-center justify-between font-mono text-xs text-stone-500">
+            <span>Buddy = A ⊕ 2^k · 1024K → 512K → 256K → 128K</span>
+            <span class="text-stone-900 font-medium group-hover:translate-x-1 transition-transform inline-flex items-center gap-1">
+              进入演示 &rarr;
+            </span>
+          </div>
+        </a>
+
+        <!-- Card: Discrete Memory Allocation (Paging, Segmentation, Segmented Paging) -->
+        <a href="离散分配内存管理/index.html" data-discipline="os" class="card-project rounded-2xl p-6 flex flex-col justify-between gap-6 group">
+          <div class="flex flex-col gap-3">
+            <div class="flex items-center justify-between">
+              <span class="px-2.5 py-1 rounded-md text-[11px] font-mono font-semibold bg-purple-50 text-purple-700 border border-purple-200">
+                计算机操作系统
+              </span>
+              <span class="text-xs font-mono text-purple-600 font-medium flex items-center gap-1">
+                <span class="w-2 h-2 rounded-full bg-purple-500"></span>
+                GSAP 动态映射与双重高亮
+              </span>
+            </div>
+
+            <h3 class="text-lg font-semibold text-stone-900 group-hover:text-purple-700 transition-colors">
+              离散分配内存管理动态演示
+            </h3>
+
+            <p class="text-xs text-stone-600 leading-relaxed">
+              分页、分段与段页式三次匹配动画演进：主存高地址内核区页表/段表（标注隐藏页号/段号）、逻辑号寻址匹配、表项与物理主存同步脉冲高亮及进程实体装入。
+            </p>
+          </div>
+
+          <div class="pt-4 border-t border-[#ECEBE4] flex items-center justify-between font-mono text-xs text-stone-500">
+            <span>页表/段表[隐藏号] → 同步高亮 → 物理装入</span>
+            <span class="text-stone-900 font-medium group-hover:translate-x-1 transition-transform inline-flex items-center gap-1">
+              进入演示 &rarr;
+            </span>
+          </div>
+        </a>
+
+        <!-- ==================== DATA STRUCTURES CARDS ==================== -->
+
+        <!-- Card: Replacement Selection & Optimal Merge Tree -->
+        <a href="置换-选择排序与最佳归并树/index.html" data-discipline="ds" class="card-project rounded-2xl p-6 flex flex-col justify-between gap-6 group">
+          <div class="flex flex-col gap-3">
+            <div class="flex items-center justify-between">
+              <span class="px-2.5 py-1 rounded-md text-[11px] font-mono font-semibold bg-amber-50 text-amber-800 border border-amber-200">
+                数据结构
+              </span>
+              <span class="text-xs font-mono text-amber-600 font-medium flex items-center gap-1">
+                <span class="w-2 h-2 rounded-full bg-amber-500"></span>
+                败者树与哈夫曼树
+              </span>
+            </div>
+
+            <h3 class="text-lg font-semibold text-stone-900 group-hover:text-amber-700 transition-colors">
+              置换-选择排序与最佳归并树可视化
+            </h3>
+
+            <p class="text-xs text-stone-600 leading-relaxed">
+              败者树最小堆运行机制、初始归并段动态生成、哈夫曼树构造、虚段（Dummy Run）补齐与 WPL 读写 I/O 成本分析。
+            </p>
+          </div>
+
+          <div class="pt-4 border-t border-[#ECEBE4] flex items-center justify-between font-mono text-xs text-stone-500">
+            <span>External Sorting & Huffman Tree</span>
+            <span class="text-stone-900 font-medium group-hover:translate-x-1 transition-transform inline-flex items-center gap-1">
+              进入演示 &rarr;
+            </span>
+          </div>
+        </a>
+
+        <!-- ==================== COMPUTER NETWORKS CARDS ==================== -->
+
+        <!-- Card: GBN Protocol Visualizer -->
+        <a href="回退N帧协议/index.html" data-discipline="net" class="card-project rounded-2xl p-6 flex flex-col justify-between gap-6 group">
+          <div class="flex flex-col gap-3">
+            <div class="flex items-center justify-between">
+              <span class="px-2.5 py-1 rounded-md text-[11px] font-mono font-semibold bg-sky-50 text-sky-700 border border-sky-200">
+                计算机网络
+              </span>
+              <span class="text-xs font-mono text-sky-600 font-medium flex items-center gap-1">
+                <span class="w-2 h-2 rounded-full bg-sky-500"></span>
+                60fps 滑动窗口与梯形图
+              </span>
+            </div>
+
+            <h3 class="text-lg font-semibold text-stone-900 group-hover:text-sky-700 transition-colors">
+              回退N帧 (GBN) 滑动窗口协议工作机制
+            </h3>
+
+            <p class="text-xs text-stone-600 leading-relaxed">
+              发送窗口 $W_T=4$ 与严格接收窗口 $W_R=1$ 动态滑动；涵盖未丢失帧流水线、数据帧丢失回退重传、ACK丢失累积吸收、重复帧丢弃与补偿ACK回复等全场景，配有时空交互梯形图与 408 核心考点解析。
+            </p>
+          </div>
+
+          <div class="pt-4 border-t border-[#ECEBE4] flex items-center justify-between font-mono text-xs text-stone-500">
+            <span>1 ≤ W_T ≤ 2^n - 1 · Cumulative ACK</span>
+            <span class="text-stone-900 font-medium group-hover:translate-x-1 transition-transform inline-flex items-center gap-1">
+              进入演示 &rarr;
+            </span>
+          </div>
+        </a>
+
+        <!-- Card: SR Protocol Visualizer -->
+        <a href="选择重传协议/index.html" data-discipline="net" class="card-project rounded-2xl p-6 flex flex-col justify-between gap-6 group">
+          <div class="flex flex-col gap-3">
+            <div class="flex items-center justify-between">
+              <span class="px-2.5 py-1 rounded-md text-[11px] font-mono font-semibold bg-sky-50 text-sky-700 border border-sky-200">
+                计算机网络
+              </span>
+              <span class="text-xs font-mono text-sky-600 font-medium flex items-center gap-1">
+                <span class="w-2 h-2 rounded-full bg-sky-500"></span>
+                60fps 乱序缓存与独立定时器
+              </span>
+            </div>
+
+            <h3 class="text-lg font-semibold text-stone-900 group-hover:text-sky-700 transition-colors">
+              选择重传 (SR) 滑动窗口协议工作机制
+            </h3>
+
+            <p class="text-xs text-stone-600 leading-relaxed">
+              发送窗口 $W_T=4$ 与接收窗口 $W_R=4$（满足 $W_T+W_R \le 2^n$）；聚焦呈现连续突发流水线收发、丢包演练（含单帧丢失与不连续双帧丢失）以及数据帧出错丢弃与 NAK 快速重传，深度剖析接收方乱序缓存、基序号填洞批量级联交付及每帧独立定时器机制，配有时空交互梯形图与 408 核心考点解析。
+            </p>
+          </div>
+
+          <div class="pt-4 border-t border-[#ECEBE4] flex items-center justify-between font-mono text-xs text-stone-500">
+            <span>W_T + W_R ≤ 2^n · ACK / NAK · Buffer</span>
+            <span class="text-stone-900 font-medium group-hover:translate-x-1 transition-transform inline-flex items-center gap-1">
+              进入演示 &rarr;
+            </span>
+          </div>
+        </a>
+
+        <!-- Card: VLAN & 802.1Q Protocol Visualizer -->
+        <a href="以太网VLAN与802.1Q帧/index.html" data-discipline="net" class="card-project rounded-2xl p-6 flex flex-col justify-between gap-6 group">
+          <div class="flex flex-col gap-3">
+            <div class="flex items-center justify-between">
+              <span class="px-2.5 py-1 rounded-md text-[11px] font-mono font-semibold bg-sky-50 text-sky-700 border border-sky-200">
+                计算机网络
+              </span>
+              <span class="text-xs font-mono text-sky-600 font-medium flex items-center gap-1">
+                <span class="w-2 h-2 rounded-full bg-sky-500"></span>
+                60fps 双交换机与802.1Q转发
+              </span>
+            </div>
+
+            <h3 class="text-lg font-semibold text-stone-900 group-hover:text-sky-700 transition-colors">
+              以太网 VLAN 划分与 802.1Q 帧封装机制
+            </h3>
+
+            <p class="text-xs text-stone-600 leading-relaxed">
+              基于经典双交换机拓扑与 VID 端口映射，全景呈现 802.1Q 帧格式（TPID、TCI、VID、1518B &rarr; 1522B 演进及 42B/46B 最小载荷推导）；动态演示主机 A 发送标准以太网帧（红色方块）至 E、同 VLAN 本地广播、跨 VLAN 隔离剪裁（❌ 阻断）以及跨交换机 Trunk 链路 802.1Q 打标中继（绿色方块）与出向标签剥离全流程。
+            </p>
+          </div>
+
+          <div class="pt-4 border-t border-[#ECEBE4] flex items-center justify-between font-mono text-xs text-stone-500">
+            <span>IEEE 802.1Q · Access (Untag) · Trunk (Tag) · VID</span>
+            <span class="text-stone-900 font-medium group-hover:translate-x-1 transition-transform inline-flex items-center gap-1">
+              进入演示 &rarr;
+            </span>
+          </div>
+        </a>
+
+        <!-- Card: Ethernet Switch Self-Learning -->
+        <a href="以太网交换机自学习/index.html" data-discipline="net" class="card-project rounded-2xl p-6 flex flex-col justify-between gap-6 group">
+          <div class="flex flex-col gap-3">
+            <div class="flex items-center justify-between">
+              <span class="px-2.5 py-1 rounded-md text-[11px] font-mono font-semibold bg-sky-50 text-sky-700 border border-sky-200">
+                计算机网络
+              </span>
+              <span class="text-xs font-mono text-sky-600 font-medium flex items-center gap-1">
+                <span class="w-2 h-2 rounded-full bg-sky-500"></span>
+                60fps 自学习与泛洪单播对比
+              </span>
+            </div>
+
+            <h3 class="text-lg font-semibold text-stone-900 group-hover:text-sky-700 transition-colors">
+              以太网交换机自学习与帧转发表机制
+            </h3>
+
+            <p class="text-xs text-stone-600 leading-relaxed">
+              聚焦 408 核心考点“进门看源 MAC 学习端口，出门看目的 MAC 选端口”，内标 4 个物理接口与 CAM 转发表；深度复现从空表到自学习登记、未知单播盲目泛洪（广播扩散与非目的主机硬件丢弃）、查表命中精准单播以及表项动态老化的 3 次经典连续演进。
+            </p>
+          </div>
+
+          <div class="pt-4 border-t border-[#ECEBE4] flex items-center justify-between font-mono text-xs text-stone-500">
+            <span>CAM 表 · 端口映射 · 泛洪 vs 广播 · 冲突域隔离</span>
+            <span class="text-stone-900 font-medium group-hover:translate-x-1 transition-transform inline-flex items-center gap-1">
+              进入演示 &rarr;
+            </span>
+          </div>
+        </a>
+
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Footer -->
+  <footer class="border-t border-[#E5E4DC] py-5 px-6 text-center text-xs font-mono text-stone-400">
+    Interactive Visualizer Showcase · High Taste Minimalist Design · 学科层级架构
+  </footer>
+
+  <!-- Navigation & Filtering Logic -->
+  <script>
+    const disciplineMeta = {
+      math: {
+        title: '高等数学',
+        badge: '高等数学',
+        badgeColor: 'bg-blue-50 text-blue-700 border-blue-200',
+        count: '共 3 个独立演示模块',
+        desc: ''
+      },
+      prob: {
+        title: '概率论与数理统计',
+        badge: '概率论与数理统计',
+        badgeColor: 'bg-emerald-50 text-emerald-800 border-emerald-200',
+        count: '共 2 个独立演示模块',
+        desc: ''
+      },
+      ds: {
+        title: '数据结构',
+        badge: '数据结构',
+        badgeColor: 'bg-amber-50 text-amber-800 border-amber-200',
+        count: '共 1 个独立演示模块',
+        desc: ''
+      },
+      co: {
+        title: '计算机组成原理',
+        badge: '计算机组成原理',
+        badgeColor: 'bg-rose-50 text-rose-800 border-rose-200',
+        count: '共 2 个独立演示模块',
+        desc: ''
+      },
+      os: {
+        title: '计算机操作系统',
+        badge: '计算机操作系统',
+        badgeColor: 'bg-purple-50 text-purple-800 border-purple-200',
+        count: '共 3 个独立演示模块',
+        desc: ''
+      },
+      net: {
+        title: '计算机网络',
+        badge: '计算机网络',
+        badgeColor: 'bg-sky-50 text-sky-800 border-sky-200',
+        count: '共 4 个独立演示模块',
+        desc: ''
+      },
+      cs: {
+        title: '计算机专业基础 (408)',
+        badge: '408 全科综合',
+        badgeColor: 'bg-indigo-50 text-indigo-700 border-indigo-200',
+        count: '共 10 个独立演示模块',
+        desc: ''
+      },
+      all: {
+        title: '全部学科演示模块清单',
+        badge: '全学科总览',
+        badgeColor: 'bg-stone-100 text-stone-800 border-stone-300',
+        count: '共 15 个独立演示模块',
+        desc: ''
+      }
+    };
+
+    function switchView(target) {
+      const viewHub = document.getElementById('view-hub');
+      const viewDiscipline = document.getElementById('view-discipline');
+
+      const navHub = document.getElementById('nav-hub');
+      const navAll = document.getElementById('nav-all');
+
+      if (target === 'hub') {
+        // Show Hub
+        viewHub.classList.remove('hidden');
+        viewDiscipline.classList.add('hidden');
+        window.location.hash = 'hub';
+
+        navHub.classList.add('active');
+        navHub.classList.remove('text-stone-600', 'bg-white');
+        navAll.classList.remove('active');
+        navAll.classList.add('text-stone-600', 'bg-white');
+
+        gsap.fromTo(viewHub, { opacity: 0, y: 10 }, { opacity: 1, y: 0, duration: 0.25, ease: 'power2.out' });
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+        return;
+      }
+
+      // Show Discipline View
+      viewHub.classList.add('hidden');
+      viewDiscipline.classList.remove('hidden');
+      window.location.hash = target;
+
+      navHub.classList.remove('active');
+      navHub.classList.add('text-stone-600', 'bg-white');
+      if (target === 'all') {
+        navAll.classList.add('active');
+        navAll.classList.remove('text-stone-600', 'bg-white');
+      } else {
+        navAll.classList.remove('active');
+        navAll.classList.add('text-stone-600', 'bg-white');
+      }
+
+      // Update Tabs in discipline header
+      const tabs = ['all', 'math', 'prob', 'ds', 'co', 'os', 'net', 'cs'];
+      tabs.forEach(t => {
+        const btn = document.getElementById(`btn-tab-${t}`);
+        if (btn) {
+          if (t === target) {
+            btn.classList.add('active');
+            btn.classList.remove('text-stone-600');
+          } else {
+            btn.classList.remove('active');
+            btn.classList.add('text-stone-600');
+          }
+        }
+      });
+
+      // Update Meta
+      const meta = disciplineMeta[target] || disciplineMeta.all;
+      document.getElementById('breadcrumb-title').innerText = meta.title;
+      document.getElementById('discipline-title').innerText = meta.title;
+      document.getElementById('discipline-count').innerText = meta.count;
+
+      const descEl = document.getElementById('discipline-desc');
+      if (meta.desc) {
+        descEl.innerText = meta.desc;
+        descEl.classList.remove('hidden');
+      } else {
+        descEl.innerText = '';
+        descEl.classList.add('hidden');
+      }
+
+      const badge = document.getElementById('discipline-badge');
+      badge.innerText = meta.badge;
+      badge.className = `px-2 py-0.5 rounded text-[11px] font-mono font-semibold border ${meta.badgeColor}`;
+
+      // Filter Cards
+      const csSubs = ['ds', 'co', 'os', 'net'];
+      const cards = document.querySelectorAll('#projects-grid > a');
+      let visibleCount = 0;
+      cards.forEach(card => {
+        const d = card.getAttribute('data-discipline');
+        if (target === 'all' || d === target || (target === 'cs' && csSubs.includes(d))) {
+          card.classList.remove('hidden');
+          visibleCount++;
+        } else {
+          card.classList.add('hidden');
+        }
+      });
+
+      // Smooth Entrance Animation
+      gsap.fromTo('#projects-grid > a:not(.hidden)',
+        { opacity: 0, y: 15 },
+        { opacity: 1, y: 0, duration: 0.3, stagger: 0.05, ease: 'power2.out' }
+      );
+
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    const validDisciplineHashes = ['math', 'prob', 'ds', 'co', 'os', 'net', 'cs', 'all'];
+
+    // Handle initial hash on page load
+    window.addEventListener('DOMContentLoaded', () => {
+      const hash = window.location.hash.replace('#', '');
+      if (validDisciplineHashes.includes(hash)) {
+        switchView(hash);
+      } else {
+        switchView('hub');
+      }
+    });
+
+    window.addEventListener('hashchange', () => {
+      const hash = window.location.hash.replace('#', '');
+      if (validDisciplineHashes.includes(hash)) {
+        switchView(hash);
+      } else if (hash === 'hub' || !hash) {
+        switchView('hub');
+      }
+    });
+  </script>
+</body>
+</html>

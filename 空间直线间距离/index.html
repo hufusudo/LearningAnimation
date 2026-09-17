@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>空间直线间距离与直线投影 | Visualizer Lab</title>
+
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['-apple-system', 'BlinkMacSystemFont', 'SF Pro Display', 'Segoe UI', 'Roboto', 'sans-serif'],
+            serif: ['Newsreader', 'Georgia', 'serif'],
+            mono: ['JetBrains Mono', 'Fira Code', 'SF Mono', 'monospace']
+          },
+          colors: {
+            stone: {
+              50: '#FAF9F5', 100: '#F4F3EE', 200: '#E5E4DC', 300: '#D6D3CD', 400: '#A8A29E',
+              500: '#78716C', 600: '#57534E', 700: '#44403C', 800: '#292524', 900: '#1C1917'
+            }
+          }
+        }
+      }
+    }
+  </script>
+
+  <!-- Three.js & OrbitControls -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+
+  <!-- GSAP -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+
+  <!-- KaTeX -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="h-screen flex flex-col bg-[#FAF9F5] text-stone-900 selection:bg-amber-100 selection:text-amber-900 overflow-hidden">
+
+  <!-- ===== Header ===== -->
+  <header class="h-14 flex-shrink-0 bg-[#FAF9F5]/90 backdrop-blur border-b border-[#E5E4DC] px-4 lg:px-6 flex items-center justify-between gap-3 z-30">
+    <div class="flex items-center gap-3 min-w-0">
+      <a href="../index.html" class="flex items-center gap-1.5 text-xs font-mono text-stone-500 hover:text-stone-900 transition-colors py-1 px-2 rounded-md hover:bg-stone-200/60">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path></svg>
+        <span>展厅门户</span>
+      </a>
+      <div class="h-4 w-[1px] bg-stone-300"></div>
+      <div class="w-7 h-7 rounded-lg bg-stone-900 text-white flex items-center justify-center font-mono font-bold text-[10px]">L₁L₂</div>
+      <h1 class="text-sm font-semibold tracking-tight text-stone-900 truncate">
+        空间直线间距离 · 直线在平面上的投影
+        <span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-amber-100/70 text-amber-800 border border-amber-200">空间解析几何</span>
+      </h1>
+    </div>
+
+    <!-- Module Tabs -->
+    <div class="flex items-center bg-[#EBEAE3] p-0.5 rounded-xl border border-[#DCDAD0] text-xs font-medium overflow-x-auto">
+      <button id="tab-module-A" class="tab-btn active px-3 py-1.5 rounded-lg flex items-center gap-1.5">
+        <span class="w-2 h-2 rounded-full bg-blue-500"></span><span>① 两直线间的距离</span>
+      </button>
+      <button id="tab-module-B" class="tab-btn px-3 py-1.5 rounded-lg flex items-center gap-1.5 text-stone-600 hover:text-stone-900">
+        <span class="w-2 h-2 rounded-full bg-emerald-500"></span><span>② 直线在平面上的投影</span>
+      </button>
+    </div>
+
+    <div class="flex items-center gap-2">
+      <button id="btn-reset-cam" title="重置视角" class="hidden md:flex px-2.5 py-1.5 rounded-lg border border-[#E5E4DC] hover:border-stone-400 bg-white text-xs font-mono text-stone-600 hover:text-stone-900 transition-colors items-center gap-1 shadow-sm">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+        <span>重置视角</span>
+      </button>
+      <button id="btn-toggle-explain" class="lg:hidden px-2.5 py-1.5 rounded-lg border border-[#E5E4DC] bg-white text-xs font-medium text-stone-700">笔记看板</button>
+    </div>
+  </header>
+
+  <main class="flex-1 flex flex-col lg:flex-row min-h-0 overflow-hidden relative">
+
+    <!-- ===== 3D Canvas ===== -->
+    <section class="flex-1 relative flex flex-col min-h-0 overflow-hidden">
+      <div id="canvas-container" class="flex-1 w-full h-full cursor-grab active:cursor-grabbing"></div>
+
+      <!-- Top-left HUD -->
+      <div class="absolute top-3 left-3 pointer-events-none z-10 max-w-[19rem] w-[19rem]">
+        <div class="editorial-card p-3 pointer-events-auto bg-white/95 backdrop-blur shadow-sm">
+          <div class="flex items-center justify-between gap-2 mb-1.5">
+            <span id="hud-badge" class="subtle-badge bg-blue-50 text-blue-700 border-blue-200">异面直线</span>
+            <span id="hud-subbadge" class="text-[11px] font-mono text-stone-400">空间位置关系</span>
+          </div>
+          <div id="hud-body" class="space-y-0.5"></div>
+        </div>
+      </div>
+
+      <!-- Top-right layer toggles -->
+      <div class="absolute top-3 right-3 z-10 pointer-events-none max-w-[22rem]">
+        <div id="layers-A" class="editorial-card px-3 py-2 pointer-events-auto bg-white/95 backdrop-blur shadow-sm flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs">
+          <span class="text-stone-400 font-mono text-[11px]">几何图层:</span>
+          <label class="flex items-center gap-1.5 cursor-pointer select-none text-stone-700 hover:text-stone-900">
+            <input type="checkbox" data-layer="a-common" checked class="rounded border-stone-300 text-rose-600 focus:ring-0">
+            <span class="flex items-center gap-1"><span class="legend-dot bg-red-600"></span>公垂线段</span>
+          </label>
+          <label class="flex items-center gap-1.5 cursor-pointer select-none text-stone-700 hover:text-stone-900">
+            <input type="checkbox" data-layer="a-box" checked class="rounded border-stone-300 text-indigo-600 focus:ring-0">
+            <span class="flex items-center gap-1"><span class="legend-dot bg-indigo-500"></span>平行六面体</span>
+          </label>
+          <label class="flex items-center gap-1.5 cursor-pointer select-none text-stone-700 hover:text-stone-900">
+            <input type="checkbox" data-layer="a-plane" checked class="rounded border-stone-300 text-teal-600 focus:ring-0">
+            <span class="flex items-center gap-1"><span class="legend-dot bg-teal-600"></span>过 L₁ ∥ L₂ 平面</span>
+          </label>
+          <label class="flex items-center gap-1.5 cursor-pointer select-none text-stone-700 hover:text-stone-900">
+            <input type="checkbox" data-layer="a-points" checked class="rounded border-stone-300 text-slate-600 focus:ring-0">
+            <span class="flex items-center gap-1"><span class="legend-dot bg-slate-500"></span>动点 A、B</span>
+          </label>
+        </div>
+
+        <div id="layers-B" class="hidden editorial-card px-3 py-2 pointer-events-auto bg-white/95 backdrop-blur shadow-sm flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs">
+          <span class="text-stone-400 font-mono text-[11px]">几何图层:</span>
+          <label class="flex items-center gap-1.5 cursor-pointer select-none text-stone-700 hover:text-stone-900">
+            <input type="checkbox" data-layer="b-projplane" checked class="rounded border-stone-300 text-amber-600 focus:ring-0">
+            <span class="flex items-center gap-1"><span class="legend-dot bg-amber-600"></span>投影平面 π′</span>
+          </label>
+          <label class="flex items-center gap-1.5 cursor-pointer select-none text-stone-700 hover:text-stone-900">
+            <input type="checkbox" data-layer="b-drops" checked class="rounded border-stone-300 text-slate-600 focus:ring-0">
+            <span class="flex items-center gap-1"><span class="legend-dot bg-slate-500"></span>投影线 (⊥π)</span>
+          </label>
+          <label class="flex items-center gap-1.5 cursor-pointer select-none text-stone-700 hover:text-stone-900">
+            <input type="checkbox" data-layer="b-projline" checked class="rounded border-stone-300 text-emerald-600 focus:ring-0">
+            <span class="flex items-center gap-1"><span class="legend-dot bg-emerald-600"></span>投影直线 L′</span>
+          </label>
+          <label class="flex items-center gap-1.5 cursor-pointer select-none text-stone-700 hover:text-stone-900">
+            <input type="checkbox" data-layer="b-plane" checked class="rounded border-stone-300 text-teal-600 focus:ring-0">
+            <span class="flex items-center gap-1"><span class="legend-dot bg-teal-600"></span>平面 π 网格</span>
+          </label>
+        </div>
+      </div>
+
+      <!-- Bottom control bar -->
+      <div class="absolute bottom-4 left-1/2 -translate-x-1/2 z-10 w-[95%] max-w-3xl">
+        <div class="editorial-card px-4 py-3 bg-white/95 backdrop-blur shadow-md flex flex-col gap-2.5">
+
+          <!-- ===== Module A controls ===== -->
+          <div id="controls-A" class="flex flex-col gap-2.5">
+            <div class="flex items-center justify-between gap-2 flex-wrap">
+              <div class="flex items-center gap-1.5">
+                <span class="text-[11px] font-mono text-stone-400 mr-1">位置关系:</span>
+                <button data-case-a="skew"       class="chip-btn active px-2.5 py-1 rounded-lg border border-stone-200 bg-white text-xs font-medium">异面</button>
+                <button data-case-a="parallel"   class="chip-btn px-2.5 py-1 rounded-lg border border-stone-200 bg-white text-xs font-medium">平行</button>
+                <button data-case-a="intersect"  class="chip-btn px-2.5 py-1 rounded-lg border border-stone-200 bg-white text-xs font-medium">相交</button>
+                <button data-case-a="coincident" class="chip-btn px-2.5 py-1 rounded-lg border border-stone-200 bg-white text-xs font-medium">重合</button>
+              </div>
+              <div class="flex items-center gap-1.5">
+                <span class="text-[11px] font-mono text-stone-400 mr-1">理解方式:</span>
+                <button data-mode-a="common" class="chip-btn active px-2.5 py-1 rounded-lg border border-stone-200 bg-white text-xs font-medium">公垂线 d</button>
+                <button data-mode-a="box"    class="chip-btn px-2.5 py-1 rounded-lg border border-stone-200 bg-white text-xs font-medium">六面体 V/S</button>
+                <button data-mode-a="plane"  class="chip-btn px-2.5 py-1 rounded-lg border border-stone-200 bg-white text-xs font-medium">平面法</button>
+              </div>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 items-center">
+              <div class="flex flex-col gap-1">
+                <div class="flex items-center justify-between text-xs">
+                  <span class="text-stone-600 font-medium flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-blue-600"></span>L₁ 动点 A 参数 $t$</span>
+                  <span id="val-ta" class="font-mono text-stone-700 font-semibold">0.00</span>
+                </div>
+                <input id="slider-ta" type="range" min="-5" max="5" step="0.02" value="0" class="cursor-pointer">
+              </div>
+              <div class="flex flex-col gap-1">
+                <div class="flex items-center justify-between text-xs">
+                  <span class="text-stone-600 font-medium flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-rose-600"></span>L₂ 动点 B 参数 $u$</span>
+                  <span id="val-ub" class="font-mono text-stone-700 font-semibold">0.00</span>
+                </div>
+                <input id="slider-ub" type="range" min="-5" max="5" step="0.02" value="0" class="cursor-pointer">
+              </div>
+            </div>
+          </div>
+
+          <!-- ===== Module B controls ===== -->
+          <div id="controls-B" class="hidden flex-col gap-2.5">
+            <div class="flex items-center justify-between gap-2 flex-wrap">
+              <div class="flex items-center gap-1.5">
+                <span class="text-[11px] font-mono text-stone-400 mr-1">典型位置:</span>
+                <button data-case-b="oblique"    class="chip-btn active px-2.5 py-1 rounded-lg border border-stone-200 bg-white text-xs font-medium">斜交</button>
+                <button data-case-b="parallel"   class="chip-btn px-2.5 py-1 rounded-lg border border-stone-200 bg-white text-xs font-medium">平行于 π</button>
+                <button data-case-b="inside"     class="chip-btn px-2.5 py-1 rounded-lg border border-stone-200 bg-white text-xs font-medium">在 π 上</button>
+                <button data-case-b="pendicular" class="chip-btn px-2.5 py-1 rounded-lg border border-stone-200 bg-white text-xs font-medium">垂直于 π</button>
+              </div>
+              <div class="flex items-center gap-2">
+                <span class="text-[11px] font-mono text-stone-400">平面倾角 α</span>
+                <span id="val-alpha" class="font-mono text-xs text-stone-700 font-semibold w-10 text-right">0°</span>
+                <input id="slider-alpha" type="range" min="-45" max="45" step="1" value="0" class="w-32 cursor-pointer">
+              </div>
+            </div>
+
+            <div class="flex flex-col gap-1">
+              <div class="flex items-center justify-between text-xs">
+                <span class="text-stone-600 font-medium flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-amber-500"></span>L 上动点 M 参数 $t$（其投影 M′ 描出 L′）</span>
+                <span id="val-tb" class="font-mono text-stone-700 font-semibold">0.00</span>
+              </div>
+              <input id="slider-tb" type="range" min="-5" max="5" step="0.02" value="0" class="cursor-pointer">
+            </div>
+          </div>
+
+          <!-- Shared footer row -->
+          <div class="flex items-center justify-between pt-2 border-t border-[#EFEFE9] text-[11px] font-mono text-stone-500">
+            <button id="btn-min" class="px-3 py-1.5 rounded-lg bg-stone-900 text-white font-medium hover:bg-stone-800 transition-colors flex items-center gap-1.5 shadow-sm">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"></path></svg>
+              <span id="btn-min-text">捕捉距离最小值</span>
+            </button>
+            <div class="flex items-center gap-2">
+              <span class="flex items-center gap-1"><span class="legend-dot bg-blue-600"></span>L₁</span>
+              <span class="flex items-center gap-1"><span class="legend-dot bg-rose-600"></span>L₂</span>
+              <span class="flex items-center gap-1"><span class="legend-dot bg-amber-500"></span>拖拽手柄</span>
+              <span class="hidden md:inline text-stone-400">· 拖动球体可实时改变直线</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== Notes / derivation panel ===== -->
+    <aside id="explain-panel" class="w-full lg:w-[470px] xl:w-[500px] flex-shrink-0 bg-white border-l border-[#E5E4DC] flex flex-col h-full overflow-hidden shadow-sm z-20">
+      <div class="p-3.5 border-b border-[#E5E4DC] bg-[#FAF9F5] flex items-center justify-between">
+        <div>
+          <h2 id="panel-title" class="text-sm font-bold text-stone-900">两直线间距离的几何理解</h2>
+          <p id="panel-subtitle" class="text-[11px] text-stone-500 mt-0.5">平行 · 相交 · 重合 · 异面 的统一判别与计算</p>
+        </div>
+        <span class="text-[10px] font-mono text-stone-500 bg-stone-100 px-2 py-0.5 rounded border border-stone-200">考点同步</span>
+      </div>
+      <div id="derivation-content" class="flex-1 overflow-y-auto p-4 space-y-3 text-stone-700 text-xs leading-relaxed"></div>
+    </aside>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,335 @@
+/* ==========================================================================
+   以太网交换机自学习与帧转发表 - 核心样式 (Taste-Skill Light Editorial)
+   ========================================================================== */
+
+:root {
+  --bg-page: #FAF9F5;
+  --bg-card: #FFFFFF;
+  --border-subtle: #E5E4DC;
+  --border-strong: #D6D5CD;
+  --text-primary: #1C1917;
+  --text-secondary: #78716C;
+  --accent-blue: #2563EB;
+  --accent-emerald: #059669;
+  --accent-amber: #D97706;
+  --accent-rose: #E11D48;
+}
+
+body {
+  background-color: var(--bg-page);
+  color: var(--text-primary);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, sans-serif;
+}
+
+/* 交换机实体与宽敞内部空间 */
+.switch-container {
+  background-color: #FFFFFF;
+  border: 1.5px solid #D6D5CD;
+  box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.05), 0 2px 6px -1px rgba(0, 0, 0, 0.03);
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.switch-interior-bg {
+  background-color: #F8FAFC;
+  background-image: radial-gradient(#CBD5E1 1.2px, transparent 1.2px);
+  background-size: 16px 16px;
+}
+
+/* 端口徽章与状态指示 */
+.port-badge {
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  position: relative;
+  user-select: none;
+}
+.port-badge:hover {
+  transform: scale(1.02);
+}
+.port-badge.port-rx {
+  border-color: #3B82F6 !important;
+  background-color: #EFF6FF !important;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.25);
+}
+.port-badge.port-tx-flood {
+  border-color: #F59E0B !important;
+  background-color: #FFFBEB !important;
+  box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.25);
+}
+.port-badge.port-tx-unicast {
+  border-color: #10B981 !important;
+  background-color: #ECFDF5 !important;
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.25);
+}
+.port-badge.port-idle {
+  border-color: #E2E8F0;
+  background-color: #FFFFFF;
+}
+
+/* 状态灯 LED */
+.led-lamp {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: #94A3B8;
+  display: inline-block;
+  transition: background-color 0.2s ease, box-shadow 0.2s ease;
+}
+.led-lamp.led-green {
+  background-color: #10B981;
+  box-shadow: 0 0 8px #10B981;
+}
+.led-lamp.led-blue {
+  background-color: #3B82F6;
+  box-shadow: 0 0 8px #3B82F6;
+}
+.led-lamp.led-amber {
+  background-color: #F59E0B;
+  box-shadow: 0 0 8px #F59E0B;
+}
+
+/* 主机卡片 */
+.host-card {
+  transition: all 0.2s ease;
+  user-select: none;
+}
+.host-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.06);
+}
+.host-card.host-active-sender {
+  border-color: #3B82F6 !important;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.25), 0 4px 12px rgba(59, 130, 246, 0.15);
+}
+.host-card.host-active-receiver {
+  border-color: #10B981 !important;
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.25), 0 4px 12px rgba(16, 185, 129, 0.15);
+}
+.host-card.host-dropped {
+  border-color: #F87171 !important;
+  background-color: #FFF5F5 !important;
+}
+
+/* MAC 表格行动画与高亮 */
+.table-row-new {
+  animation: rowHighlightGreen 1.4s ease-out;
+}
+@keyframes rowHighlightGreen {
+  0% {
+    background-color: #D1FAE5;
+    transform: scale(1.01);
+  }
+  70% {
+    background-color: #ECFDF5;
+  }
+  100% {
+    background-color: transparent;
+    transform: scale(1);
+  }
+}
+
+.table-row-hit {
+  animation: rowHighlightBlue 1.2s ease-out;
+}
+@keyframes rowHighlightBlue {
+  0% {
+    background-color: #DBEAFE;
+    font-weight: bold;
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+
+/* 控制器按键 */
+.ctrl-btn {
+  transition: all 0.15s ease;
+}
+.ctrl-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+.ctrl-btn:active:not(:disabled) {
+  transform: translateY(0);
+}
+.ctrl-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.speed-pill.active {
+  background-color: #1C1917;
+  color: #FFFFFF;
+  border-color: #1C1917;
+}
+
+/* 数据包飞行节点 */
+.packet-node {
+  filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.16));
+  pointer-events: none;
+}
+
+/* 连线脉冲 */
+@keyframes linkPulse {
+  0% { stroke-dashoffset: 24; }
+  100% { stroke-dashoffset: 0; }
+}
+.animated-link {
+  stroke-dasharray: 6 6;
+  animation: linkPulse 0.8s linear infinite;
+}
+
+/* 408 知识点笔记高亮卡片 (Callout) */
+.callout {
+  border-left-width: 4px;
+  border-radius: 0.5rem;
+  padding: 0.875rem 1rem;
+  font-size: 0.8125rem;
+  line-height: 1.5;
+}
+.callout-tip {
+  border-color: #059669;
+  background-color: #F0FDF4;
+  color: #064E3B;
+}
+.callout-note {
+  border-color: #2563EB;
+  background-color: #EFF6FF;
+  color: #1E3A8A;
+}
+.callout-important {
+  border-color: #7C3AED;
+  background-color: #F5F3FF;
+  color: #4C1D95;
+}
+.callout-warning {
+  border-color: #D97706;
+  background-color: #FFFBEB;
+  color: #78350F;
+}
+
+/* ==========================================================================
+   兜圈问题 (Looping Problem) 专用样式 · 像素级对齐教材图示
+   ========================================================================== */
+
+/* 显示器主机图形 (对齐原图中的红/蓝/黑屏幕) */
+.monitor-box {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  user-select: none;
+  transition: transform 0.2s ease;
+}
+.monitor-screen {
+  width: 46px;
+  height: 36px;
+  border-radius: 4px;
+  border: 2.5px solid currentColor;
+  position: relative;
+  background-color: #FFFFFF;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.06);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.monitor-screen::after {
+  content: '';
+  position: absolute;
+  bottom: -6px;
+  width: 10px;
+  height: 6px;
+  background-color: currentColor;
+}
+.monitor-screen::before {
+  content: '';
+  position: absolute;
+  bottom: -8px;
+  width: 22px;
+  height: 2.5px;
+  background-color: currentColor;
+  border-radius: 1px;
+}
+.monitor-red {
+  color: #DC2626;
+}
+.monitor-blue {
+  color: #2563EB;
+}
+.monitor-black {
+  color: #1C1917;
+}
+
+/* 兜圈交换机大框 */
+.loop-switch {
+  width: 320px;
+  background-color: #FFFFFF;
+  border: 2px solid #1C1917;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.06);
+  border-radius: 12px;
+  position: relative;
+  transition: all 0.2s ease;
+}
+
+/* 交换机内部方块端口 (对齐图示中 1, 3, 2, 4 方块) */
+.loop-port {
+  width: 40px;
+  height: 40px;
+  border: 2px solid #1C1917;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 16px;
+  font-weight: 700;
+  background-color: #FFFFFF;
+  transition: all 0.2s ease;
+  position: relative;
+}
+.loop-port.port-active-rx {
+  background-color: #EFF6FF !important;
+  border-color: #2563EB !important;
+  color: #2563EB;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.3);
+}
+.loop-port.port-active-tx {
+  background-color: #FFFBEB !important;
+  border-color: #D97706 !important;
+  color: #D97706;
+  box-shadow: 0 0 0 3px rgba(217, 119, 6, 0.3);
+}
+.loop-port.port-blocked {
+  background-color: #FEF2F2 !important;
+  border-color: #DC2626 !important;
+  color: #DC2626;
+}
+.loop-port.port-blocked::after {
+  content: '✕ 阻塞';
+  position: absolute;
+  top: -20px;
+  left: 50%;
+  transform: translateX(-50%);
+  background-color: #DC2626;
+  color: #FFFFFF;
+  font-size: 9px;
+  font-weight: bold;
+  padding: 1px 4px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+/* 交换表震荡抖动动画 (MAC Address Flapping) */
+@keyframes tableShake {
+  0%, 100% { transform: translateX(0); background-color: #FEF2F2; }
+  25% { transform: translateX(-4px); background-color: #FEE2E2; }
+  75% { transform: translateX(4px); background-color: #FECACA; }
+}
+.table-row-flapping {
+  animation: tableShake 0.5s ease-in-out;
+  color: #DC2626 !important;
+  font-weight: bold !important;
+}
+
+/* 环路数据包飞行标记 */
+.loop-packet {
+  filter: drop-shadow(0 3px 6px rgba(0, 0, 0, 0.2));
+  pointer-events: none;
+}
+

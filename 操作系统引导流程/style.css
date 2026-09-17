@@ -1,0 +1,272 @@
+/* ==========================================================================
+   操作系统引导流程 · 暖白纸面 / 精确线条
+   语义色: ROM固件琥珀 / I/O数据流钴蓝 / 活动分区翡翠 / 内核成功翡翠加深
+   ========================================================================== */
+
+:root {
+  --bg-page: #FAF9F5;
+  --bg-card: #FFFFFF;
+  --bg-subtle: #F4F3EE;
+  --border-light: #E5E4DC;
+  --border-strong: #D6D3CD;
+  --text-main: #1C1917;
+  --text-muted: #57534E;
+
+  --rom: #D97706;
+  --rom-glow: rgba(217, 119, 6, 0.3);
+  --io: #2563EB;
+  --io-glow: rgba(37, 99, 235, 0.3);
+  --active: #059669;
+  --active-glow: rgba(5, 150, 105, 0.3);
+  --idle-wire: #CBD5E1;
+}
+
+body {
+  background-color: var(--bg-page);
+  color: var(--text-main);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, sans-serif;
+  overflow-x: hidden;
+}
+
+.font-serif { font-family: 'Newsreader', Georgia, serif; }
+.font-mono, .font-mono-num {
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+.card-panel {
+  background: var(--bg-card);
+  border: 1px solid var(--border-light);
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.02);
+}
+.card-panel:hover { border-color: var(--border-strong); }
+
+.ctl-btn {
+  padding: 0.375rem 0.9rem;
+  border-radius: 0.5rem;
+  font-size: 0.8rem;
+  border: 1px solid var(--border-strong);
+  color: #44403C;
+  background: #FFFFFF;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.ctl-btn:hover:not(:disabled) { border-color: #78716C; }
+.ctl-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: #F4F3EE; }
+::-webkit-scrollbar-thumb { background: #D6D3CD; border-radius: 3px; }
+
+/* ==========================================================================
+   SVG 画布基础
+   ========================================================================== */
+
+#boot-svg { user-select: none; }
+
+.zone-label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+  font-weight: 700;
+  fill: #57534E;
+}
+.zone-sub {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10.5px;
+  fill: #78716C;
+}
+.addr-label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  fill: #A8A29E;
+  text-anchor: end;
+}
+.addr-label.key { fill: #B45309; font-weight: 700; }
+
+/* 主存区段 */
+.mem-rom    { fill: #FEF6E7; stroke: var(--rom); stroke-width: 1.5px; }
+.mem-free   { fill: #F8FAFC; stroke: var(--idle-wire); stroke-width: 1px; }
+.mem-slot {
+  fill: #FFFFFF;
+  stroke: var(--border-strong);
+  stroke-width: 1.2px;
+  stroke-dasharray: 5 4;
+}
+.mem-slot.filled {
+  fill: #EFF6FF;
+  stroke: var(--io);
+  stroke-width: 1.5px;
+  stroke-dasharray: none;
+  filter: drop-shadow(0 0 5px var(--io-glow));
+}
+.mem-kernel {
+  fill: #FFFFFF;
+  stroke: var(--border-strong);
+  stroke-width: 1.5px;
+  stroke-dasharray: 6 4;
+}
+.mem-kernel.filled {
+  fill: #ECFDF5;
+  stroke: var(--active);
+  stroke-width: 2px;
+  stroke-dasharray: none;
+  filter: drop-shadow(0 0 7px var(--active-glow));
+}
+.slot-text {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  font-weight: 700;
+  fill: #A8A29E;
+}
+.slot-text.filled { fill: #1D4ED8; }
+
+/* 磁盘 */
+.disk-body {
+  fill: #F8FAFC;
+  stroke: #94A3B8;
+  stroke-width: 1.5px;
+  rx: 10px;
+}
+.sector-mbr {
+  fill: #FFFFFF;
+  stroke: #94A3B8;
+  stroke-width: 1.2px;
+}
+.partition {
+  fill: #FFFFFF;
+  stroke: #CBD5E1;
+  stroke-width: 1.2px;
+}
+.partition.active-part {
+  fill: #F0FDF4;
+  stroke: var(--active);
+  stroke-width: 2px;
+  filter: drop-shadow(0 0 6px var(--active-glow));
+}
+.part-cell {
+  fill: #F4F3EE;
+  stroke: #D6D3CD;
+  stroke-width: 1px;
+}
+.part-cell.hot {
+  fill: #ECFDF5;
+  stroke: var(--active);
+  stroke-width: 1.8px;
+}
+.cell-text {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  fill: #78716C;
+  text-anchor: middle;
+}
+.file-kernel {
+  fill: #ECFDF5;
+  stroke: var(--active);
+  stroke-width: 1.4px;
+  stroke-dasharray: 4 3;
+}
+.file-kernel.sent { stroke-dasharray: none; fill: #A7F3D0; }
+.sector-text {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11.5px;
+  font-weight: 700;
+  fill: #292524;
+}
+.sector-sub {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9.5px;
+  fill: #A8A29E;
+}
+
+/* CPU */
+.cpu-box {
+  fill: #FFFFFF;
+  stroke: #1C1917;
+  stroke-width: 2px;
+}
+.cpu-title {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 14px;
+  font-weight: 700;
+  fill: #1C1917;
+}
+.pc-text {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  font-weight: 700;
+  fill: #B45309;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 总线引线 */
+.wire {
+  stroke: var(--idle-wire);
+  stroke-width: 2.5px;
+  fill: none;
+}
+.io-path {
+  stroke: #BFDBFE;
+  stroke-width: 4px;
+  fill: none;
+  stroke-linecap: round;
+}
+.io-path.active {
+  stroke: var(--io);
+  filter: drop-shadow(0 0 5px var(--io-glow));
+}
+.exec-path {
+  stroke: #DDD6FE;
+  stroke-width: 2.5px;
+  fill: none;
+  stroke-dasharray: 6 5;
+}
+.exec-path.active {
+  stroke: #7C3AED;
+  filter: drop-shadow(0 0 4px rgba(124, 58, 237, 0.35));
+}
+
+/* 数据包 */
+.pkt-rect { fill: #DBEAFE; stroke: var(--io); stroke-width: 1.8px; }
+.pkt-text {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11.5px;
+  font-weight: 700;
+  fill: #1E3A8A;
+}
+
+/* 执行点 */
+.pc-dot { fill: #7C3AED; filter: drop-shadow(0 0 5px rgba(124, 58, 237, 0.6)); }
+
+@keyframes flowDash { to { stroke-dashoffset: -20; } }
+.io-animating { stroke-dasharray: 8 5; animation: flowDash 0.6s linear infinite; }
+
+@keyframes pulseSoft { 50% { opacity: 0.35; } }
+.pulsing { animation: pulseSoft 0.9s ease-in-out infinite; }
+
+/* 步骤节点 */
+.timeline-node {
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  cursor: pointer;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 11.5px;
+  border: 1px solid var(--border-light);
+  background: #FFFFFF;
+  color: #A8A29E;
+  user-select: none;
+}
+.timeline-node:hover { transform: translateY(-1px); border-color: #A8A29E; }
+.timeline-node.current {
+  background-color: #1C1917;
+  color: #FFFFFF;
+  border-color: #1C1917;
+}
+.timeline-node.passed {
+  background-color: #F4F3EE;
+  color: #44403C;
+  border-color: #D6D3CD;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .io-animating, .pulsing { animation: none; }
+  * { transition: none !important; }
+}

@@ -1,0 +1,357 @@
+/* ==========================================================================
+   Single-Bus CPU Data Path Visualization - Stylesheet
+   暖白纸面 / 精确线条 · 总线语义色: 内总线琥珀 / ABUS 钴蓝 / DBUS 翡翠 / CBUS 绛紫
+   ========================================================================== */
+
+:root {
+  --bg-page: #FAF9F5;
+  --bg-card: #FFFFFF;
+  --bg-subtle: #F4F3EE;
+  --border-light: #E5E4DC;
+  --border-strong: #D6D3CD;
+  --text-main: #1C1917;
+  --text-muted: #57534E;
+
+  --bus-internal: #D97706;
+  --bus-internal-glow: rgba(217, 119, 6, 0.25);
+  --bus-abus: #2563EB;
+  --bus-abus-glow: rgba(37, 99, 235, 0.3);
+  --bus-dbus: #059669;
+  --bus-dbus-glow: rgba(5, 150, 105, 0.3);
+  --bus-cbus: #7C3AED;
+  --bus-cbus-glow: rgba(124, 58, 237, 0.3);
+
+  --wire-idle: #CBD5E1;
+}
+
+body {
+  background-color: var(--bg-page);
+  color: var(--text-main);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, sans-serif;
+  overflow-x: hidden;
+}
+
+.font-mono-num {
+  font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+.card-panel {
+  background: var(--bg-card);
+  border: 1px solid var(--border-light);
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.02);
+}
+.card-panel:hover {
+  border-color: var(--border-strong);
+}
+
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: #F4F3EE; }
+::-webkit-scrollbar-thumb { background: #D6D3CD; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #A8A29E; }
+
+/* ==========================================================================
+   SVG 画布
+   ========================================================================== */
+
+#cpu-svg { user-select: none; }
+
+/* 区域边界 */
+.zone-cpu {
+  fill: #FFFFFF;
+  stroke: #D6D3CD;
+  stroke-width: 1.5px;
+  stroke-dasharray: 7 5;
+}
+.zone-mem {
+  fill: #F8FAFC;
+  stroke: #CBD5E1;
+  stroke-width: 1.5px;
+}
+.zone-label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+  font-weight: 700;
+  fill: #57534E;
+}
+
+/* 部件文字 */
+.comp-title {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12.5px;
+  font-weight: 700;
+  fill: #292524;
+}
+.comp-sub {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10.5px;
+  fill: #78716C;
+}
+.comp-val {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 14px;
+  font-weight: 700;
+  fill: #B45309;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 特殊部件配色 */
+.cu-box { fill: #FAF5FF; stroke: #A855F7; stroke-width: 1.5px; }
+.alu-box { fill: #EFF6FF; stroke: #3B82F6; stroke-width: 2px; }
+.mem-decoder { fill: #EFF6FF; stroke: #93C5FD; stroke-width: 1px; }
+.wire-opcode { stroke: #A855F7; stroke-width: 2px; fill: none; }
+
+/* ==========================================================================
+   内部单总线 (主干 + 引线)
+   ========================================================================== */
+
+.bus-internal-trunk {
+  stroke: var(--bus-internal);
+  stroke-width: 12px;
+  stroke-linecap: round;
+  filter: drop-shadow(0 0 5px var(--bus-internal-glow));
+  transition: all 0.3s ease;
+}
+.bus-internal-trunk.active {
+  stroke-width: 14px;
+  filter: drop-shadow(0 0 9px rgba(217, 119, 6, 0.55));
+}
+
+.trunk-label-internal {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+  font-weight: 700;
+  fill: #92400E;
+  letter-spacing: 0.1em;
+}
+
+.bus-internal-wire {
+  stroke: #CBD5E1;
+  stroke-width: 3px;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  fill: none;
+  transition: all 0.25s ease;
+}
+.bus-internal-wire.active {
+  stroke: var(--bus-internal);
+  stroke-width: 4px;
+  filter: drop-shadow(0 0 5px rgba(217, 119, 6, 0.55));
+}
+
+/* ==========================================================================
+   外部系统总线主干 (ABUS / DBUS / CBUS) —— 粗干道, 与细引线明确区分
+   ========================================================================== */
+
+.bus-trunk {
+  stroke-width: 11px;
+  stroke-linecap: butt;
+  fill: none;
+  transition: all 0.25s ease;
+}
+
+.bus-trunk-abus { stroke: #BFDBFE; }
+.bus-trunk-abus.active {
+  stroke: var(--bus-abus);
+  filter: drop-shadow(0 0 7px var(--bus-abus-glow));
+}
+
+.bus-trunk-dbus { stroke: #A7F3D0; }
+.bus-trunk-dbus.active {
+  stroke: var(--bus-dbus);
+  filter: drop-shadow(0 0 7px var(--bus-dbus-glow));
+}
+
+.bus-trunk-cbus {
+  stroke: #DDD6FE;
+  stroke-width: 7px;
+  stroke-dasharray: 8 5;
+}
+.bus-trunk-cbus.active {
+  stroke: var(--bus-cbus);
+  stroke-dasharray: none;
+  filter: drop-shadow(0 0 7px var(--bus-cbus-glow));
+}
+
+.bus-label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+/* CPU ↔ 主存 之间的引线 (接入主干) */
+.bus-abus-line {
+  stroke: #93C5FD;
+  stroke-width: 4px;
+  stroke-linecap: round;
+  fill: none;
+  transition: all 0.25s ease;
+}
+.bus-abus-line.active {
+  stroke: var(--bus-abus);
+  stroke-width: 5px;
+  filter: drop-shadow(0 0 5px var(--bus-abus-glow));
+}
+
+.bus-dbus-line {
+  stroke: #A7F3D0;
+  stroke-width: 4px;
+  stroke-linecap: round;
+  fill: none;
+  transition: all 0.25s ease;
+}
+.bus-dbus-line.active {
+  stroke: var(--bus-dbus);
+  stroke-width: 5px;
+  filter: drop-shadow(0 0 5px var(--bus-dbus-glow));
+}
+
+.bus-cbus-line {
+  stroke: #DDD6FE;
+  stroke-width: 3px;
+  stroke-linecap: round;
+  fill: none;
+  transition: all 0.25s ease;
+}
+.bus-cbus-line.active {
+  stroke: var(--bus-cbus);
+  stroke-width: 4px;
+  filter: drop-shadow(0 0 5px var(--bus-cbus-glow));
+}
+
+/* ==========================================================================
+   部件盒 / 三态门
+   ========================================================================== */
+
+.component-box {
+  fill: #FFFFFF;
+  stroke: #D6D3CD;
+  stroke-width: 1.5px;
+  rx: 8px;
+  ry: 8px;
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.component-box:hover {
+  stroke: #78716C;
+}
+
+.component-box.highlight-in {
+  stroke: #10B981;
+  stroke-width: 2.5px;
+  fill: #F0FDF4;
+  filter: drop-shadow(0 0 8px rgba(16, 185, 129, 0.35));
+}
+.component-box.highlight-out {
+  stroke: #D97706;
+  stroke-width: 2.5px;
+  fill: #FFFBEB;
+  filter: drop-shadow(0 0 8px rgba(217, 119, 6, 0.35));
+}
+
+.tristate-gate {
+  fill: #FFFFFF;
+  stroke: #78716C;
+  stroke-width: 1.5px;
+  transition: all 0.25s ease;
+}
+.tristate-gate.open {
+  fill: #FEF3C7;
+  stroke: #D97706;
+  stroke-width: 2.5px;
+  filter: drop-shadow(0 0 6px rgba(217, 119, 6, 0.5));
+}
+
+/* ==========================================================================
+   信号徽标 / 引脚标注
+   ========================================================================== */
+
+.signal-badge {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11.5px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  transition: all 0.2s ease;
+  user-select: none;
+}
+.signal-badge.inactive {
+  background-color: #F4F3EE;
+  color: #A8A29E;
+  border: 1px solid #E5E4DC;
+}
+.signal-badge.active {
+  background-color: #ECFDF5;
+  color: #065F46;
+  border: 1px solid #6EE7B7;
+  font-weight: 700;
+}
+
+.pin-label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  fill: #78716C;
+}
+.pin-label.active {
+  fill: #D97706;
+  font-weight: 700;
+}
+
+/* ==========================================================================
+   数据包 (药丸形, 颜色随总线变化)
+   ========================================================================== */
+
+.packet-text {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12.5px;
+  font-weight: 700;
+  fill: #1C1917;
+}
+
+/* ==========================================================================
+   数据流动画 (虚线流动)
+   ========================================================================== */
+
+@keyframes flowDash {
+  to { stroke-dashoffset: -20; }
+}
+.flow-animating {
+  stroke-dasharray: 7 5;
+  animation: flowDash 0.7s linear infinite;
+}
+.bus-trunk-cbus.flow-animating {
+  stroke-dasharray: 8 5;
+}
+
+/* ==========================================================================
+   时间轴节点
+   ========================================================================== */
+
+.timeline-node {
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  cursor: pointer;
+}
+.timeline-node:hover { transform: translateY(-2px); }
+.timeline-node.current {
+  background-color: #1C1917;
+  color: #FFFFFF;
+  border-color: #1C1917;
+  box-shadow: 0 4px 12px rgba(28, 25, 23, 0.2);
+}
+.timeline-node.passed {
+  background-color: #F4F3EE;
+  color: #44403C;
+  border-color: #D6D3CD;
+}
+.timeline-node.future {
+  background-color: #FFFFFF;
+  color: #A8A29E;
+  border-color: #E5E4DC;
+}
+
+/* 动效降级 */
+@media (prefers-reduced-motion: reduce) {
+  .flow-animating { animation: none; }
+  .timeline-node, .component-box, .tristate-gate, .bus-internal-wire,
+  .bus-trunk, .bus-abus-line, .bus-dbus-line, .bus-cbus-line {
+    transition: none !important;
+  }
+}

@@ -1,0 +1,540 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>柯西中值定理几何直观与交互可视化 | Cauchy's Mean Value Theorem</title>
+
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['-apple-system', 'BlinkMacSystemFont', 'SF Pro Display', 'Segoe UI', 'Roboto', 'sans-serif'],
+            serif: ['Newsreader', 'Georgia', 'serif'],
+            mono: ['JetBrains Mono', 'Fira Code', 'SF Mono', 'monospace']
+          },
+          colors: {
+            stone: {
+              50: '#FAF9F5',
+              100: '#F4F3EE',
+              200: '#E5E4DC',
+              300: '#D6D3CD',
+              400: '#A8A29E',
+              500: '#78716C',
+              600: '#57534E',
+              700: '#44403C',
+              800: '#292524',
+              900: '#1C1917'
+            }
+          }
+        }
+      }
+    }
+  </script>
+
+  <!-- GSAP CDN for smooth continuous tweens -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+
+  <!-- KaTeX for formula rendering -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+
+  <!-- Custom Stylesheet -->
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="min-h-screen flex flex-col font-sans selection:bg-blue-100 selection:text-blue-900">
+
+  <!-- Top Navigation Header -->
+  <header class="sticky top-0 z-30 bg-[#FAF9F5]/90 backdrop-blur border-b border-[#E5E4DC] px-4 lg:px-8 py-3 flex flex-wrap items-center justify-between gap-4">
+    <!-- Brand & Title -->
+    <div class="flex items-center gap-3">
+      <div class="w-8 h-8 rounded-lg bg-stone-900 text-white flex items-center justify-center font-mono font-bold text-xs shadow-sm">
+        f'/g'
+      </div>
+      <div>
+        <h1 class="text-base font-semibold text-stone-900 tracking-tight flex items-center gap-2">
+          柯西中值定理几何直观
+          <span class="text-xs font-mono font-normal px-2 py-0.5 rounded border border-[#E5E4DC] bg-white text-stone-600 hidden sm:inline-block">
+            Cauchy's Mean Value Theorem
+          </span>
+        </h1>
+        <p class="text-xs text-stone-500 font-mono">
+          [f(b)-f(a)] / [g(b)-g(a)] = f'(ξ) / g'(ξ) &nbsp;·&nbsp; 平面参数曲线切线与割线平行
+        </p>
+      </div>
+    </div>
+
+    <!-- Presets & Quick Action Controls -->
+    <div class="flex items-center flex-wrap gap-2 text-xs">
+      <!-- Function Presets -->
+      <div class="flex items-center bg-stone-100 p-1 rounded-lg border border-[#E5E4DC] gap-1">
+        <button id="preset-cubic" class="btn-action px-2.5 py-1 rounded bg-white font-medium text-stone-800 border border-[#E5E4DC] hover:border-stone-400">
+          🌸 典型参数曲线
+        </button>
+        <button id="preset-elliptic" class="btn-action px-2.5 py-1 rounded hover:bg-white text-stone-700 hover:text-stone-900 transition-colors">
+          🔄 椭圆与三角
+        </button>
+        <button id="preset-multi-xi" class="btn-action px-2.5 py-1 rounded hover:bg-white text-stone-700 hover:text-stone-900 transition-colors">
+          〰️ S型多中值点
+        </button>
+        <button id="preset-lagrange" class="btn-action px-2.5 py-1 rounded hover:bg-white text-stone-700 hover:text-stone-900 transition-colors">
+          📐 拉格朗日特例
+        </button>
+        <button id="preset-rolle" class="btn-action px-2.5 py-1 rounded hover:bg-white text-stone-700 hover:text-stone-900 transition-colors">
+          ⚖️ 罗尔特例
+        </button>
+      </div>
+
+      <!-- Snap to Xi Button -->
+      <button id="btn-snap-xi" class="btn-action flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-rose-300 bg-rose-50 hover:bg-rose-100 font-semibold text-rose-800 shadow-sm" title="GSAP 缓动将动点滑动至中值点 ξ">
+        <span>🎯 一键捕捉中值点 ξ</span>
+      </button>
+
+      <!-- Auto Cruise Toggle -->
+      <button id="btn-auto-cruise" class="btn-action flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#E5E4DC] bg-white hover:bg-stone-100 font-medium text-stone-800">
+        <svg id="icon-play" class="w-3.5 h-3.5 text-stone-700" fill="currentColor" viewBox="0 0 20 20">
+          <polygon points="5 3 19 10 5 17" />
+        </svg>
+        <span id="label-auto-cruise">自动巡航扫描</span>
+      </button>
+
+      <!-- Reset View -->
+      <button id="btn-reset" class="btn-action px-2.5 py-1.5 rounded-lg border border-[#E5E4DC] bg-white hover:bg-stone-100 text-stone-600 hover:text-stone-900" title="重置区间与参数">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+        </svg>
+      </button>
+    </div>
+  </header>
+
+  <!-- Main Content Grid -->
+  <main class="flex-1 max-w-7xl w-full mx-auto p-4 lg:p-6 grid grid-cols-1 lg:grid-cols-12 gap-6">
+
+    <!-- Left Column: Interactive Parametric Plane & Sliders (7 cols) -->
+    <div class="lg:col-span-7 flex flex-col gap-4">
+
+      <!-- Main Canvas Card -->
+      <div class="card-surface p-4 sm:p-5 flex flex-col">
+        <!-- Canvas Status Badges & Controls -->
+        <div class="flex items-center justify-between pb-3 mb-3 border-b border-[#ECEBE4] flex-wrap gap-2">
+          <!-- Coordinates Legend -->
+          <div class="flex items-center gap-2 font-mono text-xs flex-wrap">
+            <!-- Start point A -->
+            <div class="flex items-center gap-1 px-2 py-0.5 rounded bg-[#FFFBEB] border border-[#FDE68A] text-[#B45309]">
+              <span class="w-2 h-2 rounded-full bg-[#D97706]"></span>
+              <span class="font-bold">A(a)</span>
+              <span id="badge-a-coords" class="text-[11px]">(0.00, 0.00)</span>
+            </div>
+
+            <!-- End point B -->
+            <div class="flex items-center gap-1 px-2 py-0.5 rounded bg-[#FFFBEB] border border-[#FDE68A] text-[#B45309]">
+              <span class="w-2 h-2 rounded-full bg-[#D97706]"></span>
+              <span class="font-bold">B(b)</span>
+              <span id="badge-b-coords" class="text-[11px]">(0.00, 0.00)</span>
+            </div>
+
+            <!-- Current point P(t) -->
+            <div class="flex items-center gap-1 px-2 py-0.5 rounded bg-[#ECFDF5] border border-[#A7F3D0] text-[#047857]">
+              <span class="w-2 h-2 rounded-full bg-[#059669]"></span>
+              <span class="font-bold">P(t)</span>
+              <span id="badge-p-coords" class="text-[11px]">(0.00, 0.00)</span>
+            </div>
+
+            <!-- Xi badge -->
+            <div id="badge-xi-list" class="flex items-center gap-1 px-2 py-0.5 rounded bg-rose-50 border border-rose-200 text-rose-800">
+              <span class="w-2 h-2 rounded-full bg-rose-600"></span>
+              <span class="font-bold">中值点:</span>
+              <span id="text-xi-values" class="font-bold text-[11px]">ξ = 1.25</span>
+            </div>
+          </div>
+
+          <!-- Canvas Visual Toggles -->
+          <div class="flex items-center gap-3 text-xs">
+            <label class="flex items-center gap-1 cursor-pointer text-stone-600 hover:text-stone-900 select-none">
+              <input type="checkbox" id="toggle-guideline" checked class="rounded text-emerald-600 focus:ring-0">
+              <span>平行辅助线</span>
+            </label>
+            <label class="flex items-center gap-1 cursor-pointer text-stone-600 hover:text-stone-900 select-none">
+              <input type="checkbox" id="toggle-shadow-band" checked class="rounded text-amber-600 focus:ring-0">
+              <span>割线投影带</span>
+            </label>
+            <label class="flex items-center gap-1 cursor-pointer text-stone-600 hover:text-stone-900 select-none">
+              <input type="checkbox" id="toggle-grid" checked class="rounded text-stone-600 focus:ring-0">
+              <span>网格</span>
+            </label>
+          </div>
+        </div>
+
+        <!-- SVG Interactive Parametric Plane -->
+        <div class="relative w-full aspect-[4/3] bg-[#FCFBF8] rounded-xl border border-[#E8E7DF] overflow-hidden select-none touch-none" id="canvas-container">
+          <svg id="param-svg" class="w-full h-full block" viewBox="-320 -240 640 480">
+            <!-- Defs: Markers and Patterns -->
+            <defs>
+              <!-- Arrow marker for Tangent Vector (Emerald) -->
+              <marker id="arrow-tangent" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                <path d="M 0 1.5 L 10 5 L 0 8.5 z" fill="#059669" />
+              </marker>
+
+              <!-- Arrow marker for Secant Vector (Amber) -->
+              <marker id="arrow-secant" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                <path d="M 0 1.5 L 10 5 L 0 8.5 z" fill="#D97706" />
+              </marker>
+
+              <!-- Parallel Band Hatching -->
+              <pattern id="band-pattern" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+                <line x1="0" y1="0" x2="0" y2="8" stroke="#D97706" stroke-width="1.2" stroke-opacity="0.1" />
+              </pattern>
+            </defs>
+
+            <!-- Background Grid Layer -->
+            <g id="layer-grid"></g>
+
+            <!-- Coordinate Axes Layer -->
+            <g id="layer-axes">
+              <line x1="-320" y1="0" x2="320" y2="0" class="axis-line" />
+              <line x1="0" y1="-240" x2="0" y2="240" class="axis-line" />
+              <!-- Axis labels -->
+              <text x="302" y="-8" font-size="11" font-family="JetBrains Mono" fill="#A8A29E">X=g(t)</text>
+              <text x="8" y="-225" font-size="11" font-family="JetBrains Mono" fill="#A8A29E">Y=f(t)</text>
+              <text x="6" y="14" font-size="10" font-family="JetBrains Mono" fill="#A8A29E">O</text>
+            </g>
+
+            <!-- Geometry Construction Layers -->
+            <!-- 1. Full Parametric Curve (Faint/Dashed Context) -->
+            <path id="path-curve-full" d="" fill="none" stroke="#93C5FD" stroke-width="1.5" stroke-dasharray="3 3" stroke-opacity="0.6" />
+
+            <!-- 2. Active Interval Curve Segment [a, b] -->
+            <path id="path-curve-active" d="" fill="none" stroke="#2563EB" stroke-width="3.5" stroke-linecap="round" />
+
+            <!-- 3. Parallel Shadow Band between Secant and Tangent (Toggleable) -->
+            <polygon id="poly-shadow-band" points="" fill="url(#band-pattern)" stroke="none" />
+
+            <!-- 4. Secant Line AB -->
+            <g id="layer-secant">
+              <!-- Secant line segment -->
+              <line id="line-secant" x1="0" y1="0" x2="0" y2="0" stroke="#D97706" stroke-width="2.5" stroke-linecap="round" />
+              <!-- Extended dashed guide line for secant -->
+              <line id="line-secant-ext" x1="0" y1="0" x2="0" y2="0" stroke="#D97706" stroke-width="1" stroke-dasharray="4 4" stroke-opacity="0.4" />
+              <!-- Secant slope label -->
+              <text id="label-secant-slope" font-size="11" font-family="JetBrains Mono" fill="#B45309" font-weight="600"></text>
+            </g>
+
+            <!-- 5. Tangent Line at Current Point P(t) -->
+            <g id="layer-tangent">
+              <!-- Tangent line passing through P(t) -->
+              <line id="line-tangent" x1="0" y1="0" x2="0" y2="0" stroke="#059669" stroke-width="2.2" stroke-linecap="round" />
+              <!-- Parallel guideline through P(t) matching secant slope -->
+              <line id="line-parallel-guide" x1="0" y1="0" x2="0" y2="0" stroke="#E11D48" stroke-width="1.2" stroke-dasharray="3 3" stroke-opacity="0.6" />
+              <!-- Tangent slope label -->
+              <text id="label-tangent-slope" font-size="11" font-family="JetBrains Mono" fill="#047857" font-weight="600"></text>
+            </g>
+
+            <!-- 6. Mean Value Points Xi (ξ) on the curve -->
+            <g id="layer-xi-points"></g>
+
+            <!-- 7. Interactive Draggable Handles (A, B, P) -->
+            <g id="layer-handles">
+              <!-- Handle A (Start Endpoint) -->
+              <g id="handle-a" class="curve-handle" transform="translate(0, 0)">
+                <circle r="13" fill="#D97706" fill-opacity="0.18" />
+                <circle r="6" fill="#D97706" stroke="#FFFFFF" stroke-width="2" />
+                <text x="10" y="-8" font-size="12" font-family="JetBrains Mono" font-weight="bold" fill="#B45309">A</text>
+              </g>
+
+              <!-- Handle B (End Endpoint) -->
+              <g id="handle-b" class="curve-handle" transform="translate(0, 0)">
+                <circle r="13" fill="#D97706" fill-opacity="0.18" />
+                <circle r="6" fill="#D97706" stroke="#FFFFFF" stroke-width="2" />
+                <text x="10" y="-8" font-size="12" font-family="JetBrains Mono" font-weight="bold" fill="#B45309">B</text>
+              </g>
+
+              <!-- Handle P(t) (Moving Point) -->
+              <g id="handle-p" class="curve-handle" transform="translate(0, 0)">
+                <circle r="15" fill="#059669" fill-opacity="0.2" />
+                <circle r="7" fill="#059669" stroke="#FFFFFF" stroke-width="2.5" />
+                <text x="12" y="-10" font-size="12" font-family="JetBrains Mono" font-weight="bold" fill="#047857">P(t)</text>
+              </g>
+            </g>
+          </svg>
+
+          <!-- Floating Interaction Hint -->
+          <div class="absolute bottom-2 left-3 pointer-events-none text-[11px] font-mono text-stone-500 bg-white/85 backdrop-blur px-2.5 py-1 rounded-md border border-[#E5E4DC] flex items-center gap-2">
+            <span>🖱️ 拖拽 A/B 端点或 P(t) 动点</span>
+            <span class="text-stone-300">|</span>
+            <span class="text-emerald-700 font-medium">绿色切线</span>
+            <span class="text-amber-700 font-medium">琥珀色割线</span>
+          </div>
+        </div>
+
+        <!-- Continuous Scrubbing & Interval Sliders -->
+        <div class="mt-4 pt-3 border-t border-[#ECEBE4] flex flex-col gap-3 text-xs font-mono">
+          <!-- Main Parameter t Scrubber -->
+          <div class="p-3 rounded-lg bg-[#ECFDF5]/70 border border-[#A7F3D0] flex flex-col gap-2">
+            <div class="flex items-center justify-between font-bold text-[#047857]">
+              <span class="flex items-center gap-1.5">
+                <span class="w-2.5 h-2.5 rounded-full bg-[#059669]"></span>
+                当前切点参数 t ∈ [a, b]
+              </span>
+              <span id="readout-t-val" class="text-sm font-bold">t = 1.25</span>
+            </div>
+            <div class="flex items-center gap-3">
+              <span id="slider-t-min-label" class="w-12 text-stone-500 text-[11px]">a=-2.0</span>
+              <input type="range" id="slider-t" min="-2" max="2" step="0.005" value="0.5" class="flex-1 slider-t">
+              <span id="slider-t-max-label" class="w-12 text-stone-500 text-[11px] text-right">b=2.0</span>
+            </div>
+          </div>
+
+          <!-- Interval Endpoints a and b Sliders -->
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <!-- Slider a -->
+            <div class="p-2.5 rounded-lg bg-stone-50 border border-[#E5E4DC] flex flex-col gap-1.5">
+              <div class="flex items-center justify-between text-stone-700">
+                <span>区间起点 a (对应点 A)</span>
+                <span id="val-a-text" class="font-bold text-amber-800">a = -2.00</span>
+              </div>
+              <input type="range" id="slider-a" min="-3" max="3" step="0.05" value="-2.0" class="slider-a">
+            </div>
+
+            <!-- Slider b -->
+            <div class="p-2.5 rounded-lg bg-stone-50 border border-[#E5E4DC] flex flex-col gap-1.5">
+              <div class="flex items-center justify-between text-stone-700">
+                <span>区间终点 b (对应点 B)</span>
+                <span id="val-b-text" class="font-bold text-amber-800">b = 2.00</span>
+              </div>
+              <input type="range" id="slider-b" min="-3" max="3" step="0.05" value="2.0" class="slider-b">
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Slope & Parallelism Real-time Inspector -->
+      <div class="card-surface p-4 flex flex-col gap-3">
+        <div class="flex items-center justify-between flex-wrap gap-2">
+          <h2 class="text-xs font-bold uppercase tracking-wider text-stone-500 font-mono">
+            斜率与平行度实时检测 (Slope & Parallelism)
+          </h2>
+          <!-- Parallel Match Badge -->
+          <div id="badge-parallel-match" class="px-2.5 py-0.5 rounded-full text-xs font-mono font-semibold flex items-center gap-1.5 bg-stone-100 text-stone-700 border border-[#E5E4DC]">
+            <span class="w-2 h-2 rounded-full bg-stone-400" id="dot-parallel"></span>
+            <span id="text-parallel-status">切线与割线夹角偏差: 12.4°</span>
+          </div>
+        </div>
+
+        <!-- Dynamic Formula Equations Box -->
+        <div class="bg-stone-50 p-3 rounded-lg border border-[#E5E4DC] font-mono text-xs overflow-x-auto grid grid-cols-1 sm:grid-cols-3 gap-3 items-center">
+          <!-- Secant Slope -->
+          <div class="flex flex-col p-2 bg-white rounded border border-[#ECEBE4]">
+            <span class="text-[11px] text-amber-700 font-semibold mb-0.5">割线斜率 k_割 (AB)</span>
+            <span class="text-stone-500 text-[10px]">[f(b)-f(a)] / [g(b)-g(a)]</span>
+            <span id="metric-secant-val" class="text-base font-bold text-amber-800 mt-1">k = 0.750</span>
+          </div>
+
+          <!-- Parallel Icon -->
+          <div class="flex flex-col items-center justify-center text-stone-400">
+            <span id="metric-parallel-symbol" class="text-xl font-bold text-stone-700">∦</span>
+            <span id="metric-angle-diff" class="text-[11px] font-semibold text-stone-600">Δθ = 12.4°</span>
+          </div>
+
+          <!-- Tangent Slope -->
+          <div class="flex flex-col p-2 bg-white rounded border border-[#ECEBE4]">
+            <span class="text-[11px] text-emerald-700 font-semibold mb-0.5">切线斜率 k_切 (P)</span>
+            <span class="text-stone-500 text-[10px]">f'(t) / g'(t)</span>
+            <span id="metric-tangent-val" class="text-base font-bold text-emerald-800 mt-1">k = 1.320</span>
+          </div>
+        </div>
+
+        <!-- Parallelism Deviation Gauge Bar -->
+        <div class="flex flex-col gap-1.5 font-mono text-xs">
+          <div class="flex justify-between text-[11px] text-stone-600">
+            <span>平行度吻合度（接近 100% 时切线与割线平行）</span>
+            <span id="metric-parallel-percent" class="font-bold text-stone-900">86.2%</span>
+          </div>
+          <!-- Gauge Bar -->
+          <div class="w-full h-2.5 rounded-full bg-stone-100 border border-[#E5E4DC] overflow-hidden p-0.5 flex">
+            <div id="bar-parallel" class="h-full rounded-full bg-emerald-500 transition-all duration-75" style="width: 86.2%;"></div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Right Column: Auxiliary Function & Theoretical Views (5 cols) -->
+    <div class="lg:col-span-5 flex flex-col gap-4">
+
+      <!-- Auxiliary Function Chart Card (Rolle's Theorem Connection) -->
+      <div class="card-surface p-4 flex flex-col gap-3">
+        <div class="flex items-center justify-between pb-2 border-b border-[#ECEBE4]">
+          <div class="flex items-center gap-2">
+            <span class="w-2.5 h-2.5 rounded-full bg-purple-600"></span>
+            <h3 class="font-semibold text-stone-900 text-xs font-mono uppercase tracking-wider">
+              罗尔辅助函数联动 F(t)
+            </h3>
+          </div>
+          <span class="text-[11px] font-mono text-purple-700 font-medium">F'(ξ) = 0 极值点</span>
+        </div>
+
+        <p class="text-xs text-stone-600 leading-relaxed">
+          构造辅助函数 \(F(t) = [f(b)-f(a)]g(t) - [g(b)-g(a)]f(t)\)。易验证 \(F(a) = F(b)\)，其驻点导数 \(F'(\xi) = 0\) 恰好对应割线平行切点！
+        </p>
+
+        <!-- SVG Auxiliary Function Plot -->
+        <div class="w-full bg-[#FAF9F5] rounded-lg border border-[#E5E4DC] p-3 flex flex-col items-center">
+          <svg id="aux-svg" class="w-full h-28 block" viewBox="-120 -30 240 100">
+            <!-- Baseline -->
+            <line x1="-120" y1="50" x2="120" y2="50" stroke="#D6D3CD" stroke-width="1.5" stroke-dasharray="3 3" />
+            <!-- Axis label -->
+            <text x="105" y="45" font-size="9" font-family="JetBrains Mono" fill="#A8A29E">t</text>
+            <text x="-115" y="-12" font-size="9" font-family="JetBrains Mono" fill="#7C3AED">F(t)</text>
+            <!-- Endpoints A and B on baseline -->
+            <circle id="aux-point-a" cx="-80" cy="50" r="3.5" fill="#D97706" />
+            <text id="aux-text-a" x="-80" y="65" font-size="9" font-family="JetBrains Mono" fill="#B45309" text-anchor="middle">a</text>
+            <circle id="aux-point-b" cx="80" cy="50" r="3.5" fill="#D97706" />
+            <text id="aux-text-b" x="80" y="65" font-size="9" font-family="JetBrains Mono" fill="#B45309" text-anchor="middle">b</text>
+
+            <!-- Dynamic Curve F(t) -->
+            <path id="path-aux-curve" d="" fill="none" stroke="#7C3AED" stroke-width="2.2" stroke-linecap="round" />
+
+            <!-- Stationary points Xi on F(t) -->
+            <g id="layer-aux-xi"></g>
+
+            <!-- Current point on F(t) -->
+            <circle id="aux-current-point" cx="0" cy="50" r="5" fill="#059669" stroke="#FFFFFF" stroke-width="1.5" />
+          </svg>
+        </div>
+      </div>
+
+      <!-- Theory Tabs Card -->
+      <div class="flex p-1 bg-stone-100 rounded-xl border border-[#E5E4DC] text-xs font-medium">
+        <button class="tab-btn active flex-1 py-1.5 px-2 rounded-lg text-center" data-tab="tab-parametric">
+          1. 参数几何直观
+        </button>
+        <button class="tab-btn flex-1 py-1.5 px-2 rounded-lg text-center" data-tab="tab-rolle">
+          2. 罗尔构造解析
+        </button>
+        <button class="tab-btn flex-1 py-1.5 px-2 rounded-lg text-center" data-tab="tab-hierarchy">
+          3. 定理大一统
+        </button>
+      </div>
+
+      <!-- Tab 1: Parametric Plane View -->
+      <div id="tab-parametric" class="tab-content card-surface p-5 flex flex-col gap-3">
+        <div class="flex items-center gap-2 pb-2 border-b border-[#ECEBE4]">
+          <span class="w-2 h-2 rounded-full bg-blue-600"></span>
+          <h4 class="font-semibold text-stone-900 text-sm">参数方程视角：参数曲线上的拉格朗日</h4>
+        </div>
+        <div class="prose text-xs text-stone-600 leading-relaxed flex flex-col gap-2.5">
+          <p>
+            拉格朗日中值定理描述的是直角坐标函数 \(y = f(x)\) 图像上切线与割线平行的性质。但在很多物理与几何问题中，轨迹是由参数方程描述的：
+          </p>
+          <div class="bg-stone-50 p-2.5 rounded-lg border border-[#E5E4DC] font-mono text-xs text-stone-800 text-center">
+            \(\begin{cases} X = g(t) \\ Y = f(t) \end{cases} \quad (t \in [a, b])\)
+          </div>
+          <p>
+            <strong>质点平面运动学直观</strong>：
+          </p>
+          <ul class="list-disc list-inside space-y-1 text-stone-700">
+            <li>起点到终点的<strong>总平均位移向量</strong>为 \(\vec{D} = (g(b)-g(a), f(b)-f(a))\)，其方向斜率即割线斜率 \(k_{\text{割}}\)；</li>
+            <li>质点在时刻 \(t\) 的<strong>瞬时速度向量</strong>为 \(\vec{v}(t) = (g'(t), f'(t))\)，其轨迹切线斜率为 \(k_{\text{切}}(t) = \frac{f'(t)}{g'(t)}\)；</li>
+            <li>柯西中值定理断言：质点在运动过程中，<strong>必定存在某个时刻 \(\xi\)，其实时运动方向与总平均位移方向完全平行</strong>！</li>
+          </ul>
+        </div>
+      </div>
+
+      <!-- Tab 2: Rolle Auxiliary Function View -->
+      <div id="tab-rolle" class="tab-content card-surface p-5 flex flex-col gap-3 hidden">
+        <div class="flex items-center gap-2 pb-2 border-b border-[#ECEBE4]">
+          <span class="w-2 h-2 rounded-full bg-purple-600"></span>
+          <h4 class="font-semibold text-stone-900 text-sm">罗尔构造法：割线距离极值原理</h4>
+        </div>
+        <div class="prose text-xs text-stone-600 leading-relaxed flex flex-col gap-2.5">
+          <p>
+            为何柯西辅助函数要构造为两项交叉乘积？
+          </p>
+          <div class="bg-purple-50/60 p-2.5 rounded-lg border border-purple-200 font-mono text-xs text-purple-950 text-center font-bold">
+            \(F(t) = [f(b)-f(a)]g(t) - [g(b)-g(a)]f(t)\)
+          </div>
+          <p>
+            <strong>几何意义（点到割线的有向距离）</strong>：
+          </p>
+          <p class="text-stone-700">
+            直线 \(AB\) 的一般方程为 \([f(b)-f(a)]X - [g(b)-g(a)]Y + C = 0\)。因此，曲线上动点 \(P(g(t), f(t))\) 到割线 \(AB\) 的垂直距离恰好正比于 \(|F(t) + C|\)！
+          </p>
+          <p class="text-stone-700">
+            当动点 \(P\) 移动到距离割线 \(AB\) <strong>最远的点（极大值/极小值点）</strong>时，切线方向必然平行于底边 \(AB\)，此时导数 \(F'(\xi) = 0\)，从而直接严谨证得柯西中值定理。
+          </p>
+        </div>
+      </div>
+
+      <!-- Tab 3: Hierarchy of Mean Value Theorems -->
+      <div id="tab-hierarchy" class="tab-content card-surface p-5 flex flex-col gap-3 hidden">
+        <div class="flex items-center gap-2 pb-2 border-b border-[#ECEBE4]">
+          <span class="w-2 h-2 rounded-full bg-amber-600"></span>
+          <h4 class="font-semibold text-stone-900 text-sm">微积分中值定理大一统图谱</h4>
+        </div>
+        <div class="prose text-xs text-stone-600 leading-relaxed flex flex-col gap-2.5">
+          <div class="bg-stone-50 p-3 rounded-lg border border-[#E5E4DC] flex flex-col gap-2">
+            <div class="flex items-center justify-between text-[11px] font-mono border-b border-stone-200 pb-1">
+              <span class="font-bold text-stone-900">罗尔定理 (Rolle)</span>
+              <span class="text-stone-500">f(a) = f(b) ⇒ f'(ξ) = 0</span>
+            </div>
+            <div class="text-[10px] text-stone-600">↓ 坐标系旋转倾斜（令 g(x) = x）</div>
+            <div class="flex items-center justify-between text-[11px] font-mono border-b border-stone-200 pb-1">
+              <span class="font-bold text-stone-900">拉格朗日中值定理 (Lagrange)</span>
+              <span class="text-stone-500">[f(b)-f(a)]/(b-a) = f'(ξ)</span>
+            </div>
+            <div class="text-[10px] text-stone-600">↓ 推广到二维参数空间（引入独立参考系 g(t)）</div>
+            <div class="flex items-center justify-between text-[11px] font-mono border-b border-stone-200 pb-1 text-blue-900 font-bold">
+              <span>柯西中值定理 (Cauchy)</span>
+              <span>[f(b)-f(a)]/[g(b)-g(a)] = f'(ξ)/g'(ξ)</span>
+            </div>
+            <div class="text-[10px] text-stone-600">↓ 取极限令 b → a（未定式 0/0 求极限）</div>
+            <div class="flex items-center justify-between text-[11px] font-mono text-emerald-900 font-bold">
+              <span>洛必达法则 (L'Hôpital)</span>
+              <span>lim f(x)/g(x) = lim f'(x)/g'(x)</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Quick Takeaways Bento Box -->
+      <div class="card-surface p-4 flex flex-col gap-2 font-mono text-xs">
+        <div class="text-[11px] font-bold text-stone-500 uppercase tracking-wider">
+          定理核心速查
+        </div>
+        <div class="grid grid-cols-2 gap-2 text-stone-700">
+          <div class="p-2 rounded bg-stone-50 border border-[#ECEBE4]">
+            <span class="text-stone-400 block text-[10px]">几何本质</span>
+            <span class="font-semibold text-stone-900">切线 ∥ 割线 AB</span>
+          </div>
+          <div class="p-2 rounded bg-stone-50 border border-[#ECEBE4]">
+            <span class="text-stone-400 block text-[10px]">代数等价</span>
+            <span class="font-semibold text-stone-900">F'(ξ) = 0</span>
+          </div>
+          <div class="p-2 rounded bg-stone-50 border border-[#ECEBE4]">
+            <span class="text-stone-400 block text-[10px]">关键前提</span>
+            <span class="font-semibold text-rose-700">g'(t) ≠ 0</span>
+          </div>
+          <div class="p-2 rounded bg-stone-50 border border-[#ECEBE4]">
+            <span class="text-stone-400 block text-[10px]">基石应用</span>
+            <span class="font-semibold text-blue-700">洛必达法则证明</span>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+  </main>
+
+  <!-- Footer -->
+  <footer class="border-t border-[#E5E4DC] py-4 px-6 text-center text-xs font-mono text-stone-400 bg-white/50">
+    柯西中值定理几何直观可视化 · 交互式数学实验室 · Light Minimalist Design
+  </footer>
+
+  <!-- App Script -->
+  <script src="app.js"></script>
+</body>
+</html>

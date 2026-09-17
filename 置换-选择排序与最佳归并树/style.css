@@ -1,0 +1,533 @@
+/* =========================================================================
+   置换-选择排序与最佳归并树 — 视觉设计系统
+   Taste-Skill Light Editorial (严格浅色纸质美学)
+   基准色调：温暖纸白 #FAF9F5，纯白卡片 #FFFFFF，精致 1px 细线边框 #E5E4DC / #D6D3CD
+   ========================================================================= */
+
+:root {
+  --bg-page: #FAF9F5;
+  --bg-card: #FFFFFF;
+  --bg-subtle: #F4F3EE;
+  --border-subtle: #E5E4DC;
+  --border-strong: #D6D3CD;
+  --text-primary: #1C1917;
+  --text-secondary: #57534E;
+  --text-muted: #78716C;
+
+  /* 功能语义色 (功能指示而非装饰性泛滥) */
+  --color-active: #059669;       /* 活跃小顶堆 翡翠绿 */
+  --color-active-bg: #ECFDF5;
+  --color-active-border: #6EE7B7;
+
+  --color-frozen: #E11D48;       /* 冻结/虚段 玫瑰红 */
+  --color-frozen-bg: #FFF1F2;
+  --color-frozen-border: #FDA4AF;
+
+  --color-amber: #D97706;        /* 当前归并段/核心焦点 琥珀金 */
+  --color-amber-bg: #FFFBEB;
+  --color-amber-border: #FCD34D;
+}
+
+body {
+  background-color: var(--bg-page);
+  color: var(--text-primary);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, sans-serif;
+}
+
+.font-serif {
+  font-family: 'Newsreader', Georgia, serif;
+}
+
+.font-mono, .font-mono-num {
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 纸质卡片面板 */
+.card-panel {
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: 1rem;
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.02);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.card-panel:hover {
+  border-color: var(--border-strong);
+}
+
+/* 精致细线滚动条 */
+.scrollbar-thin::-webkit-scrollbar {
+  height: 5px;
+  width: 5px;
+}
+.scrollbar-thin::-webkit-scrollbar-track {
+  background: #FAF9F5;
+  border-radius: 4px;
+}
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background: #D6D3CD;
+  border-radius: 4px;
+}
+.scrollbar-thin::-webkit-scrollbar-thumb:hover {
+  background: #A8A29E;
+}
+
+/* ---- 控件系统 (Controls) ----------------------------------------------- */
+
+.ctl-btn {
+  padding: 0.35rem 0.75rem;
+  background: #FFFFFF;
+  border: 1px solid var(--border-strong);
+  border-radius: 0.5rem;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: #44403C;
+  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  user-select: none;
+}
+.ctl-btn:hover:not(:disabled) {
+  background: #FBFBFA;
+  border-color: #78716C;
+  color: #1C1917;
+  transform: translateY(-1px);
+}
+.ctl-btn:active:not(:disabled) {
+  transform: translateY(0);
+}
+.ctl-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.btn-primary {
+  padding: 0.35rem 0.95rem;
+  background: #1C1917;
+  color: #FFFFFF;
+  border: 1px solid #1C1917;
+  border-radius: 0.5rem;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.75rem;
+  font-weight: 600;
+  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+  user-select: none;
+}
+.btn-primary:hover {
+  background: #292524;
+  border-color: #292524;
+  transform: translateY(-1px);
+}
+.btn-primary:active {
+  transform: translateY(0);
+}
+
+.btn-preset {
+  padding: 0.25rem 0.55rem;
+  background: #FFFFFF;
+  border: 1px solid var(--border-subtle);
+  border-radius: 0.4rem;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.7rem;
+  color: #57534E;
+  transition: all 0.15s ease;
+  user-select: none;
+}
+.btn-preset:hover {
+  color: #1C1917;
+  border-color: #A8A29E;
+  background: #FBFBFA;
+}
+
+.ctrl-group {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.25rem 0.6rem;
+  background: #F4F3EE;
+  border: 1px solid var(--border-subtle);
+  border-radius: 0.5rem;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.72rem;
+  color: #57534E;
+}
+
+/* ---- 代码伴随高亮面板 (Live Code Panel) -------------------------------- */
+
+.code-container {
+  background: #F8FAFC;
+  border: 1px solid var(--border-subtle);
+  border-radius: 0.75rem;
+}
+
+.code-line {
+  display: flex;
+  align-items: center;
+  padding: 2.5px 8px;
+  border-radius: 4px;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  border-left: 3px solid transparent;
+  color: #64748B;
+  font-size: 0.72rem;
+}
+
+.code-line .line-num {
+  width: 26px;
+  color: #94A3B8;
+  font-size: 0.68rem;
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.code-line.active-rs,
+.code-line.active-tree {
+  background: #FFFBEB;
+  border-left-color: #D97706;
+  color: #92400E;
+  font-weight: 600;
+}
+
+/* ---- 输入流芯片 (Stream Chips) ----------------------------------------- */
+
+.stream-node-chip {
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  border-radius: 0.5rem;
+  background: #FFFFFF;
+  border: 1px solid var(--border-strong);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 700;
+  font-size: 0.8rem;
+  color: #1C1917;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+  transition: all 0.2s ease;
+}
+
+.stream-node-chip.head-chip {
+  border-color: #D97706;
+  background: #FEF3C7;
+  color: #92400E;
+  box-shadow: 0 0 0 2px rgba(217, 119, 6, 0.2);
+}
+
+/* ---- 置换选择小顶堆树节点 (Heap Node) ---------------------------------- */
+
+.heap-node {
+  position: absolute;
+  width: 38px;
+  height: 38px;
+  border-radius: 0.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 700;
+  font-size: 0.8rem;
+  transform: translate(-50%, -50%);
+  user-select: none;
+  z-index: 10;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.04);
+  transition: border-color 0.25s ease, background-color 0.25s ease;
+}
+
+.heap-node.active-node {
+  background: #ECFDF5;
+  border: 1.5px solid #059669;
+  color: #065F46;
+}
+
+.heap-node.frozen-node {
+  background: #FFF1F2;
+  border: 1.5px dashed #E11D48;
+  color: #9F1239;
+}
+
+.heap-node.highlight-node {
+  border-color: #D97706 !important;
+  box-shadow: 0 0 0 3px rgba(217, 119, 6, 0.25);
+  z-index: 25;
+}
+
+.heap-node .node-idx-badge {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  font-size: 8px;
+  background: #FFFFFF;
+  color: #78716C;
+  border: 1px solid var(--border-strong);
+  border-radius: 9999px;
+  width: 14px;
+  height: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+}
+
+/* 线性内存槽位 (WA Slots) */
+.wa-slot-box {
+  background: #FFFFFF;
+  border: 1px solid var(--border-subtle);
+  border-radius: 0.5rem;
+  height: 46px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  font-family: 'JetBrains Mono', monospace;
+  transition: border-color 0.25s ease, background-color 0.25s ease;
+}
+
+.wa-slot-box.active-slot {
+  border-color: #6EE7B7;
+  background: #ECFDF5;
+}
+
+.wa-slot-box.frozen-slot {
+  border-color: #FDA4AF;
+  background: #FFF1F2;
+}
+
+/* 树 SVG 连接线 (RS Heap) */
+.rs-tree-edge {
+  stroke: #CBD5E1;
+  stroke-width: 1.5px;
+  transition: stroke 0.25s ease;
+}
+
+.rs-tree-edge.active-edge {
+  stroke: #94A3B8;
+  stroke-width: 1.5px;
+}
+
+.rs-tree-edge.frozen-edge {
+  stroke: #FDA4AF;
+  stroke-width: 1.2px;
+  stroke-dasharray: 3 3;
+}
+
+/* ---- 归并段输出轨道 (Run Tracks) --------------------------------------- */
+
+.run-track-row {
+  background: #FFFFFF;
+  border: 1px solid var(--border-subtle);
+  border-radius: 0.5rem;
+  padding: 0.35rem 0.6rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.run-track-row.current-row {
+  border-color: #FCD34D;
+  background: #FFFDF5;
+}
+
+.run-pill {
+  width: 28px;
+  height: 28px;
+  border-radius: 0.4rem;
+  background: #FFFBEB;
+  border: 1px solid #FCD34D;
+  color: #92400E;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.72rem;
+  font-weight: 700;
+  flex-shrink: 0;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02);
+}
+
+/* ---- 最佳归并树候选森林 (Forest Queue) ----------------------------------- */
+
+.forest-chip {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.25rem 0.6rem;
+  border-radius: 0.4rem;
+  background: #FFFFFF;
+  border: 1px solid var(--border-strong);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.75rem;
+  font-weight: 700;
+  flex-shrink: 0;
+  transition: all 0.25s ease;
+}
+
+.forest-chip.selected {
+  border-color: #D97706;
+  background: #FEF3C7;
+  box-shadow: 0 0 0 2px rgba(217, 119, 6, 0.2);
+}
+
+.forest-chip.dummy {
+  border-style: dashed;
+  border-color: #E11D48;
+  background: #FFF1F2;
+  color: #9F1239;
+}
+
+/* ---- 最佳归并树拓扑节点 (OMT Nodes on Canvas) --------------------------- */
+
+.tree-node-dom {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 700;
+  user-select: none;
+  z-index: 10;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.05);
+  transition: border-color 0.25s, box-shadow 0.25s;
+}
+
+.tree-node-dom.real-leaf {
+  width: 44px;
+  height: 44px;
+  border-radius: 0.55rem;
+  background: #FFFBEB;
+  border: 1.5px solid #F59E0B;
+  color: #92400E;
+  font-size: 0.85rem;
+}
+
+.tree-node-dom.dummy-leaf {
+  width: 44px;
+  height: 44px;
+  border-radius: 0.55rem;
+  background: #FFF1F2;
+  border: 1.5px dashed #E11D48;
+  color: #9F1239;
+  font-size: 0.8rem;
+}
+
+.tree-node-dom.internal-node {
+  width: 46px;
+  height: 46px;
+  border-radius: 9999px;
+  background: #F4F3EE;
+  border: 1.5px solid #A8A29E;
+  color: #1C1917;
+  font-size: 0.85rem;
+}
+
+.tree-node-dom.root-node {
+  border-color: #1C1917;
+  background: #1C1917;
+  color: #FFFFFF;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.15);
+}
+
+.tree-node-dom .tag-label {
+  font-size: 0.55rem;
+  opacity: 0.8;
+  margin-top: -2px;
+}
+
+/* 归并树平滑贝塞尔连接线 */
+.omt-edge-path {
+  stroke: #94A3B8;
+  stroke-width: 1.5px;
+  fill: none;
+}
+
+.omt-edge-path.dummy-path {
+  stroke: #FDA4AF;
+  stroke-width: 1.3px;
+  stroke-dasharray: 3 3;
+}
+
+.omt-edge-path.active-path {
+  stroke: #64748B;
+  stroke-width: 1.5px;
+}
+
+/* ---- 笔记式引用看板 (Obsidian-Style Callouts) --------------------------- */
+
+.callout {
+  padding: 0.85rem 1rem;
+  border-radius: 0.75rem;
+  border-left: 3px solid;
+  margin-bottom: 0.75rem;
+  font-size: 0.8rem;
+  line-height: 1.6;
+}
+
+.callout-title {
+  font-weight: 700;
+  font-size: 0.82rem;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-bottom: 0.35rem;
+}
+
+.callout-tip {
+  background-color: #ECFDF5;
+  border-color: #10B981;
+  color: #065F46;
+}
+.callout-tip .callout-title {
+  color: #047857;
+}
+
+.callout-note {
+  background-color: #F0F9FF;
+  border-color: #0EA5E9;
+  color: #0C4A6E;
+}
+.callout-note .callout-title {
+  color: #0369A1;
+}
+
+.callout-important {
+  background-color: #F5F3FF;
+  border-color: #8B5CF6;
+  color: #4C1D95;
+}
+.callout-important .callout-title {
+  color: #6D28D9;
+}
+
+.callout-warning {
+  background-color: #FFFBEB;
+  border-color: #F59E0B;
+  color: #78350F;
+}
+.callout-warning .callout-title {
+  color: #B45309;
+}
+
+/* ---- 减弱动效 (prefers-reduced-motion) ----------------------------------- */
+
+@media (prefers-reduced-motion: reduce) {
+  .code-line,
+  .heap-node,
+  .tree-node-dom,
+  .wa-slot-box,
+  .forest-chip,
+  .ctl-btn,
+  .btn-primary,
+  .btn-preset {
+    transition: none !important;
+  }
+}

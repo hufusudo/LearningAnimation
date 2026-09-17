@@ -1,0 +1,99 @@
+/* ==========================================================================
+   VLAN 原理与 802.1Q 动画演示 - 核心样式 (保持简洁，大空间与丝滑过渡)
+   ========================================================================== */
+
+:root {
+  --bg-page: #FAF9F5;
+  --bg-card: #FFFFFF;
+  --border-subtle: #E5E4DC;
+  --text-primary: #1C1917;
+  --packet-red: #EF4444;
+  --packet-green: #059669;
+}
+
+body {
+  background-color: var(--bg-page);
+  color: var(--text-primary);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, sans-serif;
+}
+
+/* 交换机实体与宽敞内部空间 */
+.switch-box {
+  transition: all 0.2s ease;
+}
+.switch-box:hover {
+  border-color: #A8A29E;
+}
+
+/* 交换机内部交换矩阵背景 (Faint Circuit/Bus Grid) */
+.switch-interior {
+  background-color: #F8FAFC;
+  background-image: radial-gradient(#CBD5E1 1px, transparent 1px);
+  background-size: 14px 14px;
+}
+
+/* 端口微交互 */
+.port-badge {
+  transition: all 0.2s ease;
+  position: relative;
+}
+.port-badge.active-port {
+  box-shadow: 0 0 0 2px #3B82F6, 0 2px 10px rgba(59, 130, 246, 0.35);
+  transform: translateY(-2px);
+}
+.port-badge.blocked-port {
+  background-color: #FEF2F2 !important;
+  border-color: #F87171 !important;
+}
+
+/* 主机卡片 */
+.host-card {
+  transition: all 0.2s ease;
+}
+.host-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+}
+.host-card.receiving-pulse {
+  animation: hostPulse 1s infinite alternate ease-in-out;
+}
+@keyframes hostPulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.5);
+    border-color: #10B981;
+  }
+  100% {
+    box-shadow: 0 0 0 8px rgba(16, 185, 129, 0);
+    border-color: #059669;
+  }
+}
+
+.host-card.sending-pulse {
+  animation: sendPulse 0.9s infinite alternate ease-in-out;
+}
+@keyframes sendPulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.5);
+    border-color: #EF4444;
+  }
+  100% {
+    box-shadow: 0 0 0 8px rgba(239, 68, 68, 0);
+    border-color: #DC2626;
+  }
+}
+
+/* 速率按键 */
+.speed-btn {
+  transition: all 0.15s ease;
+}
+.speed-btn.active {
+  background-color: #1C1917;
+  color: #FFFFFF;
+  border-color: #1C1917;
+}
+
+/* 报文方块 SVG */
+.packet-node {
+  filter: drop-shadow(0 3px 6px rgba(0, 0, 0, 0.18));
+  user-select: none;
+}

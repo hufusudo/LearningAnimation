@@ -1,0 +1,201 @@
+/* ==========================================================================
+   Sequential Multiplier Circuit - High-Fidelity Interactive Visualizer
+   Replicating the reference circuit diagram with smooth 60fps continuous tweens
+   ========================================================================== */
+
+:root {
+  --bg-page: #FAF9F5;
+  --bg-card: #FFFFFF;
+  --bg-subtle: #F5F4EE;
+  --border-main: #E5E4DC;
+  --border-strong: #D6D3CD;
+  --text-main: #1C1917;
+  --text-muted: #57534E;
+  --text-dim: #A8A29E;
+
+  /* Diagram Palette Colors */
+  --c-cout: #7C3AED;      /* Cout: 紫色 */
+  --c-cout-bg: #8B5CF6;
+  --c-acc: #0284C7;       /* ACC: 亮天蓝 */
+  --c-acc-cell: #38BDF8;
+  --c-mq: #059669;        /* MQ: 碧绿/翡翠 */
+  --c-mq-cell: #10B981;
+  --c-mq0-hatch: #CCFBF1;
+  --c-alu: #F59E0B;       /* ALU: 暖橙黄 */
+  --c-ctrl: #EF4444;      /* 控制逻辑: 鲜红 */
+  --c-x: #334155;         /* X: 深灰蓝 */
+}
+
+body {
+  background-color: var(--bg-page);
+  color: var(--text-main);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, sans-serif;
+  overflow-x: hidden;
+}
+
+.font-mono-num {
+  font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+.card-panel {
+  background: var(--bg-card);
+  border: 1px solid var(--border-main);
+  border-radius: 16px;
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.02);
+}
+
+/* SVG Elements & Circuit Styling */
+#circuit-svg {
+  user-select: none;
+}
+
+/* Register Bit Boxes in SVG */
+.svg-bit-cell {
+  transition: fill 0.3s ease, stroke 0.3s ease, filter 0.3s ease;
+}
+
+.svg-bit-text {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 26px;
+  font-weight: 800;
+  fill: #FFFFFF;
+  text-anchor: middle;
+  dominant-baseline: central;
+  pointer-events: none;
+}
+
+/* ALU Shape */
+.svg-alu-body {
+  fill: #F59E0B;
+  stroke: #B45309;
+  stroke-width: 2.5px;
+  filter: drop-shadow(0 4px 10px rgba(245, 158, 11, 0.25));
+  transition: all 0.3s ease;
+}
+
+.svg-alu-body.active {
+  fill: #FBBF24;
+  stroke: #D97706;
+  filter: drop-shadow(0 0 16px rgba(245, 158, 11, 0.55));
+}
+
+/* Control Unit Box */
+.svg-ctrl-box {
+  fill: #EF4444;
+  stroke: #B91C1C;
+  stroke-width: 2.5px;
+  filter: drop-shadow(0 4px 10px rgba(239, 68, 68, 0.25));
+  transition: all 0.3s ease;
+}
+
+.svg-ctrl-box.active {
+  fill: #F87171;
+  stroke: #DC2626;
+  filter: drop-shadow(0 0 16px rgba(239, 68, 68, 0.5));
+}
+
+/* Wire Paths */
+.wire-path {
+  stroke: #1E293B;
+  stroke-width: 2.5px;
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: stroke 0.25s ease, stroke-width 0.25s ease, filter 0.25s ease;
+}
+
+.wire-path.active {
+  stroke: #2563EB;
+  stroke-width: 4px;
+  filter: drop-shadow(0 0 6px rgba(37, 99, 235, 0.5));
+}
+
+.wire-path-ctrl {
+  stroke: #1E293B;
+  stroke-width: 3.5px;
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: all 0.25s ease;
+}
+
+.wire-path-ctrl.active {
+  stroke: #EF4444;
+  stroke-width: 4.5px;
+  filter: drop-shadow(0 0 8px rgba(239, 68, 68, 0.6));
+}
+
+.wire-bus-thick {
+  stroke: #1E293B;
+  stroke-width: 4px;
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* Flow Dash Animation */
+@keyframes flowDash {
+  to {
+    stroke-dashoffset: -20;
+  }
+}
+
+.wire-animating {
+  stroke-dasharray: 6 4;
+  animation: flowDash 0.7s linear infinite;
+}
+
+/* Hatched pattern for MQ0 */
+.hatch-pattern {
+  stroke: #047857;
+  stroke-width: 1.5;
+}
+
+/* Step Node in Timeline */
+.step-node {
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.step-node.current {
+  background: #1C1917;
+  color: #FFFFFF;
+  border-color: #1C1917;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.15);
+}
+.step-node.passed {
+  background: #F5F4EE;
+  color: #57534E;
+  border-color: #D6D3CD;
+}
+.step-node.future {
+  background: #FFFFFF;
+  color: #A8A29E;
+  border-color: #E5E4DC;
+}
+
+/* Micro-phase Step Tabs */
+.phase-pill {
+  transition: all 0.2s ease;
+  cursor: pointer;
+}
+.phase-pill.active {
+  background-color: #1C1917;
+  color: #FFFFFF;
+  font-weight: 600;
+}
+.phase-pill.inactive {
+  background-color: #F5F4EE;
+  color: #78716C;
+}
+
+/* Sliding Floating Bit Token */
+.sliding-token {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 24px;
+  font-weight: 800;
+  fill: #FFFFFF;
+  text-anchor: middle;
+  dominant-baseline: central;
+  filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.35));
+}

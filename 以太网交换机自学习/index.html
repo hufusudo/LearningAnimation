@@ -1,0 +1,559 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>以太网交换机自学习与环路兜圈问题 - 408 核心可视化</title>
+
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['-apple-system', 'BlinkMacSystemFont', 'SF Pro Display', 'Segoe UI', 'Roboto', 'sans-serif'],
+            mono: ['JetBrains Mono', 'Fira Code', 'monospace']
+          }
+        }
+      }
+    }
+  </script>
+
+  <!-- GSAP CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+
+  <!-- Custom CSS -->
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="min-h-screen bg-[#FAF9F5] text-stone-900 flex flex-col justify-between antialiased selection:bg-stone-200">
+
+  <!-- ============================================================ -->
+  <!-- 极简顶栏 Header -->
+  <!-- ============================================================ -->
+  <header class="border-b border-[#E5E4DC] bg-[#FAF9F5]/90 backdrop-blur sticky top-0 z-30 px-6 py-2.5">
+    <div class="max-w-7xl mx-auto flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <a href="../index.html#cs" class="w-7 h-7 rounded-lg bg-stone-900 text-white flex items-center justify-center font-mono font-bold text-xs hover:bg-stone-800 transition-colors shadow-sm" title="返回计算机专业基础展厅">
+          ←
+        </a>
+        <div>
+          <h1 class="text-base font-bold tracking-tight text-stone-900 flex items-center gap-2">
+            以太网交换机自学习与兜圈问题
+            <span class="text-xs font-mono font-normal px-2 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-200">408 核心考点</span>
+          </h1>
+        </div>
+      </div>
+
+      <!-- 模式切换控制器 -->
+      <div class="flex items-center gap-2">
+        <div class="flex items-center p-1 bg-stone-200/70 rounded-xl text-xs font-mono">
+          <button id="tab-mode-loop" onclick="setMainMode('loop')" class="px-3 py-1.5 rounded-lg font-bold bg-white text-stone-900 shadow-sm transition-all">
+            双交换机兜圈问题 (对照图示)
+          </button>
+          <button id="tab-mode-single" onclick="setMainMode('single')" class="px-3 py-1.5 rounded-lg font-medium text-stone-600 hover:text-stone-900 transition-all">
+            单交换机自学习 (3次过程)
+          </button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- ============================================================ -->
+  <!-- 主舞台 -->
+  <!-- ============================================================ -->
+  <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-4 space-y-4">
+
+    <!-- ========================================================== -->
+    <!-- 视图 1：双交换机环路兜圈问题 (对照图示重点实现) -->
+    <!-- ========================================================== -->
+    <div id="view-loop" class="space-y-4">
+      
+      <!-- 控制器卡片 -->
+      <section class="bg-white border border-[#E5E4DC] rounded-2xl p-4 shadow-sm space-y-3">
+        
+        <!-- 过程阶段选择卡片 -->
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-2">
+          <button id="loop-btn-s1" onclick="setLoopStep(1)" class="loop-step-tab active text-left p-3 rounded-xl border border-stone-900 bg-stone-900 text-white transition-all">
+            <div class="flex items-center justify-between text-xs font-mono opacity-80 mb-1">
+              <span>阶段 1</span>
+              <span class="px-1.5 py-0.2 rounded bg-amber-400/20 text-amber-300 text-[10px]">A 发帧泛洪</span>
+            </div>
+            <div class="text-xs font-bold truncate">A &rarr; 交换机 1</div>
+            <div class="text-[11px] opacity-70 truncate mt-0.5">学 A&rarr;1，泛洪至 2, 3, 4</div>
+          </button>
+
+          <button id="loop-btn-s2" onclick="setLoopStep(2)" class="loop-step-tab text-left p-3 rounded-xl border border-[#E5E4DC] bg-stone-50 text-stone-800 hover:border-stone-400 transition-all">
+            <div class="flex items-center justify-between text-xs font-mono text-stone-500 mb-1">
+              <span>阶段 2</span>
+              <span class="px-1.5 py-0.2 rounded bg-rose-50 text-rose-700 text-[10px] border border-rose-200">双路抵交换机 2</span>
+            </div>
+            <div class="text-xs font-bold truncate">上路 1 与下路 2</div>
+            <div class="text-[11px] text-stone-500 truncate mt-0.5">学 A&rarr;1，下路震荡 A&rarr;2 并倒灌</div>
+          </button>
+
+          <button id="loop-btn-s3" onclick="setLoopStep(3)" class="loop-step-tab text-left p-3 rounded-xl border border-[#E5E4DC] bg-stone-50 text-stone-800 hover:border-stone-400 transition-all">
+            <div class="flex items-center justify-between text-xs font-mono text-stone-500 mb-1">
+              <span>阶段 3</span>
+              <span class="px-1.5 py-0.2 rounded bg-amber-50 text-amber-700 text-[10px] border border-amber-200">倒灌交换机 1</span>
+            </div>
+            <div class="text-xs font-bold truncate">两路帧倒灌 SW1</div>
+            <div class="text-[11px] text-stone-500 truncate mt-0.5">表 1 震荡篡改，再次向外泛洪</div>
+          </button>
+
+          <button id="loop-btn-s4" onclick="setLoopStep(4)" class="loop-step-tab text-left p-3 rounded-xl border border-[#E5E4DC] bg-stone-50 text-stone-800 hover:border-stone-400 transition-all">
+            <div class="flex items-center justify-between text-xs font-mono text-stone-500 mb-1">
+              <span>阶段 4</span>
+              <span class="px-1.5 py-0.2 rounded bg-red-100 text-red-800 text-[10px] border border-red-300 font-bold">无休止死循环</span>
+            </div>
+            <div class="text-xs font-bold truncate">死循环兜圈 & 风暴</div>
+            <div class="text-[11px] text-stone-500 truncate mt-0.5">表项疯狂抖动 · 信道瘫痪</div>
+          </button>
+        </div>
+
+        <!-- 播放控制行与 STP 破环按键 -->
+        <div class="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-stone-100">
+          
+          <div class="flex items-center gap-2">
+            <button id="loop-btn-play" onclick="toggleLoopPlay()" class="ctrl-btn px-4 py-1.5 rounded-lg bg-stone-900 hover:bg-stone-800 text-white font-mono text-xs font-semibold flex items-center gap-1.5 shadow-sm">
+              <span id="loop-play-icon">▶</span>
+              <span id="loop-play-text">自动演示兜圈</span>
+            </button>
+
+            <button onclick="prevLoopStep()" class="ctrl-btn px-3 py-1.5 rounded-lg border border-[#E5E4DC] hover:border-stone-400 bg-white text-stone-700 text-xs font-mono">
+              ⏮ 上一步
+            </button>
+
+            <button onclick="nextLoopStep()" class="ctrl-btn px-3 py-1.5 rounded-lg border border-[#E5E4DC] hover:border-stone-400 bg-white text-stone-700 text-xs font-mono">
+              下一步 ⏭
+            </button>
+
+            <button onclick="resetLoop()" class="ctrl-btn px-3 py-1.5 rounded-lg border border-[#E5E4DC] hover:border-stone-400 bg-white text-stone-600 text-xs font-mono">
+              ↺ 重置拓扑与表
+            </button>
+
+            <!-- STP 破环开关 -->
+            <button id="loop-btn-stp" onclick="toggleSTP()" class="ctrl-btn px-3.5 py-1.5 rounded-lg border border-indigo-200 bg-indigo-50 hover:bg-indigo-100 text-indigo-800 font-mono text-xs font-bold flex items-center gap-1.5 transition-all">
+              <span>🛡️ STP 生成树破环:</span>
+              <span id="stp-badge" class="px-1.5 py-0.2 rounded bg-stone-200 text-stone-700 text-[10px]">未开启 (存在环路)</span>
+            </button>
+          </div>
+
+          <!-- 速率与统计 -->
+          <div class="flex items-center gap-4 text-xs font-mono text-stone-500">
+            <div class="flex items-center gap-1.5">
+              <span>主机 B 收到副本:</span>
+              <span id="host-B-packet-count" class="font-bold text-blue-600 px-1.5 py-0.5 rounded bg-blue-50 border border-blue-200">0 份</span>
+            </div>
+            <div class="flex items-center gap-1.5">
+              <span>速度:</span>
+              <button onclick="setLoopSpeed(0.5)" class="loop-speed-pill px-2 py-1 rounded border border-[#E5E4DC] hover:border-stone-400 text-stone-600">0.5x</button>
+              <button onclick="setLoopSpeed(1.0)" class="loop-speed-pill active px-2 py-1 rounded border border-stone-900 text-white">1.0x</button>
+              <button onclick="setLoopSpeed(1.8)" class="loop-speed-pill px-2 py-1 rounded border border-[#E5E4DC] hover:border-stone-400 text-stone-600">1.8x</button>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- 状态提示解说条 -->
+        <div class="bg-stone-50 border border-stone-200 rounded-xl p-3 flex items-start gap-3">
+          <div id="loop-status-icon" class="w-6 h-6 rounded-md bg-stone-200 text-stone-700 flex items-center justify-center font-bold text-xs flex-shrink-0 mt-0.5">
+            ℹ
+          </div>
+          <div class="flex-1 min-w-0">
+            <div id="loop-status-title" class="text-xs font-bold text-stone-900">
+              准备就绪：A 向 B 发送一帧
+            </div>
+            <div id="loop-status-desc" class="text-xs text-stone-600 mt-0.5 leading-relaxed">
+              初始时交换机 1 与交换机 2 的转发表均为空。点击“自动演示兜圈”或“下一步”，观察由于两台交换机之间存在双重冗余链路（物理环路），数据帧如何形成无休止死循环兜圈。
+            </div>
+          </div>
+        </div>
+
+      </section>
+
+      <!-- 核心画布：双交换机环路拓扑 (对齐原图) -->
+      <section class="bg-white border border-[#E5E4DC] rounded-2xl p-6 shadow-sm">
+        
+        <!-- 顶部标题：对齐原图字样 -->
+        <div class="text-center pb-6">
+          <h2 class="text-xl sm:text-2xl font-bold tracking-tight text-stone-900 font-sans">
+            兜圈问题
+          </h2>
+          <p class="text-xs sm:text-sm font-mono font-bold text-blue-600 mt-1">
+            A向B发送一帧
+          </p>
+        </div>
+
+        <!-- 拓扑视口容器 -->
+        <div id="loop-canvas-container" class="relative w-full min-h-[460px] rounded-xl overflow-hidden select-none flex items-center justify-between px-4 sm:px-10">
+          
+          <!-- SVG 连线与动画帧层 -->
+          <svg id="loop-svg-layer" class="absolute inset-0 w-full h-full pointer-events-none z-10">
+            <!-- 静态连接线 -->
+            <g id="loop-static-links" stroke="#1C1917" stroke-width="2.5" stroke-linecap="round"></g>
+            <!-- 动态飞行帧 Packet 容器 -->
+            <g id="loop-packets"></g>
+          </svg>
+
+          <!-- 1. 左侧：主机 A 与 主机 C -->
+          <div class="relative z-20 flex flex-col justify-around h-[340px]">
+            
+            <!-- 主机 A (红框显示器) -->
+            <div id="loop-host-A" class="monitor-box">
+              <span class="text-lg font-bold text-red-600 font-mono">A</span>
+              <div class="monitor-screen monitor-red">
+                <span class="text-[10px] font-mono font-bold text-red-600">SRC</span>
+              </div>
+            </div>
+
+            <!-- 主机 C (黑框显示器) -->
+            <div id="loop-host-C" class="monitor-box">
+              <span class="text-lg font-bold text-stone-900 font-mono">C</span>
+              <div class="monitor-screen monitor-black"></div>
+            </div>
+
+          </div>
+
+          <!-- 2. 中间：交换机 1 与 交换机 2 (方框与内部转发表) -->
+          <div class="relative z-20 flex items-center justify-center gap-12 sm:gap-20">
+            
+            <!-- 交换机 1 -->
+            <div class="flex flex-col items-center">
+              <div id="loop-sw1-box" class="loop-switch p-4 flex flex-col justify-between h-[340px]">
+                
+                <!-- 上排端口：1 (左) 与 3 (右) -->
+                <div class="flex items-center justify-between">
+                  <div id="sw1-p1" class="loop-port" title="端口 1 · 接主机 A">1</div>
+                  <div id="sw1-p3" class="loop-port" title="端口 3 · 上联链路接 SW2 端口 1">3</div>
+                </div>
+
+                <!-- 内部核心：交换表 1 (严格放入交换机内部) -->
+                <div class="bg-stone-50 border border-stone-300 rounded-lg p-2.5 shadow-inner">
+                  <div class="text-xs font-mono font-bold text-stone-800 text-center pb-1">
+                    交换表1
+                  </div>
+                  <table class="w-full text-center font-mono text-xs border border-stone-300 bg-white">
+                    <thead>
+                      <tr class="bg-stone-100 border-b border-stone-300 text-[11px] text-stone-700">
+                        <th class="py-1 px-2 border-r border-stone-300">MAC地址</th>
+                        <th class="py-1 px-2">端口</th>
+                      </tr>
+                    </thead>
+                    <tbody id="sw1-table-body" class="divide-y divide-stone-200">
+                      <tr id="sw1-empty-row">
+                        <td colspan="2" class="py-3 text-stone-400 italic text-[11px]">（空）</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+
+                <!-- 下排端口：2 (左) 与 4 (右) -->
+                <div class="flex items-center justify-between">
+                  <div id="sw1-p2" class="loop-port" title="端口 2 · 接主机 C">2</div>
+                  <div id="sw1-p4" class="loop-port" title="端口 4 · 下联链路接 SW2 端口 2">4</div>
+                </div>
+
+              </div>
+              <div class="mt-2.5 font-bold font-mono text-sm text-stone-900">
+                交换机1
+              </div>
+            </div>
+
+            <!-- 交换机 2 -->
+            <div class="flex flex-col items-center">
+              <div id="loop-sw2-box" class="loop-switch p-4 flex flex-col justify-between h-[340px]">
+                
+                <!-- 上排端口：1 (左) 与 3 (右) -->
+                <div class="flex items-center justify-between">
+                  <div id="sw2-p1" class="loop-port" title="端口 1 · 上联链路接 SW1 端口 3">1</div>
+                  <div id="sw2-p3" class="loop-port" title="端口 3 · 接主机 B">3</div>
+                </div>
+
+                <!-- 内部核心：交换表 2 (严格放入交换机内部) -->
+                <div class="bg-stone-50 border border-stone-300 rounded-lg p-2.5 shadow-inner">
+                  <div class="text-xs font-mono font-bold text-stone-800 text-center pb-1">
+                    交换表2
+                  </div>
+                  <table class="w-full text-center font-mono text-xs border border-stone-300 bg-white">
+                    <thead>
+                      <tr class="bg-stone-100 border-b border-stone-300 text-[11px] text-stone-700">
+                        <th class="py-1 px-2 border-r border-stone-300">MAC地址</th>
+                        <th class="py-1 px-2">端口</th>
+                      </tr>
+                    </thead>
+                    <tbody id="sw2-table-body" class="divide-y divide-stone-200">
+                      <tr id="sw2-empty-row">
+                        <td colspan="2" class="py-3 text-stone-400 italic text-[11px]">（空）</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+
+                <!-- 下排端口：2 (左) 与 4 (右) -->
+                <div class="flex items-center justify-between">
+                  <div id="sw2-p2" class="loop-port" title="端口 2 · 下联链路接 SW1 端口 4">2</div>
+                  <div id="sw2-p4" class="loop-port" title="端口 4 · 接主机 D">4</div>
+                </div>
+
+              </div>
+              <div class="mt-2.5 font-bold font-mono text-sm text-stone-900">
+                交换机2
+              </div>
+            </div>
+
+          </div>
+
+          <!-- 3. 右侧：主机 B 与 主机 D -->
+          <div class="relative z-20 flex flex-col justify-around h-[340px]">
+            
+            <!-- 主机 B (蓝框显示器) -->
+            <div id="loop-host-B" class="monitor-box">
+              <div class="monitor-screen monitor-blue">
+                <span class="text-[10px] font-mono font-bold text-blue-600">DST</span>
+              </div>
+              <span class="text-lg font-bold text-blue-600 font-mono">B</span>
+            </div>
+
+            <!-- 主机 D (黑框显示器) -->
+            <div id="loop-host-D" class="monitor-box">
+              <div class="monitor-screen monitor-black"></div>
+              <span class="text-lg font-bold text-stone-900 font-mono">D</span>
+            </div>
+
+          </div>
+
+        </div>
+
+      </section>
+
+    </div>
+
+    <!-- ========================================================== -->
+    <!-- 视图 2：单交换机基础自学习 (保留前次功能，支持随时切回) -->
+    <!-- ========================================================== -->
+    <div id="view-single" class="hidden space-y-4">
+      
+      <!-- 过程选择卡片栏 -->
+      <section class="bg-white border border-[#E5E4DC] rounded-2xl p-4 shadow-sm space-y-3">
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-2">
+          <button id="tab-proc1" onclick="switchProcess(1)" class="proc-tab active text-left p-3 rounded-xl border border-stone-900 bg-stone-900 text-white transition-all">
+            <div class="flex items-center justify-between text-xs font-mono opacity-80 mb-1">
+              <span>过程 1</span>
+              <span class="px-1.5 py-0.2 rounded bg-amber-400/20 text-amber-300 text-[10px]">泛洪扩散</span>
+            </div>
+            <div class="text-xs font-bold truncate">主机 A &rarr; 主机 B</div>
+            <div class="text-[11px] opacity-70 truncate mt-0.5">空表自学习 · 未知单播泛洪</div>
+          </button>
+
+          <button id="tab-proc2" onclick="switchProcess(2)" class="proc-tab text-left p-3 rounded-xl border border-[#E5E4DC] bg-stone-50 text-stone-800 hover:border-stone-400 transition-all">
+            <div class="flex items-center justify-between text-xs font-mono text-stone-500 mb-1">
+              <span>过程 2</span>
+              <span class="px-1.5 py-0.2 rounded bg-emerald-50 text-emerald-700 text-[10px] border border-emerald-200">精准单播</span>
+            </div>
+            <div class="text-xs font-bold truncate">主机 B &rarr; 主机 A</div>
+            <div class="text-[11px] text-stone-500 truncate mt-0.5">学习 B · 命中 A 定向应答</div>
+          </button>
+
+          <button id="tab-proc3" onclick="switchProcess(3)" class="proc-tab text-left p-3 rounded-xl border border-[#E5E4DC] bg-stone-50 text-stone-800 hover:border-stone-400 transition-all">
+            <div class="flex items-center justify-between text-xs font-mono text-stone-500 mb-1">
+              <span>过程 3</span>
+              <span class="px-1.5 py-0.2 rounded bg-emerald-50 text-emerald-700 text-[10px] border border-emerald-200">精准单播</span>
+            </div>
+            <div class="text-xs font-bold truncate">主机 C &rarr; 主机 A</div>
+            <div class="text-[11px] text-stone-500 truncate mt-0.5">学习 C · 命中 A 定向转发</div>
+          </button>
+
+          <button id="tab-sandbox" onclick="switchProcess('sandbox')" class="proc-tab text-left p-3 rounded-xl border border-[#E5E4DC] bg-stone-50 text-stone-800 hover:border-stone-400 transition-all">
+            <div class="flex items-center justify-between text-xs font-mono text-stone-500 mb-1">
+              <span>自由实验</span>
+              <span class="px-1.5 py-0.2 rounded bg-blue-50 text-blue-700 text-[10px] border border-blue-200">沙箱验证</span>
+            </div>
+            <div class="text-xs font-bold truncate">自定义主机收发</div>
+            <div class="text-[11px] text-stone-500 truncate mt-0.5">任选源主机与目的主机</div>
+          </button>
+        </div>
+
+        <!-- 播放控制行 -->
+        <div class="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-stone-100">
+          <div class="flex items-center gap-2">
+            <button id="btn-play" onclick="togglePlay()" class="ctrl-btn px-4 py-1.5 rounded-lg bg-stone-900 hover:bg-stone-800 text-white font-mono text-xs font-semibold flex items-center gap-1.5 shadow-sm">
+              <span id="play-icon">▶</span>
+              <span id="play-text">自动播放</span>
+            </button>
+            <button id="btn-prev" onclick="prevStep()" class="ctrl-btn px-3 py-1.5 rounded-lg border border-[#E5E4DC] hover:border-stone-400 bg-white text-stone-700 text-xs font-mono">
+              ⏮ 上一步
+            </button>
+            <button id="btn-next" onclick="nextStep()" class="ctrl-btn px-3 py-1.5 rounded-lg border border-[#E5E4DC] hover:border-stone-400 bg-white text-stone-700 text-xs font-mono">
+              下一步 ⏭
+            </button>
+            <button id="btn-reset" onclick="resetCurrentProcess()" class="ctrl-btn px-3 py-1.5 rounded-lg border border-[#E5E4DC] hover:border-stone-400 bg-white text-stone-600 text-xs font-mono">
+              ↺ 重置表与状态
+            </button>
+          </div>
+
+          <div class="flex items-center gap-2 font-mono text-xs text-stone-600">
+            <span>阶段:</span>
+            <span id="step-badge" class="font-bold px-2 py-0.5 rounded bg-stone-100 text-stone-900 border border-stone-300">
+              阶段 1 / 4
+            </span>
+          </div>
+
+          <div class="flex items-center gap-1.5 text-xs font-mono text-stone-500">
+            <span>速度:</span>
+            <button onclick="setSpeed(0.5)" class="speed-pill px-2 py-1 rounded border border-[#E5E4DC] hover:border-stone-400 text-stone-600">0.5x</button>
+            <button onclick="setSpeed(1.0)" class="speed-pill active px-2 py-1 rounded border border-stone-900 text-white">1.0x</button>
+            <button onclick="setSpeed(1.8)" class="speed-pill px-2 py-1 rounded border border-[#E5E4DC] hover:border-stone-400 text-stone-600">1.8x</button>
+          </div>
+        </div>
+
+        <div id="status-panel" class="bg-stone-50 border border-stone-200 rounded-xl p-3 flex items-start gap-3">
+          <div id="status-icon-box" class="w-6 h-6 rounded-md bg-blue-100 text-blue-700 flex items-center justify-center font-bold text-xs flex-shrink-0 mt-0.5">ℹ</div>
+          <div class="flex-1 min-w-0">
+            <div id="status-title" class="text-xs font-bold text-stone-900">准备就绪</div>
+            <div id="status-desc" class="text-xs text-stone-600 mt-0.5 leading-relaxed">点击播放或下一步观察单交换机自学习。</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 单交换机拓扑 -->
+      <section class="bg-white border border-[#E5E4DC] rounded-2xl p-4 sm:p-6 shadow-sm">
+        <div id="canvas-container" class="relative w-full min-h-[540px] rounded-xl overflow-hidden select-none">
+          <svg id="svg-layer" class="absolute inset-0 w-full h-full pointer-events-none z-10">
+            <g id="svg-links" stroke="#E2E8F0" stroke-width="2" stroke-linecap="round"></g>
+            <g id="svg-active-links" stroke-width="3" stroke-linecap="round"></g>
+            <g id="svg-packets"></g>
+          </svg>
+
+          <div class="relative z-20 w-full h-full flex flex-col justify-between py-2 gap-8">
+            <div class="flex items-center justify-between px-4 sm:px-12">
+              <div id="host-A" class="host-card w-48 sm:w-56 bg-white border-2 border-stone-200 rounded-xl p-3 shadow-sm flex flex-col gap-1.5">
+                <div class="flex items-center justify-between">
+                  <div class="flex items-center gap-2">
+                    <div class="w-7 h-7 rounded-lg bg-blue-50 text-blue-700 flex items-center justify-center font-mono font-bold text-xs border border-blue-200">A</div>
+                    <div><div class="text-xs font-bold text-stone-900">主机 Host-A</div><div class="text-[10px] text-stone-400 font-mono">192.168.1.1</div></div>
+                  </div>
+                  <span id="host-A-badge" class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-stone-100 text-stone-600 border border-stone-200">端口 1</span>
+                </div>
+                <div class="pt-1 border-t border-stone-100 text-[10px] font-mono flex items-center justify-between text-stone-500">
+                  <span>MAC:</span><span class="font-semibold text-stone-700">00-1A-2B-3C-4D-A1</span>
+                </div>
+                <div id="host-A-status" class="text-[10px] font-mono text-center py-0.5 rounded bg-stone-50 text-stone-400">空闲待机</div>
+              </div>
+
+              <div id="host-B" class="host-card w-48 sm:w-56 bg-white border-2 border-stone-200 rounded-xl p-3 shadow-sm flex flex-col gap-1.5">
+                <div class="flex items-center justify-between">
+                  <div class="flex items-center gap-2">
+                    <div class="w-7 h-7 rounded-lg bg-emerald-50 text-emerald-700 flex items-center justify-center font-mono font-bold text-xs border border-emerald-200">B</div>
+                    <div><div class="text-xs font-bold text-stone-900">主机 Host-B</div><div class="text-[10px] text-stone-400 font-mono">192.168.1.2</div></div>
+                  </div>
+                  <span id="host-B-badge" class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-stone-100 text-stone-600 border border-stone-200">端口 2</span>
+                </div>
+                <div class="pt-1 border-t border-stone-100 text-[10px] font-mono flex items-center justify-between text-stone-500">
+                  <span>MAC:</span><span class="font-semibold text-stone-700">00-1A-2B-3C-4D-B2</span>
+                </div>
+                <div id="host-B-status" class="text-[10px] font-mono text-center py-0.5 rounded bg-stone-50 text-stone-400">空闲待机</div>
+              </div>
+            </div>
+
+            <div class="flex justify-center px-2">
+              <div id="switch-main" class="switch-container w-full max-w-3xl rounded-2xl p-4 sm:p-5 flex flex-col gap-4 relative">
+                <div class="flex items-center justify-between border-b border-stone-200 pb-2.5">
+                  <div class="flex items-center gap-2.5">
+                    <div class="w-8 h-8 rounded-lg bg-stone-900 text-white flex items-center justify-center font-mono font-bold text-sm shadow-sm">SW</div>
+                    <div>
+                      <div class="text-xs font-bold text-stone-900 flex items-center gap-2">以太网交换机 (Ethernet Switch)</div>
+                      <div class="text-[10px] font-mono text-stone-400">存储转发模式 · 内部 CAM 转发表</div>
+                    </div>
+                  </div>
+                  <div class="flex items-center gap-2 text-xs font-mono text-stone-500">
+                    <span>转发表项:</span><span id="mac-table-count" class="font-bold text-stone-900 px-1.5 py-0.5 rounded bg-stone-100">0 条</span>
+                  </div>
+                </div>
+
+                <div class="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                  <div id="port-1" class="port-badge port-idle border border-stone-200 rounded-xl p-2.5 flex flex-col justify-between gap-1 shadow-sm">
+                    <div class="flex items-center justify-between"><span class="text-xs font-mono font-bold text-stone-800">端口 1</span><span id="led-1" class="led-lamp"></span></div>
+                    <div id="port-1-traffic" class="text-[10px] font-mono text-stone-400 truncate">IDLE 空闲</div>
+                  </div>
+                  <div id="port-2" class="port-badge port-idle border border-stone-200 rounded-xl p-2.5 flex flex-col justify-between gap-1 shadow-sm">
+                    <div class="flex items-center justify-between"><span class="text-xs font-mono font-bold text-stone-800">端口 2</span><span id="led-2" class="led-lamp"></span></div>
+                    <div id="port-2-traffic" class="text-[10px] font-mono text-stone-400 truncate">IDLE 空闲</div>
+                  </div>
+                  <div id="port-3" class="port-badge port-idle border border-stone-200 rounded-xl p-2.5 flex flex-col justify-between gap-1 shadow-sm">
+                    <div class="flex items-center justify-between"><span class="text-xs font-mono font-bold text-stone-800">端口 3</span><span id="led-3" class="led-lamp"></span></div>
+                    <div id="port-3-traffic" class="text-[10px] font-mono text-stone-400 truncate">IDLE 空闲</div>
+                  </div>
+                  <div id="port-4" class="port-badge port-idle border border-stone-200 rounded-xl p-2.5 flex flex-col justify-between gap-1 shadow-sm">
+                    <div class="flex items-center justify-between"><span class="text-xs font-mono font-bold text-stone-800">端口 4</span><span id="led-4" class="led-lamp"></span></div>
+                    <div id="port-4-traffic" class="text-[10px] font-mono text-stone-400 truncate">IDLE 空闲</div>
+                  </div>
+                </div>
+
+                <div class="switch-interior-bg border border-stone-200 rounded-xl p-3.5 flex flex-col gap-2 shadow-inner">
+                  <div class="text-xs font-mono font-bold text-stone-800">交换机 MAC 地址转发表 (CAM Table)</div>
+                  <div class="overflow-x-auto bg-white rounded-lg border border-stone-200">
+                    <table class="w-full text-left font-mono text-xs">
+                      <thead>
+                        <tr class="bg-stone-50 border-b border-stone-200 text-[11px] text-stone-500">
+                          <th class="py-2 px-3">目的 MAC 地址</th>
+                          <th class="py-2 px-3">端口</th>
+                          <th class="py-2 px-3">TTL</th>
+                          <th class="py-2 px-3">状态</th>
+                        </tr>
+                      </thead>
+                      <tbody id="mac-table-body" class="divide-y divide-stone-100">
+                        <tr id="table-empty-row"><td colspan="4" class="py-3 text-center text-stone-400 text-xs italic">转发表当前为空</td></tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="flex items-center justify-between px-4 sm:px-12">
+              <div id="host-C" class="host-card w-48 sm:w-56 bg-white border-2 border-stone-200 rounded-xl p-3 shadow-sm flex flex-col gap-1.5">
+                <div class="flex items-center justify-between">
+                  <div class="flex items-center gap-2">
+                    <div class="w-7 h-7 rounded-lg bg-amber-50 text-amber-700 flex items-center justify-center font-mono font-bold text-xs border border-amber-200">C</div>
+                    <div><div class="text-xs font-bold text-stone-900">主机 Host-C</div><div class="text-[10px] text-stone-400 font-mono">192.168.1.3</div></div>
+                  </div>
+                  <span id="host-C-badge" class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-stone-100 text-stone-600 border border-stone-200">端口 3</span>
+                </div>
+                <div class="pt-1 border-t border-stone-100 text-[10px] font-mono flex items-center justify-between text-stone-500">
+                  <span>MAC:</span><span class="font-semibold text-stone-700">00-1A-2B-3C-4D-C3</span>
+                </div>
+                <div id="host-C-status" class="text-[10px] font-mono text-center py-0.5 rounded bg-stone-50 text-stone-400">空闲待机</div>
+              </div>
+
+              <div id="host-D" class="host-card w-48 sm:w-56 bg-white border-2 border-stone-200 rounded-xl p-3 shadow-sm flex flex-col gap-1.5">
+                <div class="flex items-center justify-between">
+                  <div class="flex items-center gap-2">
+                    <div class="w-7 h-7 rounded-lg bg-purple-50 text-purple-700 flex items-center justify-center font-mono font-bold text-xs border border-purple-200">D</div>
+                    <div><div class="text-xs font-bold text-stone-900">主机 Host-D</div><div class="text-[10px] text-stone-400 font-mono">192.168.1.4</div></div>
+                  </div>
+                  <span id="host-D-badge" class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-stone-100 text-stone-600 border border-stone-200">端口 4</span>
+                </div>
+                <div class="pt-1 border-t border-stone-100 text-[10px] font-mono flex items-center justify-between text-stone-500">
+                  <span>MAC:</span><span class="font-semibold text-stone-700">00-1A-2B-3C-4D-D4</span>
+                </div>
+                <div id="host-D-status" class="text-[10px] font-mono text-center py-0.5 rounded bg-stone-50 text-stone-400">空闲待机</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+    </div>
+
+  </main>
+
+  <!-- 极简页脚 -->
+  <footer class="border-t border-[#E5E4DC] py-3.5 px-6 text-center text-xs font-mono text-stone-400">
+    计算机专业基础 (408) · 计算机网络 · 交换机自学习与兜圈广播风暴交互演示
+  </footer>
+
+  <!-- 核心逻辑脚本 -->
+  <script src="app.js"></script>
+</body>
+</html>

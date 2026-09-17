@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>回退N帧 (GBN) 协议工作机制可视化 · 计算机专业基础 408</title>
+
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['-apple-system', 'BlinkMacSystemFont', 'SF Pro Display', 'Segoe UI', 'Roboto', 'sans-serif'],
+            serif: ['Newsreader', 'Georgia', 'serif'],
+            mono: ['JetBrains Mono', 'Fira Code', 'SF Mono', 'monospace']
+          },
+          colors: {
+            stone: {
+              50: '#FAF9F5',
+              100: '#F4F3EE',
+              200: '#E5E4DC',
+              300: '#D6D3CD',
+              400: '#A8A29E',
+              500: '#78716C',
+              600: '#57534E',
+              700: '#44403C',
+              800: '#292524',
+              900: '#1C1917'
+            }
+          }
+        }
+      }
+    }
+  </script>
+
+  <!-- GSAP CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+
+  <!-- KaTeX for formula rendering -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+
+  <!-- Custom Stylesheet -->
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="min-h-screen bg-[#FAF9F5] text-stone-900 selection:bg-amber-100 selection:text-amber-900 flex flex-col justify-between antialiased">
+
+  <!-- ========================================================================= -->
+  <!-- 顶栏导航 (HEADER)                                                         -->
+  <!-- ========================================================================= -->
+  <header class="border-b border-[#E5E4DC] bg-[#FAF9F5]/90 backdrop-blur sticky top-0 z-30 px-4 lg:px-8 py-3">
+    <div class="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-3">
+      <div class="flex items-center gap-3">
+        <a href="../index.html#cs" class="flex items-center gap-1.5 text-xs font-mono text-stone-500 hover:text-stone-900 transition-colors py-1 px-2.5 rounded-lg border border-stone-200 hover:border-stone-400 bg-white shadow-sm">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path></svg>
+          <span>返回学科展厅</span>
+        </a>
+        <div class="h-4 w-px bg-stone-300"></div>
+        <h1 class="text-base font-bold tracking-tight text-stone-900">
+          回退N帧 (GBN) 滑动窗口协议
+        </h1>
+      </div>
+
+      <!-- 场景选择选项卡 -->
+      <div class="flex items-center bg-[#EBEAE3] p-1 rounded-xl border border-[#DCDAD0] text-xs font-medium overflow-x-auto">
+        <button id="tab-normal" class="scenario-tab active px-3 py-1.5 rounded-lg whitespace-nowrap">
+          未丢失帧 (正常流程)
+        </button>
+        <button id="tab-data-loss" class="scenario-tab px-3 py-1.5 rounded-lg text-stone-600 hover:text-stone-900 whitespace-nowrap">
+          发送帧丢失 (回退重传)
+        </button>
+        <button id="tab-ack-loss" class="scenario-tab px-3 py-1.5 rounded-lg text-stone-600 hover:text-stone-900 whitespace-nowrap">
+          确认帧丢失 (累积吸收)
+        </button>
+        <button id="tab-duplicate" class="scenario-tab px-3 py-1.5 rounded-lg text-stone-600 hover:text-stone-900 whitespace-nowrap">
+          收到重复帧 (补偿ACK)
+        </button>
+        <button id="tab-sandbox" class="scenario-tab px-3 py-1.5 rounded-lg text-stone-600 hover:text-stone-900 whitespace-nowrap">
+          自由演练沙盒
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- ========================================================================= -->
+  <!-- 主操作与控制栏 (CONTROL BAR)                                               -->
+  <!-- ========================================================================= -->
+  <div class="border-b border-[#E5E4DC] bg-white/70 px-4 lg:px-8 py-2.5">
+    <div class="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-3">
+      <!-- 播放控制组 -->
+      <div class="flex items-center gap-2">
+        <button id="btn-play" class="btn-control bg-stone-900 text-white hover:bg-stone-800 px-3.5 py-1.5 rounded-lg text-xs font-semibold shadow-sm flex items-center gap-1.5">
+          <span id="btn-play-text">自动播放</span>
+        </button>
+        <button id="btn-step" class="btn-control bg-white text-stone-800 border border-stone-300 hover:border-stone-400 hover:bg-stone-50 px-3 py-1.5 rounded-lg text-xs font-semibold shadow-sm">
+          单步推演 &rarr;
+        </button>
+        <button id="btn-reset" class="btn-control bg-stone-100 text-stone-600 hover:text-stone-900 border border-stone-200 px-3 py-1.5 rounded-lg text-xs font-medium">
+          重置系统
+        </button>
+
+        <!-- 调速器 -->
+        <div class="flex items-center gap-1.5 ml-2 pl-3 border-l border-stone-200 text-xs font-mono text-stone-600">
+          <span>速度:</span>
+          <input id="speed-slider" type="range" min="0.5" max="2.5" step="0.1" value="1.0" class="w-16 accent-stone-900 cursor-pointer h-1 bg-stone-200 rounded-lg">
+          <span id="speed-val" class="w-7 font-bold text-stone-800">1.0x</span>
+        </div>
+      </div>
+
+      <!-- 自由交互按键组 -->
+      <div class="flex items-center gap-2">
+        <button id="btn-send-one" class="btn-control bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100 px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1">
+          <span>＋ 发送单个帧</span>
+        </button>
+        <button id="btn-drop-data" class="btn-control bg-stone-50 text-stone-600 border border-stone-200 hover:border-red-300 hover:text-red-700 px-2.5 py-1.5 rounded-lg text-xs font-mono">
+          模拟丢弃下一数据帧
+        </button>
+        <button id="btn-drop-ack" class="btn-control bg-stone-50 text-stone-600 border border-stone-200 hover:border-red-300 hover:text-red-700 px-2.5 py-1.5 rounded-lg text-xs font-mono">
+          模拟丢弃下一ACK
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========================================================================= -->
+  <!-- 主视觉区：左右双栏布局 (MAIN VIEW)                                        -->
+  <!-- ========================================================================= -->
+  <main class="flex-1 max-w-7xl w-full mx-auto px-4 lg:px-8 py-6 grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+
+    <!-- ======================================================================= -->
+    <!-- 左栏：滑动窗口动画与时空梯形图 (7 列)                                     -->
+    <!-- ======================================================================= -->
+    <div class="lg:col-span-7 flex flex-col gap-5">
+
+      <!-- 1. 发送方滑动窗口监视器 -->
+      <div class="editorial-card p-5">
+        <div class="flex items-center justify-between border-b border-[#E5E4DC] pb-3 mb-4">
+          <div class="flex items-center gap-2">
+            <span class="w-2.5 h-2.5 rounded-full bg-blue-600"></span>
+            <h2 class="text-sm font-bold text-stone-900">
+              发送方滑动窗口 (Sender Window, $W_T = 4$)
+            </h2>
+          </div>
+
+          <!-- 单一定时器仪表 -->
+          <div class="flex items-center gap-3 bg-stone-50 px-3 py-1.5 rounded-lg border border-stone-200">
+            <div class="relative w-7 h-7 flex items-center justify-center">
+              <svg class="w-7 h-7 -rotate-90" viewBox="0 0 36 36">
+                <path class="text-stone-200" stroke-width="3.5" stroke="currentColor" fill="none" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+                <path id="timer-ring-progress" class="text-amber-500 transition-all" stroke-width="3.5" stroke-dasharray="100, 100" stroke-linecap="round" stroke="currentColor" fill="none" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+              </svg>
+              <span class="absolute text-[9px] font-mono font-bold text-amber-700">⏱</span>
+            </div>
+            <div>
+              <div class="text-[11px] font-mono leading-none">
+                <span class="text-stone-400">单一定时器: </span>
+                <span id="timer-display-text" class="font-bold text-stone-800">STOPPED</span>
+              </div>
+              <div id="timer-sub-text" class="text-[10px] text-stone-400 font-mono mt-0.5">无未确认帧</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 发送方显眼事件通知条 (丢包/超时/回退重传) -->
+        <div id="sender-alert-banner" class="hidden mb-3 text-xs font-mono font-bold px-3 py-1.5 rounded-lg border flex items-center justify-between transition-all"></div>
+
+        <!-- 缓冲区序列条 (带滑动框) -->
+        <div class="relative overflow-x-auto pb-6 pt-2">
+          <div class="relative inline-flex gap-2 min-w-max" id="sender-strip-wrapper">
+            <!-- 滑动窗口动态边框覆盖层 -->
+            <div id="sender-bracket" class="window-slider-bracket"></div>
+
+            <!-- 8个序号单元格通过 JS 动态生成挂载 (0~7) -->
+            <div id="sender-cells" class="inline-flex gap-2"></div>
+          </div>
+
+          <!-- 指针标注 (base & nextseqnum) - 分层排布彻底避免重叠 -->
+          <div class="relative h-11 mt-1 text-[11px] font-mono pointer-events-none">
+            <span id="sender-base-pointer" class="absolute left-0 top-0 text-blue-700 font-bold transition-transform duration-300 whitespace-nowrap">
+              ▲ base = 0
+            </span>
+            <span id="sender-next-pointer" class="absolute left-0 top-5 text-amber-700 font-bold transition-transform duration-300 whitespace-nowrap">
+              ▲ nextseq = 0
+            </span>
+          </div>
+        </div>
+
+        <!-- 发送方图例 -->
+        <div class="flex flex-wrap items-center gap-4 text-[11px] font-mono text-stone-500 pt-2 border-t border-stone-100">
+          <div class="flex items-center gap-1.5">
+            <span class="w-3 h-3 rounded bg-[#F4F3EE] border border-[#D6D3CD]"></span>
+            <span>已发送并确认</span>
+          </div>
+          <div class="flex items-center gap-1.5">
+            <span class="w-3 h-3 rounded bg-[#EFF6FF] border border-[#93C5FD]"></span>
+            <span class="text-blue-700 font-semibold">已发送未确认 [base, next-1]</span>
+          </div>
+          <div class="flex items-center gap-1.5">
+            <span class="w-3 h-3 rounded bg-[#FEF3C7] border border-[#FCD34D]"></span>
+            <span class="text-amber-800">可用未发送 [next, base+N-1]</span>
+          </div>
+          <div class="flex items-center gap-1.5">
+            <span class="w-3 h-3 rounded bg-[#FAF9F5] border border-[#E5E4DC]"></span>
+            <span class="text-stone-400">窗口外不可用</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 2. 信道交互微通道 (报文飞行区，可点击丢包) -->
+      <div class="editorial-card p-4 relative overflow-hidden bg-gradient-to-b from-[#FAF9F5] to-[#F4F3EE]">
+        <div class="flex items-center justify-between text-xs font-mono text-stone-500 mb-2">
+          <span>双向物理信道 (Physical Channel)</span>
+          <span class="text-stone-400 text-[11px]">💡 提示：点击飞行中的任意报文可随时丢弃该帧</span>
+        </div>
+
+        <!-- 报文飞行跑道 -->
+        <div id="flight-channel" class="relative h-24 w-full border border-dashed border-stone-300 rounded-xl bg-white/60 overflow-hidden">
+          <!-- 上行跑道线 (Data Frame) -->
+          <div class="absolute top-8 left-4 right-4 h-px border-b border-blue-200 border-dashed"></div>
+          <span class="absolute top-2 left-4 text-[10px] font-mono text-blue-500">
+            发送方 &rarr; 接收方 (数据帧 Data Frame)
+          </span>
+
+          <!-- 下行跑道线 (ACK Frame) -->
+          <div class="absolute top-18 left-4 right-4 h-px border-b border-emerald-200 border-dashed"></div>
+          <span class="absolute top-12 right-4 text-[10px] font-mono text-emerald-600">
+            接收方 &rarr; 发送方 (累积确认 ACK Frame)
+          </span>
+        </div>
+      </div>
+
+      <!-- 3. 接收方滑动窗口监视器 -->
+      <div class="editorial-card p-5">
+        <div class="flex items-center justify-between border-b border-[#E5E4DC] pb-3 mb-4">
+          <div class="flex items-center gap-2">
+            <span class="w-2.5 h-2.5 rounded-full bg-emerald-600"></span>
+            <h2 class="text-sm font-bold text-stone-900">
+              接收方滑动窗口 (Receiver Window, $W_R = 1$)
+            </h2>
+          </div>
+          <span class="text-xs font-mono text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200 font-semibold">
+            严格按序接收 · 无缓存直接丢弃
+          </span>
+        </div>
+
+        <!-- 接收方显眼丢弃/接收通知条 -->
+        <div id="receiver-alert-banner" class="hidden mb-3 text-xs font-mono font-bold px-3 py-1.5 rounded-lg border flex items-center justify-between transition-all"></div>
+
+        <!-- 接收方序列条 (带单个高亮格子) -->
+        <div class="relative overflow-x-auto pb-6 pt-2">
+          <div class="relative inline-flex gap-2 min-w-max" id="receiver-strip-wrapper">
+            <!-- 单格接收窗口边框 -->
+            <div id="receiver-bracket" class="receiver-slider-bracket"></div>
+
+            <!-- 8个接收单元格 (0~7) -->
+            <div id="receiver-cells" class="inline-flex gap-2"></div>
+          </div>
+
+          <!-- 指针标注 (expectedseqnum) -->
+          <div class="relative h-6 mt-1 text-[11px] font-mono">
+            <span id="receiver-pointer" class="absolute left-0 text-emerald-700 font-bold transition-transform duration-300">
+              ▲ expected = 0 (Wr = 1)
+            </span>
+          </div>
+        </div>
+
+        <div class="text-[11px] font-mono text-stone-500 pt-2 border-t border-stone-100 flex items-center justify-between">
+          <span>规则：仅当序号严格等于 expected 时接收并滑动窗口；若到达失序帧或重复帧，直接丢弃！</span>
+          <span class="text-emerald-700 font-bold">ACK(n) 确认序号 ≤ n 的所有帧</span>
+        </div>
+      </div>
+
+      <!-- 4. 408 经典时空交互梯形图 (Space-Time Diagram) -->
+      <div class="editorial-card p-5">
+        <div class="flex items-center justify-between mb-3">
+          <div class="flex items-center gap-2">
+            <span class="w-2.5 h-2.5 rounded-full bg-stone-700"></span>
+            <h3 class="text-sm font-bold text-stone-900">
+              时空时序梯形图 (Space-Time Diagram)
+            </h3>
+          </div>
+          <span class="text-xs font-mono text-stone-400">
+            双向时序通信轨迹
+          </span>
+        </div>
+        <canvas id="spacetime-canvas" class="w-full h-72 block"></canvas>
+      </div>
+
+    </div>
+
+    <!-- ======================================================================= -->
+    <!-- 右栏：步骤微解析、状态监视器与 408 考点看板 (5 列)                        -->
+    <!-- ======================================================================= -->
+    <div class="lg:col-span-5 flex flex-col gap-5">
+
+      <!-- 1. 当前步骤核心解析看板 -->
+      <div class="editorial-card p-5 bg-stone-50 border-stone-300">
+        <div class="flex items-center justify-between pb-2 border-b border-stone-200 mb-3">
+          <div class="flex items-center gap-1.5 text-xs font-mono font-bold text-stone-800">
+            <span class="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span>
+            <span>协议当前动态执行解析</span>
+          </div>
+          <span class="text-[11px] font-mono text-stone-400">实时联动</span>
+        </div>
+        <p id="explanation-text" class="text-xs text-stone-700 leading-relaxed font-mono whitespace-pre-line">
+          就绪。请选择上方场景并点击“自动播放”或“单步推演”开始。
+        </p>
+      </div>
+
+      <!-- 2. 状态微监视器 -->
+      <div class="editorial-card p-4">
+        <div class="text-xs font-mono font-bold text-stone-500 uppercase tracking-wider mb-3">
+          PROTOCOL REGISTERS · 核心状态寄存器
+        </div>
+        <div class="grid grid-cols-2 gap-2 text-xs font-mono">
+          <div class="p-2.5 rounded-lg bg-stone-50 border border-stone-200">
+            <div class="text-stone-400 text-[10px]">发送方 base</div>
+            <div id="stat-base" class="text-base font-bold text-blue-700">0</div>
+            <div class="text-[10px] text-stone-500 mt-0.5">最早未确认帧序号</div>
+          </div>
+          <div class="p-2.5 rounded-lg bg-stone-50 border border-stone-200">
+            <div class="text-stone-400 text-[10px]">发送方 nextseqnum</div>
+            <div id="stat-next" class="text-base font-bold text-amber-700">0</div>
+            <div class="text-[10px] text-stone-500 mt-0.5">下一个可用发送序号</div>
+          </div>
+          <div class="p-2.5 rounded-lg bg-stone-50 border border-stone-200">
+            <div class="text-stone-400 text-[10px]">接收方 expectedseqnum</div>
+            <div id="stat-expected" class="text-base font-bold text-emerald-700">0</div>
+            <div class="text-[10px] text-stone-500 mt-0.5">当前期望接收序号 (Wr=1)</div>
+          </div>
+          <div class="p-2.5 rounded-lg bg-stone-50 border border-stone-200">
+            <div class="text-stone-400 text-[10px]">信道飞行报文</div>
+            <div id="stat-inflight" class="text-base font-bold text-stone-800">0</div>
+            <div class="text-[10px] text-stone-500 mt-0.5">传输中 Data / ACK</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 3. 事件日志窗口 -->
+      <div class="editorial-card p-4">
+        <div class="flex items-center justify-between pb-2 border-b border-stone-100 mb-2">
+          <span class="text-xs font-mono font-bold text-stone-700">信道与节点事件微流日志</span>
+          <span class="text-[10px] font-mono text-stone-400">实时滚动</span>
+        </div>
+        <div id="event-logs" class="h-[420px] overflow-y-auto space-y-1 pr-1">
+          <!-- 动态挂载 -->
+        </div>
+      </div>
+
+    </div>
+
+  </main>
+
+  <!-- ========================================================================= -->
+  <!-- 极简页脚 (FOOTER)                                                         -->
+  <!-- ========================================================================= -->
+  <footer class="border-t border-[#E5E4DC] py-4 px-6 text-center text-xs font-mono text-stone-400 bg-white/50">
+    可视化实验室 · 回退N帧 (GBN) 滑动窗口协议
+  </footer>
+
+  <!-- 引入核心逻辑驱动脚本 -->
+  <script src="app.js"></script>
+</body>
+</html>

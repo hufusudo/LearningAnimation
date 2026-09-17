@@ -1,0 +1,213 @@
+/* ==========================================================================
+   Cauchy's Mean Value Theorem Visualizer - Light Theme (Taste Skill Spec)
+   ========================================================================== */
+
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400;1,6..72,600&display=swap');
+
+:root {
+  --bg-page: #FAF9F5;
+  --bg-surface: #FFFFFF;
+  --bg-surface-subtle: #F4F3EE;
+  --bg-surface-hover: #ECEBE5;
+
+  --border-main: #E5E4DC;
+  --border-subtle: #ECEBE4;
+  --border-active: #C8C7BD;
+
+  --text-primary: #1C1917;
+  --text-secondary: #57534E;
+  --text-muted: #78716C;
+  --text-dim: #A8A29E;
+
+  /* Theorem Semantics */
+  --curve-color: #2563EB;      /* Royal Blue for Parametric Curve */
+  --curve-bg: #EFF6FF;
+  --curve-border: #BFDBFE;
+
+  --secant-color: #D97706;     /* Amber Gold for Secant Line AB */
+  --secant-bg: #FFFBEB;
+  --secant-border: #FDE68A;
+
+  --tangent-color: #059669;    /* Emerald Green for Tangent at P(t) */
+  --tangent-bg: #ECFDF5;
+  --tangent-border: #A7F3D0;
+
+  --aux-color: #7C3AED;        /* Violet for Auxiliary Function F(t) */
+  --aux-bg: #F5F3FF;
+  --aux-border: #DDD6FE;
+
+  --xi-color: #E11D48;         /* Crimson/Rose for Mean Value Point \xi */
+  --xi-gold: #EAB308;
+  --xi-bg: #FEFCE8;
+
+  --shadow-subtle: 0 1px 3px 0 rgba(0, 0, 0, 0.04), 0 1px 2px -1px rgba(0, 0, 0, 0.03);
+  --shadow-elevated: 0 4px 12px 0 rgba(0, 0, 0, 0.05), 0 2px 4px -2px rgba(0, 0, 0, 0.03);
+}
+
+/* Reset & Base */
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+body {
+  background-color: var(--bg-page);
+  color: var(--text-primary);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.font-serif-math {
+  font-family: 'Newsreader', Georgia, Cambria, 'Times New Roman', serif;
+}
+
+.font-mono-num {
+  font-family: 'JetBrains Mono', SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+/* Crisp 1px Borders */
+.border-refined {
+  border: 1px solid var(--border-main);
+}
+
+.border-subtle-1px {
+  border: 1px solid var(--border-subtle);
+}
+
+/* Card surfaces */
+.card-surface {
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-main);
+  border-radius: 12px;
+  box-shadow: var(--shadow-subtle);
+}
+
+/* Custom Scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #D6D3D1;
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #A8A29E;
+}
+
+/* Interactive SVG Handles */
+.curve-handle {
+  cursor: grab;
+  transition: transform 0.15s cubic-bezier(0.16, 1, 0.3, 1), filter 0.15s ease;
+}
+.curve-handle:hover {
+  filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.18));
+}
+.curve-handle:active, .curve-handle.is-dragging {
+  cursor: grabbing !important;
+  transform: scale(1.18);
+}
+
+/* Custom Sliders */
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  background: #E7E5E4;
+  height: 4px;
+  border-radius: 2px;
+  outline: none;
+  transition: background 0.15s ease;
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #1C1917;
+  cursor: pointer;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+  transition: transform 0.1s ease, background 0.15s ease;
+}
+input[type="range"]::-webkit-slider-thumb:hover {
+  transform: scale(1.25);
+  background: #000000;
+}
+input[type="range"]::-webkit-slider-thumb:active {
+  transform: scale(1.35);
+}
+
+/* Slider semantic colors */
+input[type="range"].slider-t::-webkit-slider-thumb {
+  background: var(--tangent-color);
+}
+input[type="range"].slider-a::-webkit-slider-thumb {
+  background: var(--secant-color);
+}
+input[type="range"].slider-b::-webkit-slider-thumb {
+  background: var(--secant-color);
+}
+
+/* Tab Active Styles */
+.tab-btn {
+  position: relative;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.tab-btn.active {
+  background-color: #FFFFFF;
+  color: var(--text-primary);
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.06);
+  border: 1px solid var(--border-main);
+}
+.tab-btn:not(.active) {
+  color: var(--text-muted);
+  border: 1px solid transparent;
+}
+.tab-btn:not(.active):hover {
+  color: var(--text-primary);
+  background-color: rgba(255, 255, 255, 0.6);
+}
+
+/* Action Buttons */
+.btn-action {
+  transition: all 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.btn-action:active {
+  transform: scale(0.97);
+}
+
+/* Pulse Animation for Parallel State */
+@keyframes parallelPulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(234, 179, 8, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 0 8px rgba(234, 179, 8, 0);
+  }
+}
+.pulse-parallel {
+  animation: parallelPulse 1.8s infinite cubic-bezier(0.24, 0, 0.38, 1);
+}
+
+/* Grid & Axes lines */
+.grid-line {
+  stroke: #ECEAE3;
+  stroke-width: 1;
+}
+.grid-line-subtle {
+  stroke: #F5F4EF;
+  stroke-width: 1;
+}
+.axis-line {
+  stroke: #D6D3CD;
+  stroke-width: 1.5;
+}
+
+/* KaTeX formula typography tweaks */
+.katex {
+  font-size: 1.05em !important;
+}

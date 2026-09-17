@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>操作系统离散分配存储管理 · 动画演示系统</title>
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- GSAP CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+  <!-- Google Fonts -->
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Newsreader:ital,opsz,wght@0,6..72,500;0,6..72,600;1,6..72,400&display=swap">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="min-h-screen antialiased flex flex-col justify-between">
+
+  <!-- 动态飞行与连线图层 -->
+  <div id="flying-overlay-container"></div>
+  <svg id="connection-svg-layer"></svg>
+
+  <!-- 顶部导航栏 -->
+  <header class="border-b border-[#E5E4DC] bg-[#FAF9F5]/90 backdrop-blur sticky top-0 z-40 px-6 py-3.5">
+    <div class="max-w-7xl mx-auto flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <span class="w-8 h-8 rounded-lg bg-stone-900 text-white flex items-center justify-center font-mono font-bold text-xs shadow-sm">
+          OS
+        </span>
+        <div>
+          <h1 class="text-base md:text-lg font-bold text-stone-900 leading-tight">
+            离散分配存储管理动态演示系统
+          </h1>
+          <p class="text-xs text-stone-500 font-mono mt-0.5">
+            408 核心考点 · 基本分页 / 基本分段 / 段页式动态地址映射与物理装入
+          </p>
+        </div>
+      </div>
+      <a href="../index.html" class="text-xs font-mono text-stone-500 hover:text-stone-900 transition-colors flex items-center gap-1">
+        <span>&larr;</span> <span>返回展厅</span>
+      </a>
+    </div>
+  </header>
+
+  <!-- 主体工作区 -->
+  <main class="flex-1 max-w-7xl w-full mx-auto px-4 md:px-6 py-5 flex flex-col gap-4">
+
+    <!-- 顶部操作控制与模式切换 -->
+    <div class="card-panel rounded-2xl p-4 flex flex-col gap-3 shadow-sm bg-white">
+      <div class="flex items-center justify-between flex-wrap gap-3 pb-3 border-b border-[#ECEBE4]">
+        
+        <!-- 三大分配模式切换 -->
+        <div class="flex items-center gap-1.5 bg-stone-100/80 p-1 rounded-xl border border-stone-200/80">
+          <button id="tab-paging" class="tab-btn active" onclick="switchMode('paging')">
+            <span class="w-2 h-2 rounded-full bg-blue-600"></span>
+            <span>1. 分页存储管理 (Paging)</span>
+          </button>
+          <button id="tab-seg" class="tab-btn" onclick="switchMode('seg')">
+            <span class="w-2 h-2 rounded-full bg-amber-600"></span>
+            <span>2. 分段存储管理 (Segmentation)</span>
+          </button>
+          <button id="tab-segpage" class="tab-btn" onclick="switchMode('segpage')">
+            <span class="w-2 h-2 rounded-full bg-purple-600"></span>
+            <span>3. 段页式存储管理 (Segmented Paging)</span>
+          </button>
+        </div>
+
+        <!-- 动效播放控制 -->
+        <div class="flex items-center gap-2 flex-wrap">
+          <button id="btn-play" class="px-4 py-1.5 rounded-lg text-xs font-semibold bg-stone-900 text-white hover:bg-stone-800 transition-colors shadow-sm flex items-center gap-1.5">
+            <span id="play-icon">▶</span> <span id="play-text">自动连续演示</span>
+          </button>
+          <button id="btn-prev" class="ctl-btn">
+            ⏮ 上一步
+          </button>
+          <button id="btn-next" class="ctl-btn font-semibold">
+            下一步 ⏭
+          </button>
+          <button id="btn-reset" class="ctl-btn">
+            ↺ 复位
+          </button>
+
+          <div class="h-4 w-px bg-stone-200 mx-1"></div>
+
+          <!-- 速度切换 -->
+          <div class="flex items-center gap-1 font-mono text-xs">
+            <span class="text-stone-400 mr-1">速度:</span>
+            <button id="speed-05" class="px-2 py-0.5 rounded border border-stone-200 hover:border-stone-400 text-stone-600 text-xs">0.5x</button>
+            <button id="speed-10" class="px-2 py-0.5 rounded border border-stone-900 bg-stone-900 text-white font-bold text-xs">1.0x</button>
+            <button id="speed-15" class="px-2 py-0.5 rounded border border-stone-200 hover:border-stone-400 text-stone-600 text-xs">1.5x</button>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- 步骤时间轴导航 -->
+      <div class="flex items-center justify-between gap-3 overflow-x-auto pt-1">
+        <div id="step-timeline-container" class="flex items-center gap-2 overflow-x-auto py-1">
+          <!-- 动态生成步骤药丸按钮 -->
+        </div>
+        <div class="text-[11px] font-mono text-stone-400 whitespace-nowrap hidden lg:block">
+          动画流：逻辑号移动 &rarr; 表项与物理内存双重高亮 &rarr; 进程页/段装入
+        </div>
+      </div>
+    </div>
+
+    <!-- MMU 动态状态与教学核心提示看板 -->
+    <div class="card-panel rounded-2xl p-4 bg-white flex flex-col md:flex-row items-start md:items-center justify-between gap-3 border-l-4 border-l-stone-900">
+      <div class="flex items-start md:items-center gap-3">
+        <div class="w-7 h-7 rounded-lg bg-stone-100 flex items-center justify-center font-mono text-xs font-bold text-stone-700 flex-shrink-0">
+          MMU
+        </div>
+        <div>
+          <div class="flex items-center gap-2">
+            <span class="text-xs font-bold text-stone-900 font-mono" id="mmu-title">MMU 内存管理单元状态</span>
+            <span class="px-2 py-0.5 rounded text-[10px] font-mono bg-blue-50 text-blue-700 border border-blue-200" id="mmu-state-badge">就绪等待</span>
+          </div>
+          <p class="text-xs text-stone-600 font-mono mt-0.5" id="mmu-action-desc">
+            准备开始演示：点击“自动演示”或“下一步”，观察逻辑地址到物理主存的离散映射流程。
+          </p>
+        </div>
+      </div>
+
+      <!-- 408 核心考点解析：“隐藏”标签提示 -->
+      <div class="bg-amber-50/80 border border-amber-200/80 rounded-xl px-3.5 py-2 text-xs text-amber-900 flex items-center gap-2 flex-shrink-0">
+        <span class="w-2 h-2 rounded-full bg-amber-500 animate-pulse flex-shrink-0"></span>
+        <div class="font-sans text-[11px]">
+          <span class="font-bold">408考点提示：</span>
+          <span>页表/段表首地址存入寄存器，硬件按连续下标 <code class="font-mono bg-amber-100 px-1 py-0.5 rounded font-bold">Base + i × Size</code> 直接寻址，无需字段存储页号/段号，故标记为<span class="font-bold underline ml-0.5">“隐藏”</span>。</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 核心视觉舞台：左侧进程空间，右侧物理主存（含高地址内核区） -->
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
+
+      <!-- ============================================== -->
+      <!-- 左侧：1 个进程的逻辑空间 (4 cols) -->
+      <!-- ============================================== -->
+      <div class="lg:col-span-4 flex flex-col gap-4">
+        
+        <div class="card-panel rounded-2xl p-4 md:p-5 flex flex-col gap-4">
+          <div class="flex items-center justify-between pb-3 border-b border-[#ECEBE4]">
+            <div class="flex items-center gap-2">
+              <span class="w-3 h-3 rounded-full bg-blue-600" id="proc-dot-color"></span>
+              <h2 class="text-sm font-bold text-stone-900 font-mono">
+                进程逻辑空间 (Process Space)
+              </h2>
+            </div>
+            <span class="text-[11px] font-mono text-stone-500 bg-stone-100 px-2 py-0.5 rounded">PID: 1024</span>
+          </div>
+
+          <!-- 模式说明简介 -->
+          <div class="text-xs text-stone-600 leading-relaxed font-sans bg-stone-50 p-2.5 rounded-xl border border-stone-200/60" id="proc-mode-intro">
+            <!-- 动态填充 -->
+          </div>
+
+          <!-- 进程内容卡片列表容器 -->
+          <div class="space-y-3 relative" id="process-elements-container">
+            <!-- 动态生成 Page 0/1/2 或 Segment 0/1/2 或 Segment+Page -->
+          </div>
+
+          <!-- 逻辑地址结构分解条 -->
+          <div class="mt-1 pt-3 border-t border-[#ECEBE4]">
+            <div class="text-[11px] font-mono text-stone-500 mb-1.5 flex items-center justify-between">
+              <span>逻辑地址格式划分 (Logical Address Structure)</span>
+              <span class="text-[10px] text-stone-400">32-bit CPU</span>
+            </div>
+            <div class="flex items-center gap-1 font-mono text-xs" id="logical-address-bar">
+              <!-- 动态填充逻辑地址位结构 -->
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- ============================================== -->
+      <!-- 右侧：主存空间 (含高地址内核区 + 中低地址用户区) (8 cols) -->
+      <!-- ============================================== -->
+      <div class="lg:col-span-8 flex flex-col gap-4">
+
+        <div class="card-panel rounded-2xl overflow-hidden shadow-sm flex flex-col">
+          
+          <!-- 主存标题栏与高低地址指引 -->
+          <div class="bg-stone-900 text-white px-5 py-3 flex items-center justify-between">
+            <div class="flex items-center gap-2.5">
+              <div class="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></div>
+              <h2 class="text-sm font-bold font-mono tracking-tight">
+                物理主存空间 (Physical Main Memory)
+              </h2>
+            </div>
+            <div class="flex items-center gap-3 font-mono text-xs text-stone-400">
+              <span>高地址 &uarr; 0xFFFFFFFF</span>
+              <span class="text-stone-600">|</span>
+              <span>低地址 &darr; 0x00000000</span>
+            </div>
+          </div>
+
+          <!-- ========================================== -->
+          <!-- 1. 主存高地址区：系统内核区 (Kernel Space) -->
+          <!-- 存放页表 / 段表，标注隐藏页号/段号 -->
+          <!-- ========================================== -->
+          <div class="kernel-zone-bg p-4 md:p-5 flex flex-col gap-3">
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-2">
+                <span class="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-amber-100 text-amber-800 border border-amber-300">
+                  高地址区 · 内核空间 (Kernel Space @ 0xC0000000+)
+                </span>
+                <span class="text-xs font-bold text-stone-800 font-mono" id="kernel-table-title">
+                  进程页表 (Page Table in Kernel)
+                </span>
+              </div>
+              <div class="flex items-center gap-1.5 text-xs text-stone-500 font-mono">
+                <span>基址寄存器:</span>
+                <span class="font-bold text-stone-800 bg-white px-1.5 py-0.5 rounded border border-stone-200" id="base-register-display">
+                  PTR = 0xC0004000
+                </span>
+              </div>
+            </div>
+
+            <!-- 内核数据结构（页表 / 段表 / 段页表）视窗 -->
+            <div class="bg-white rounded-xl border border-[#E5E4DC] p-3 shadow-xs" id="kernel-table-wrapper">
+              <!-- 动态装配的表格 -->
+            </div>
+          </div>
+
+          <!-- ========================================== -->
+          <!-- 2. 主存中低地址区：用户空间 (User Space) -->
+          <!-- 存放物理页框 / 物理段，接收移入的数据 -->
+          <!-- ========================================== -->
+          <div class="bg-white p-4 md:p-5 flex flex-col gap-3">
+            <div class="flex items-center justify-between pb-2 border-b border-[#ECEBE4]">
+              <div class="flex items-center gap-2">
+                <span class="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                  中低地址区 · 用户空间 (User Physical Space)
+                </span>
+                <span class="text-xs font-bold text-stone-800 font-mono" id="user-space-title">
+                  物理页框阵列 (4KB Page Frames)
+                </span>
+              </div>
+              <div class="text-[11px] font-mono text-stone-400 flex items-center gap-3">
+                <span class="flex items-center gap-1">
+                  <span class="w-2 h-2 rounded bg-stone-100 border border-stone-300"></span> 空闲
+                </span>
+                <span class="flex items-center gap-1">
+                  <span class="w-2 h-2 rounded bg-stone-300 border border-stone-400"></span> 其他占用
+                </span>
+                <span class="flex items-center gap-1">
+                  <span class="w-2 h-2 rounded bg-blue-100 border border-blue-400" id="legend-current-proc"></span> 本进程装入
+                </span>
+              </div>
+            </div>
+
+            <!-- 用户主存渲染容器 (网格页框或连续段块) -->
+            <div id="physical-memory-container" class="relative min-h-[300px]">
+              <!-- 动态填充物理页框或物理段 -->
+            </div>
+          </div>
+
+        </div>
+
+      </div>
+
+    </div>
+
+    <!-- 底部：408 核心机制与对比分析栏 -->
+    <div class="card-panel rounded-2xl p-4 bg-white">
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
+        <div class="flex flex-col gap-1 p-2.5 rounded-xl bg-stone-50 border border-stone-200/60">
+          <div class="font-bold text-stone-900 font-mono flex items-center gap-1.5">
+            <span class="w-2 h-2 rounded-full bg-blue-500"></span>
+            <span>基本分页存储 (Paging)</span>
+          </div>
+          <p class="text-stone-600 leading-relaxed font-sans">
+            逻辑与物理空间均等分为固定大小的页与页框。消除了外部碎片，仅在最后一页产生较小的内部碎片。地址一维连续。
+          </p>
+        </div>
+
+        <div class="flex flex-col gap-1 p-2.5 rounded-xl bg-stone-50 border border-stone-200/60">
+          <div class="font-bold text-stone-900 font-mono flex items-center gap-1.5">
+            <span class="w-2 h-2 rounded-full bg-amber-500"></span>
+            <span>基本分段存储 (Segmentation)</span>
+          </div>
+          <p class="text-stone-600 leading-relaxed font-sans">
+            按程序逻辑关系划分变长段（代码段、数据段、栈段），更符合程序员编程视角，便于共享与保护。无内部碎片，但产生外部碎片。
+          </p>
+        </div>
+
+        <div class="flex flex-col gap-1 p-2.5 rounded-xl bg-stone-50 border border-stone-200/60">
+          <div class="font-bold text-stone-900 font-mono flex items-center gap-1.5">
+            <span class="w-2 h-2 rounded-full bg-purple-500"></span>
+            <span>段页式存储 (Segmented Paging)</span>
+          </div>
+          <p class="text-stone-600 leading-relaxed font-sans">
+            先逻辑分段，段内再离散分页。兼顾分段的共享/保护灵活性与分页无外部碎片的内存利用率。需先查段表再查页表。
+          </p>
+        </div>
+      </div>
+    </div>
+
+  </main>
+
+  <!-- 极简页脚 -->
+  <footer class="border-t border-[#E5E4DC] py-3 text-center text-xs font-mono text-stone-400 bg-[#FAF9F5]">
+    离散分配存储管理系统 · Taste-Skill Light Editorial 浅色纸质美学 · 60fps 动态映射
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
