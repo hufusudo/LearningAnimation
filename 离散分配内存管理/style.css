@@ -26,6 +26,19 @@
   --segpage-accent: #7C3AED;
   --segpage-soft: #F5F3FF;
   --segpage-border: #DDD6FE;
+
+  /* 二级页表配色 (翡翠绿系) */
+  --twolevel-accent: #059669;
+  --twolevel-soft: #ECFDF5;
+  --twolevel-border: #A7F3D0;
+}
+
+/* 二级页表激活高亮 */
+.level2-active-glow {
+  border-color: #10B981 !important;
+  box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.3), 0 4px 14px rgba(16, 185, 129, 0.18) !important;
+  background-color: #F0FDF4 !important;
+  transition: all 0.3s ease;
 }
 
 body {

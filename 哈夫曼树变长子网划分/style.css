@@ -1,0 +1,329 @@
+/* ==========================================================================
+   哈夫曼树与变长子网划分 (VLSM) - 核心样式
+   Taste-Skill Light Editorial Aesthetic
+   ========================================================================== */
+
+:root {
+  --bg-page: #FAF9F5;
+  --bg-card: #FFFFFF;
+  --border-subtle: #E5E4DC;
+  --border-strong: #D6D5CD;
+  --text-primary: #1C1917;
+  --text-secondary: #78716C;
+  --accent-rose: #E11D48;
+  --accent-emerald: #059669;
+  --accent-amber: #D97706;
+  --accent-indigo: #4F46E5;
+}
+
+body {
+  background-color: var(--bg-page);
+  color: var(--text-primary);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, sans-serif;
+}
+
+/* 细腻卡片微质感 */
+.taste-card {
+  background-color: #FFFFFF;
+  border: 1px solid var(--border-subtle);
+  border-radius: 1rem;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02), 0 4px 12px rgba(0, 0, 0, 0.03);
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.taste-card:hover {
+  border-color: #D6D5CD;
+}
+
+/* 控制条按钮 */
+.ctl-btn {
+  padding: 0.375rem 0.75rem;
+  border-radius: 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  border: 1px solid var(--border-subtle);
+  background-color: #FFFFFF;
+  color: #44403C;
+  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  user-select: none;
+}
+
+.ctl-btn:hover:not(:disabled) {
+  background-color: #F5F5F0;
+  border-color: #A8A29E;
+  color: #1C1917;
+}
+
+.ctl-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* 步骤时间线胶囊 */
+.step-pill {
+  padding: 0.375rem 0.75rem;
+  border-radius: 0.5rem;
+  font-size: 0.72rem;
+  font-family: "JetBrains Mono", monospace;
+  font-weight: 500;
+  border: 1px solid var(--border-subtle);
+  background-color: #FFFFFF;
+  color: #78716C;
+  white-space: nowrap;
+  transition: all 0.2s ease;
+  cursor: pointer;
+}
+
+.step-pill:hover {
+  border-color: #78716C;
+  color: #1C1917;
+}
+
+.step-pill.active {
+  background-color: #1C1917;
+  color: #FFFFFF;
+  border-color: #1C1917;
+  font-weight: 600;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+}
+
+/* 二进制位元方格 */
+.bit-box {
+  width: 1.65rem;
+  height: 2.1rem;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.375rem;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.82rem;
+  font-weight: 600;
+  border: 1px solid #E5E4DC;
+  position: relative;
+  transition: all 0.2s ease;
+  user-select: none;
+}
+
+.bit-box .bit-idx {
+  font-size: 0.55rem;
+  line-height: 1;
+  opacity: 0.6;
+  font-weight: 400;
+  margin-top: 1px;
+}
+
+/* 网络号高亮 (红色) */
+.bit-net {
+  background-color: #FEF2F2;
+  color: #B91C1C;
+  border-color: #FECACA;
+}
+
+/* 主机号高亮 (绿色) */
+.bit-host {
+  background-color: #ECFDF5;
+  color: #047857;
+  border-color: #A7F3D0;
+}
+
+/* 子网位高亮 (琥珀黄 / 借位) */
+.bit-subnet {
+  background-color: #FFFBEB;
+  color: #B45309;
+  border-color: #FDE68A;
+  box-shadow: 0 0 0 2px rgba(217, 119, 6, 0.15);
+}
+
+/* 进位波纹指示器 */
+.carry-badge {
+  position: absolute;
+  top: -1.25rem;
+  font-size: 0.65rem;
+  font-weight: 700;
+  color: #DC2626;
+  background-color: #FEE2E2;
+  border: 1px solid #FCA5A5;
+  border-radius: 9999px;
+  padding: 0 0.3rem;
+  animation: bounceCarry 0.6s infinite alternate ease-in-out;
+}
+
+@keyframes bounceCarry {
+  from { transform: translateY(0); }
+  to { transform: translateY(-3px); }
+}
+
+/* 树节点样式 */
+.tree-node {
+  background-color: #FFFFFF;
+  border: 1.5px solid var(--border-subtle);
+  border-radius: 0.75rem;
+  padding: 0.6rem 0.85rem;
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.03);
+  position: relative;
+  user-select: none;
+}
+
+.tree-node:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.06);
+}
+
+/* 激活状态 */
+.tree-node.node-active {
+  border-color: #2563EB;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.2), 0 4px 12px rgba(37, 99, 235, 0.08);
+}
+
+/* 选为合法叶子节点 */
+.tree-node.node-selected {
+  border-color: #059669;
+  background-color: #F0FDF4;
+  box-shadow: 0 0 0 2.5px rgba(5, 150, 105, 0.25), 0 6px 14px rgba(5, 150, 105, 0.1);
+}
+
+/* 冲突错误节点 - 优雅阻尼微震 */
+.tree-node.node-conflict {
+  border-color: #E11D48 !important;
+  background-color: #FFF1F2 !important;
+  box-shadow: 0 0 0 3px rgba(225, 29, 72, 0.25), 0 8px 20px rgba(225, 29, 72, 0.12) !important;
+  animation: smoothDampedShake 0.6s cubic-bezier(0.36, 0.07, 0.19, 0.97) both;
+}
+
+@keyframes smoothDampedShake {
+  10%, 90% { transform: translate(-50%, -50%) translate3d(-2px, 0, 0); }
+  20%, 80% { transform: translate(-50%, -50%) translate3d(3px, 0, 0); }
+  30%, 50%, 70% { transform: translate(-50%, -50%) translate3d(-3px, 0, 0); }
+  40%, 60% { transform: translate(-50%, -50%) translate3d(3px, 0, 0); }
+}
+
+/* 节点隐藏/折叠 */
+.tree-node.node-collapsed {
+  opacity: 0.18;
+  transform: translate(-50%, -50%) scale(0.88);
+  filter: blur(0.5px);
+  pointer-events: none;
+}
+
+/* 地址条 (Address Allocation Strip) - 丝滑连续形变 */
+.address-strip {
+  height: 2.3rem;
+  border-radius: 0.6rem;
+  border: 1px solid var(--border-subtle);
+  background-color: #F5F5F0;
+  position: relative;
+  overflow: hidden;
+  display: flex;
+}
+
+.strip-segment {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.72rem;
+  font-weight: 600;
+  transition: width 0.55s cubic-bezier(0.16, 1, 0.3, 1),
+              background-color 0.45s ease,
+              color 0.3s ease,
+              opacity 0.4s ease,
+              transform 0.4s ease;
+  position: relative;
+  border-right: 1px solid rgba(255, 255, 255, 0.4);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 0 4px;
+}
+
+.strip-conflict {
+  background: repeating-linear-gradient(
+    45deg,
+    #F43F5E,
+    #F43F5E 8px,
+    #E11D48 8px,
+    #E11D48 16px
+  ) !important;
+  color: #FFFFFF !important;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+  box-shadow: inset 0 0 12px rgba(0, 0, 0, 0.2);
+}
+
+.strip-hole {
+  background: repeating-linear-gradient(
+    -45deg,
+    #E7E5E4,
+    #E7E5E4 6px,
+    #D6D3D1 6px,
+    #D6D3D1 12px
+  ) !important;
+  color: #78716C !important;
+}
+
+/* 进位波纹闪光位元 */
+.carry-active-bit {
+  background-color: #FEF08A !important;
+  color: #854D0E !important;
+  border-color: #EAB308 !important;
+  box-shadow: 0 0 12px rgba(234, 179, 8, 0.6) !important;
+  transform: translateY(-3px) scale(1.1);
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* 子网翻转位元 */
+.subnet-flipped-bit {
+  background-color: #E0E7FF !important;
+  color: #3730A3 !important;
+  border-color: #6366F1 !important;
+  box-shadow: 0 0 16px rgba(99, 102, 241, 0.7) !important;
+  transform: translateY(-4px) scale(1.15);
+  transition: all 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* 进位波纹传递指示光环 */
+.carry-glow-pill {
+  position: absolute;
+  top: -1.5rem;
+  font-size: 0.65rem;
+  font-family: "JetBrains Mono", monospace;
+  font-weight: 700;
+  color: #B45309;
+  background: #FEF3C7;
+  border: 1px solid #FCD34D;
+  padding: 1px 6px;
+  border-radius: 9999px;
+  box-shadow: 0 2px 6px rgba(245, 158, 11, 0.25);
+  pointer-events: none;
+  z-index: 10;
+}
+
+/* 代码与公式展示盒 */
+.formula-box {
+  background-color: #FAF9F5;
+  border: 1px solid #E5E4DC;
+  border-radius: 0.75rem;
+  padding: 0.75rem 1rem;
+  font-family: "JetBrains Mono", monospace;
+}
+
+/* 进位加法专用竖式 */
+.carry-table {
+  font-family: "JetBrains Mono", monospace;
+  border-collapse: separate;
+  border-spacing: 2px 4px;
+}
+
+.carry-table td {
+  width: 1.4rem;
+  height: 1.8rem;
+  text-align: center;
+  vertical-align: middle;
+  font-weight: 600;
+  border-radius: 0.25rem;
+}

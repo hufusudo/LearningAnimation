@@ -7,7 +7,7 @@
 // 1. 全局配置与状态定义
 // ============================================================
 const State = {
-  mode: 'paging', // 'paging' | 'seg' | 'segpage'
+  mode: 'paging', // 'paging' | 'seg' | 'segpage' | 'twolevel'
   currentStep: 0,
   isPlaying: false,
   speed: 1.0, // 0.5, 1.0, 1.5
@@ -65,6 +65,22 @@ const ModesConfig = {
       { title: '4. 段 1 两级装入', desc: '段号1检索段表 → 激活段1页表 → 页框号0与4同时高亮 → 段1两页装入物理页框0和4。' },
       { title: '5. 段页式完成', desc: '段页式两级动态映射完成，兼顾逻辑分段易共享与离散分页防碎片。' }
     ]
+  },
+  twolevel: {
+    name: '二级页表存储管理 (Two-Level Paging)',
+    accent: '#059669',
+    dotClass: 'bg-emerald-600',
+    intro: '32位系统4GB逻辑空间若用单级页表需占用巨大连续内存。二级分页将页表本身离散分页：<b>顶级页表（页目录表）</b>仅占1个页框常驻内存；<b>二级页表</b>离散存放并可按需调入。逻辑地址包含<b>页目录号</b>、<b>页号</b>与<b>页内偏移量</b>。',
+    tableTitle: '顶级页表与二级页表 (Page Directory & Level-2 Page Tables in Kernel)',
+    userTitle: '物理页框阵列 (Physical Page Frames · 4KB/Frame)',
+    baseReg: 'PDBR = 0xC0001000 (页目录基址寄存器) | 顶级页表常驻',
+    steps: [
+      { title: '0. 初始就绪', desc: '进程包含3个逻辑页，内核区顶级页表与二级页表就绪，PDBR指向顶级页表基址。' },
+      { title: '1. Page 0 二级映射与装入', desc: '页目录号0匹配后高亮 → 移至二级页表0 → 顶级页表的页号0与二级页表项0同时高亮 → 提取页框号3移动 → 拼上偏移量移动 → Page 0装入页框3。' },
+      { title: '2. Page 1 二级映射与装入', desc: '页目录号0匹配后高亮 → 移至二级页表0 → 顶级页表的页号1与二级页表项1同时高亮 → 提取页框号7移动 → 拼上偏移量移动 → Page 1装入页框7。' },
+      { title: '3. Page 2 二级映射与装入', desc: '页目录号1匹配后高亮 → 移至二级页表1 → 顶级页表的页号0与二级页表项0同时高亮 → 提取页框号1移动 → 拼上偏移量移动 → Page 2装入页框1。' },
+      { title: '4. 二级页表装载完成', desc: '3个逻辑页均经由两级映射平滑装载至物理页框，页表自身离散化，解决了单级大页表占用连续空间的瓶颈。' }
+    ]
   }
 };
 
@@ -108,12 +124,14 @@ function switchMode(modeKey) {
   State.currentStep = 0;
 
   // 更新 Tab 按钮状态
-  ['paging', 'seg', 'segpage'].forEach(k => {
+  ['paging', 'seg', 'segpage', 'twolevel'].forEach(k => {
     const btn = document.getElementById(`tab-${k}`);
-    if (k === modeKey) {
-      btn.classList.add('active');
-    } else {
-      btn.classList.remove('active');
+    if (btn) {
+      if (k === modeKey) {
+        btn.classList.add('active');
+      } else {
+        btn.classList.remove('active');
+      }
     }
   });
 
@@ -405,6 +423,103 @@ function renderProcessView() {
       `;
       container.appendChild(segBox);
     });
+  } else if (State.mode === 'twolevel') {
+    const pages = [
+      { 
+        id: 0, 
+        name: 'Page 0', 
+        role: '主程序代码段 (Code)', 
+        size: '4 KB', 
+        dirNo: 0, 
+        pageNo: 0, 
+        offset: '0x1A8', 
+        logicAddr: '0x000001A8', 
+        frameTarget: 3, 
+        targetAddr: '0x31A8', 
+        loadedInStep: 1 
+      },
+      { 
+        id: 1, 
+        name: 'Page 1', 
+        role: '常量只读数据 (Rodata)', 
+        size: '4 KB', 
+        dirNo: 0, 
+        pageNo: 1, 
+        offset: '0x2F0', 
+        logicAddr: '0x000012F0', 
+        frameTarget: 7, 
+        targetAddr: '0x72F0', 
+        loadedInStep: 2 
+      },
+      { 
+        id: 2, 
+        name: 'Page 2', 
+        role: '用户调用堆栈 (Stack)', 
+        size: '4 KB', 
+        dirNo: 1, 
+        pageNo: 0, 
+        offset: '0x4C0', 
+        logicAddr: '0x004004C0', 
+        frameTarget: 1, 
+        targetAddr: '0x14C0', 
+        loadedInStep: 3 
+      }
+    ];
+
+    pages.forEach(p => {
+      const isLoaded = State.currentStep >= p.loadedInStep;
+      const isCurrentActive = (p.loadedInStep === State.currentStep);
+
+      const el = document.createElement('div');
+      el.id = `proc-item-twolevel-${p.id}`;
+      el.className = `p-3 rounded-xl border transition-all duration-300 relative overflow-hidden ${
+        isLoaded 
+          ? 'bg-emerald-50/40 border-emerald-200' 
+          : (isCurrentActive ? 'bg-emerald-50/20 border-emerald-400 ring-2 ring-emerald-200 shadow-sm' : 'bg-white border-stone-200 hover:border-stone-300')
+      }`;
+
+      el.innerHTML = `
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <span class="px-2 py-0.5 rounded text-xs font-mono font-bold ${
+              isCurrentActive ? 'bg-emerald-600 text-white shadow-md ring-2 ring-emerald-200' : 'bg-emerald-100 text-emerald-800'
+            }">
+              ${p.name}
+            </span>
+            <span class="text-xs font-bold text-stone-900 font-mono">${p.role}</span>
+          </div>
+          <span class="text-[10px] font-mono text-stone-500 bg-stone-100 px-1.5 py-0.5 rounded">
+            ${p.size}
+          </span>
+        </div>
+
+        <!-- 逻辑地址三段结构展示：页目录号、页号、页内偏移量 -->
+        <div class="mt-2 grid grid-cols-3 gap-1.5 text-center font-mono text-[10px]">
+          <div class="p-1 rounded bg-stone-50 border border-stone-200">
+            <div class="text-stone-400 text-[9px]">页目录号 (P1)</div>
+            <span id="badge-twolevel-dir-${p.id}" class="font-bold text-emerald-800">${p.dirNo}</span>
+          </div>
+          <div class="p-1 rounded bg-stone-50 border border-stone-200">
+            <div class="text-stone-400 text-[9px]">页号 (P2)</div>
+            <span id="badge-twolevel-page-${p.id}" class="font-bold text-blue-700">${p.pageNo}</span>
+          </div>
+          <div class="p-1 rounded bg-stone-50 border border-stone-200">
+            <div class="text-stone-400 text-[9px]">页内偏移量 (W)</div>
+            <span id="badge-twolevel-offset-${p.id}" class="font-bold text-stone-700">${p.offset}</span>
+          </div>
+        </div>
+
+        <div class="mt-2 pt-1.5 border-t border-stone-100 flex items-center justify-between text-[10px] font-mono">
+          <span class="text-stone-400">逻辑地址: <code class="font-bold text-stone-700">${p.logicAddr}</code></span>
+          ${
+            isLoaded 
+              ? '<span class="text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded font-bold">● 已装入页框 ' + p.frameTarget + ' (' + p.targetAddr + ')</span>'
+              : '<span class="text-stone-400">○ 待装入物理页框 ' + p.frameTarget + '</span>'
+          }
+        </div>
+      `;
+      container.appendChild(el);
+    });
   }
 }
 
@@ -440,6 +555,18 @@ function renderLogicalAddressBar() {
       </div>
       <div class="flex-[1] bg-stone-100 border border-stone-300 text-stone-700 text-center py-1 rounded text-[11px]">
         页内偏移 W (12 bits)
+      </div>
+    `;
+  } else if (State.mode === 'twolevel') {
+    container.innerHTML = `
+      <div class="flex-[1] bg-emerald-100 border border-emerald-300 text-emerald-900 text-center py-1 rounded font-bold text-[11px]">
+        页目录号 P1 (10 bits · [31:22])
+      </div>
+      <div class="flex-[1] bg-blue-100 border border-blue-300 text-blue-900 text-center py-1 rounded font-bold text-[11px]">
+        页号 P2 (10 bits · [21:12])
+      </div>
+      <div class="flex-[1] bg-stone-100 border border-stone-300 text-stone-700 text-center py-1 rounded text-[11px]">
+        页内偏移量 W (12 bits · [11:0])
       </div>
     `;
   }
@@ -673,6 +800,148 @@ function renderKernelTable() {
       </div>
     `;
     wrapper.appendChild(table);
+
+  } else if (State.mode === 'twolevel') {
+    const table = document.createElement('div');
+    table.className = "w-full flex flex-col gap-3";
+    table.innerHTML = `
+      <!-- 顶级页表（页目录表 Page Directory） -->
+      <div class="border border-emerald-300 rounded-xl p-3 bg-emerald-50/20">
+        <div class="flex items-center justify-between pb-2 mb-2 border-b border-emerald-200 text-xs font-mono flex-wrap gap-2">
+          <div class="flex items-center gap-2">
+            <span class="px-2 py-0.5 rounded bg-emerald-700 text-white font-bold text-[10px]">顶级页表 (页目录表 · Page Directory)</span>
+            <span class="font-bold text-stone-800 text-[11px]">基地址寄存器: PDBR = 0xC0001000</span>
+          </div>
+          <span class="text-[11px] text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded font-bold">常驻内存 · 1 个页框 (4KB)</span>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full text-xs font-mono border-collapse">
+            <thead>
+              <tr class="bg-emerald-100/60 text-emerald-950 border-b border-emerald-200 text-left">
+                <th class="py-1.5 px-3 font-semibold">页目录号</th>
+                <th class="py-1.5 px-3 font-semibold">页号</th>
+                <th class="py-1.5 px-3 font-semibold">二级页表基地址 (Page Table Pointer)</th>
+                <th class="py-1.5 px-3 font-semibold">有效位</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-emerald-100 text-stone-700">
+              <tr id="top-pde-row-0" class="transition-colors ${State.currentStep === 1 ? 'bg-emerald-100/70 font-bold' : ''}">
+                <td id="top-dir-cell-0" class="py-2 px-3 font-bold text-stone-800">
+                  <span class="px-2 py-0.5 rounded bg-emerald-100 text-emerald-900 border border-emerald-300">0</span>
+                </td>
+                <td id="top-page-cell-0" class="py-2 px-3 font-bold text-blue-700">页号: 0</td>
+                <td class="py-2 px-3 text-stone-600">0xC0002000 (指向二级页表 0)</td>
+                <td class="py-2 px-3 text-emerald-600 font-semibold">1 (驻留)</td>
+              </tr>
+              <tr id="top-pde-row-1" class="transition-colors ${State.currentStep === 2 ? 'bg-emerald-100/70 font-bold' : ''}">
+                <td id="top-dir-cell-1" class="py-2 px-3 font-bold text-stone-800">
+                  <span class="px-2 py-0.5 rounded bg-emerald-100 text-emerald-900 border border-emerald-300">0</span>
+                </td>
+                <td id="top-page-cell-1" class="py-2 px-3 font-bold text-blue-700">页号: 1</td>
+                <td class="py-2 px-3 text-stone-600">0xC0002000 (指向二级页表 0)</td>
+                <td class="py-2 px-3 text-emerald-600 font-semibold">1 (驻留)</td>
+              </tr>
+              <tr id="top-pde-row-2" class="transition-colors ${State.currentStep === 3 ? 'bg-emerald-100/70 font-bold' : ''}">
+                <td id="top-dir-cell-2" class="py-2 px-3 font-bold text-stone-800">
+                  <span class="px-2 py-0.5 rounded bg-emerald-100 text-emerald-900 border border-emerald-300">1</span>
+                </td>
+                <td id="top-page-cell-2" class="py-2 px-3 font-bold text-blue-700">页号: 0</td>
+                <td class="py-2 px-3 text-stone-600">0xC0003000 (指向二级页表 1)</td>
+                <td class="py-2 px-3 text-emerald-600 font-semibold">1 (驻留)</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- 两个二级页表 (Level-2 Page Tables) -->
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <!-- 二级页表 0 -->
+        <div id="twolevel-table-box-0" class="border border-stone-200 rounded-xl p-3 transition-all ${
+          (State.currentStep === 1 || State.currentStep === 2) ? 'bg-emerald-50/40 border-emerald-400 ring-1 ring-emerald-300' : 'bg-white'
+        }">
+          <div class="flex items-center justify-between pb-1.5 mb-1.5 border-b border-stone-200 text-xs font-mono font-bold text-stone-800">
+            <div class="flex items-center gap-1.5">
+              <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
+              <span>二级页表 0 @ 0xC0002000</span>
+            </div>
+            <span class="text-[10px] text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">由页目录号 0 索引</span>
+          </div>
+          <table class="w-full text-[11px] font-mono border-collapse">
+            <thead>
+              <tr class="text-stone-500 text-left border-b border-stone-100">
+                <th class="pb-1.5">
+                  <span class="inline-flex items-center gap-1">
+                    <span>页号</span>
+                    <span class="badge-hidden">隐藏</span>
+                  </span>
+                </th>
+                <th class="pb-1.5">物理页框号 (Frame #)</th>
+                <th class="pb-1.5">权限</th>
+                <th class="pb-1.5">存在位</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-stone-100">
+              <tr id="twolevel-row-0-0" class="transition-colors ${State.currentStep === 1 ? 'bg-emerald-100/80 font-bold' : ''}">
+                <td class="py-1.5 font-bold text-stone-400">[0] <span class="text-[9px] text-amber-700 font-normal">隐藏</span></td>
+                <td id="twolevel-frame-cell-0-0" class="py-1.5 font-bold text-emerald-700 text-xs">Frame 3</td>
+                <td class="py-1.5 text-stone-500">RX (代码)</td>
+                <td class="py-1.5 text-emerald-600 font-bold">1 (有效)</td>
+              </tr>
+              <tr id="twolevel-row-0-1" class="transition-colors ${State.currentStep === 2 ? 'bg-emerald-100/80 font-bold' : ''}">
+                <td class="py-1.5 font-bold text-stone-400">[1] <span class="text-[9px] text-amber-700 font-normal">隐藏</span></td>
+                <td id="twolevel-frame-cell-0-1" class="py-1.5 font-bold text-emerald-700 text-xs">Frame 7</td>
+                <td class="py-1.5 text-stone-500">R (只读)</td>
+                <td class="py-1.5 text-emerald-600 font-bold">1 (有效)</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- 二级页表 1 -->
+        <div id="twolevel-table-box-1" class="border border-stone-200 rounded-xl p-3 transition-all ${
+          State.currentStep === 3 ? 'bg-emerald-50/40 border-emerald-400 ring-1 ring-emerald-300' : 'bg-white'
+        }">
+          <div class="flex items-center justify-between pb-1.5 mb-1.5 border-b border-stone-200 text-xs font-mono font-bold text-stone-800">
+            <div class="flex items-center gap-1.5">
+              <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
+              <span>二级页表 1 @ 0xC0003000</span>
+            </div>
+            <span class="text-[10px] text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">由页目录号 1 索引</span>
+          </div>
+          <table class="w-full text-[11px] font-mono border-collapse">
+            <thead>
+              <tr class="text-stone-500 text-left border-b border-stone-100">
+                <th class="pb-1.5">
+                  <span class="inline-flex items-center gap-1">
+                    <span>页号</span>
+                    <span class="badge-hidden">隐藏</span>
+                  </span>
+                </th>
+                <th class="pb-1.5">物理页框号 (Frame #)</th>
+                <th class="pb-1.5">权限</th>
+                <th class="pb-1.5">存在位</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-stone-100">
+              <tr id="twolevel-row-1-0" class="transition-colors ${State.currentStep === 3 ? 'bg-emerald-100/80 font-bold' : ''}">
+                <td class="py-1.5 font-bold text-stone-400">[0] <span class="text-[9px] text-amber-700 font-normal">隐藏</span></td>
+                <td id="twolevel-frame-cell-1-0" class="py-1.5 font-bold text-emerald-700 text-xs">Frame 1</td>
+                <td class="py-1.5 text-stone-500">RW (栈/变量)</td>
+                <td class="py-1.5 text-emerald-600 font-bold">1 (有效)</td>
+              </tr>
+              <tr id="twolevel-row-1-1" class="text-stone-300">
+                <td class="py-1.5">[1] <span class="text-[9px]">隐藏</span></td>
+                <td class="py-1.5 text-stone-400 font-normal">- (未映射)</td>
+                <td class="py-1.5">-</td>
+                <td class="py-1.5 text-stone-400">0 (待调入)</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    `;
+    wrapper.appendChild(table);
   }
 }
 
@@ -684,7 +953,7 @@ function renderUserMemory() {
   const container = document.getElementById('physical-memory-container');
   container.innerHTML = '';
 
-  if (State.mode === 'paging' || State.mode === 'segpage') {
+  if (State.mode === 'paging' || State.mode === 'segpage' || State.mode === 'twolevel') {
     // 渲染 8 个物理页框网格 (Frame 0 ~ 7)
     const grid = document.createElement('div');
     grid.className = "grid grid-cols-2 sm:grid-cols-4 gap-3";
@@ -728,6 +997,31 @@ function renderUserMemory() {
           content = `
             <div class="text-[10px] text-stone-500 font-bold">占用 · ${fr.busyLabel}</div>
           `;
+        } else {
+          content = `<div class="text-[10px] text-stone-400">空闲 (Free)</div>`;
+        }
+      } else if (State.mode === 'twolevel') {
+        if (fr.id === 3 && State.currentStep >= 1) {
+          statusClass = 'border-emerald-400 bg-emerald-50/80 text-emerald-950 font-bold';
+          content = `
+            <div class="text-[11px] text-emerald-800 font-bold">Page 0 (已装入)</div>
+            <div class="text-[10px] text-emerald-600 font-mono">代码段 · 物理 0x31A8</div>
+          `;
+        } else if (fr.id === 7 && State.currentStep >= 2) {
+          statusClass = 'border-emerald-400 bg-emerald-50/80 text-emerald-950 font-bold';
+          content = `
+            <div class="text-[11px] text-emerald-800 font-bold">Page 1 (已装入)</div>
+            <div class="text-[10px] text-emerald-600 font-mono">只读数据 · 物理 0x72F0</div>
+          `;
+        } else if (fr.id === 1 && State.currentStep >= 3) {
+          statusClass = 'border-emerald-400 bg-emerald-50/80 text-emerald-950 font-bold';
+          content = `
+            <div class="text-[11px] text-emerald-800 font-bold">Page 2 (已装入)</div>
+            <div class="text-[10px] text-emerald-600 font-mono">栈/变量 · 物理 0x14C0</div>
+          `;
+        } else if (fr.defaultStatus === 'busy') {
+          statusClass = 'border-stone-200 bg-stone-100/90 text-stone-500';
+          content = `<div class="text-[10px] text-stone-500 font-bold">占用 · ${fr.busyLabel}</div>`;
         } else {
           content = `<div class="text-[10px] text-stone-400">空闲 (Free)</div>`;
         }
@@ -888,6 +1182,7 @@ function clearFlyingOverlay() {
   const svg = document.getElementById('connection-svg-layer');
   svg.innerHTML = '';
   document.querySelectorAll('.dual-highlight-active').forEach(el => el.classList.remove('dual-highlight-active'));
+  document.querySelectorAll('.level2-active-glow').forEach(el => el.classList.remove('level2-active-glow'));
 }
 
 function drawConnectionLine(fromRect, toRect, color = '#F59E0B') {
@@ -915,7 +1210,7 @@ function drawConnectionLine(fromRect, toRect, color = '#F59E0B') {
 }
 
 /**
- * 完整三段式匹配动画：
+ * 完整三段式匹配动画（用于基本分页、分段、段页式）：
  * 1. 进程中的逻辑号移动到对应的表项，展示匹配
  * 2. 随后表项中匹配的目标（页框号/基址）以及内存中匹配的区域同时高亮一下
  * 3. 随后进程中的页/段移动到相应的物理区域
@@ -1016,6 +1311,199 @@ function runMatchingAnimation({ badgeSelector, tableCellSelector, memoryTargetSe
       }, 950 / State.speed);
     }
   });
+}
+
+/**
+ * 二级页表专属六段式联动动画（严格按用户教学流程推进）：
+ * 1. 页目录号匹配后高亮
+ * 2. 页目录号移动到相应的二级页表
+ * 3. 随后顶级页表的页号和二级页表对应页号的页表项同时高亮
+ * 4. 随后二级页表的页框号移动到相应的页框
+ * 5. 随后展示页框号拼上页内偏移量移动到相应的页框
+ * 6. 最后进程对应的页移动到相应的页框
+ */
+function runTwoLevelMatchingAnimation({
+  stepIndex,
+  dirNo,
+  pageNo,
+  topRowIndex,
+  level2TableId,
+  level2RowId,
+  level2FrameCellId,
+  targetFrameId,
+  processItemSelector,
+  offset,
+  frameNum,
+  physicalAddr,
+  pageName,
+  onComplete
+}) {
+  const topDirEl = document.querySelector(`#top-dir-cell-${topRowIndex}`);
+  const topPageEl = document.querySelector(`#top-page-cell-${topRowIndex}`);
+  const topRowEl = document.querySelector(`#top-pde-row-${topRowIndex}`);
+  const level2TableEl = document.querySelector(`#${level2TableId}`);
+  const level2RowEl = document.querySelector(`#${level2RowId}`);
+  const level2FrameEl = document.querySelector(`#${level2FrameCellId}`);
+  const memFrameEl = document.querySelector(`#${targetFrameId}`);
+  const procEl = document.querySelector(processItemSelector);
+
+  if (!topDirEl || !topPageEl || !level2TableEl || !level2RowEl || !level2FrameEl || !memFrameEl || !procEl) {
+    if (onComplete) onComplete();
+    return;
+  }
+
+  State.isAnimating = true;
+  clearFlyingOverlay();
+  const overlay = document.getElementById('flying-overlay-container');
+
+  // 【阶段 1/6】：页目录号匹配后高亮
+  updateMMUState(`【阶段 1/6：页目录号匹配高亮】顶级页表根据基址 PDBR 进行一级寻址，页目录号 [${dirNo}] 匹配成功并高亮！`);
+  topDirEl.classList.add('dual-highlight-active');
+  if (topRowEl) topRowEl.classList.add('bg-emerald-100');
+
+  setTimeout(() => {
+    // 【阶段 2/6】：页目录号移动到相应的二级页表
+    updateMMUState(`【阶段 2/6：定位二级页表】页目录号 [${dirNo}] 提取移动至二级页表 ${dirNo}，激活该二级页表...`);
+    const topDirRect = topDirEl.getBoundingClientRect();
+    const l2TableRect = level2TableEl.getBoundingClientRect();
+
+    const flyingDirChip = document.createElement('div');
+    flyingDirChip.className = "flying-chip px-2.5 py-1 bg-emerald-600 text-white font-mono font-bold text-xs flex items-center gap-1.5 shadow-lg border border-emerald-400";
+    flyingDirChip.innerHTML = `<span>⚡ 页目录号: ${dirNo}</span> <span class="text-[10px] text-emerald-200">&rarr; 激活二级页表</span>`;
+    flyingDirChip.style.left = `${topDirRect.left}px`;
+    flyingDirChip.style.top = `${topDirRect.top}px`;
+    overlay.appendChild(flyingDirChip);
+
+    gsap.to(flyingDirChip, {
+      x: l2TableRect.left + 20 - topDirRect.left,
+      y: l2TableRect.top + 10 - topDirRect.top,
+      scale: 1.1,
+      duration: 0.85 / State.speed,
+      ease: "power2.out",
+      onComplete: () => {
+        gsap.to(flyingDirChip, { opacity: 0, duration: 0.2 / State.speed, onComplete: () => flyingDirChip.remove() });
+        level2TableEl.classList.add('level2-active-glow');
+
+        // 【阶段 3/6】：随后顶级页表的页号和二级页表对应页号的页表项同时高亮
+        updateMMUState(`【阶段 3/6：两级页号协同高亮】顶级页表的<b>页号 ${pageNo}</b>与二级页表对应<b>页号 [${pageNo}]</b> 的页表项<b>同时高亮</b>！`);
+        topPageEl.classList.add('dual-highlight-active');
+        level2RowEl.classList.add('dual-highlight-active');
+        
+        const topPageRect = topPageEl.getBoundingClientRect();
+        const l2RowRect = level2RowEl.getBoundingClientRect();
+        drawConnectionLine(topPageRect, l2RowRect, '#059669');
+
+        setTimeout(() => {
+          // 【阶段 4/6】：随后二级页表的页框号移动到相应的页框
+          updateMMUState(`【阶段 4/6：页框号定位】二级页表提取物理页框号「Frame ${frameNum}」，移动定位物理主存页框 ${frameNum}！`);
+          const l2FrameRect = level2FrameEl.getBoundingClientRect();
+          const memFrameRect = memFrameEl.getBoundingClientRect();
+
+          const flyingFrameChip = document.createElement('div');
+          flyingFrameChip.className = "flying-chip px-3 py-1 bg-blue-600 text-white font-mono font-bold text-xs flex items-center gap-1.5 shadow-lg border border-blue-400";
+          flyingFrameChip.innerHTML = `<span>⚡ 页框号: Frame ${frameNum}</span>`;
+          flyingFrameChip.style.left = `${l2FrameRect.left}px`;
+          flyingFrameChip.style.top = `${l2FrameRect.top}px`;
+          overlay.appendChild(flyingFrameChip);
+
+          gsap.to(flyingFrameChip, {
+            x: memFrameRect.left + 15 - l2FrameRect.left,
+            y: memFrameRect.top + 15 - l2FrameRect.top,
+            scale: 1.15,
+            duration: 0.85 / State.speed,
+            ease: "power2.out",
+            onComplete: () => {
+              gsap.to(flyingFrameChip, { opacity: 0, duration: 0.2 / State.speed, onComplete: () => flyingFrameChip.remove() });
+              memFrameEl.classList.add('dual-highlight-active');
+
+              // 【阶段 5/6】：随后展示页框号拼上页内偏移量移动到相应的页框
+              setTimeout(() => {
+                updateMMUState(`【阶段 5/6：地址拼接生成】页框号 Frame ${frameNum} (基址 0x${frameNum}000) 拼上页内偏移量 ${offset} &rarr; 得到物理地址 <b>${physicalAddr}</b>，移动至物理页框！`);
+                
+                const spliceChip = document.createElement('div');
+                spliceChip.className = "flying-chip px-3.5 py-1.5 bg-gradient-to-r from-emerald-600 via-teal-600 to-blue-600 text-white font-mono font-bold text-xs rounded-lg shadow-xl border border-emerald-300 flex items-center gap-2";
+                spliceChip.innerHTML = `
+                  <span class="bg-white/20 px-1.5 py-0.5 rounded text-[10px]">物理拼接</span>
+                  <span>Frame ${frameNum} (0x${frameNum}000) + ${offset}</span>
+                  <span class="text-amber-300 font-bold">&rarr; ${physicalAddr}</span>
+                `;
+                const startX = window.innerWidth / 2 - 160;
+                const startY = Math.max(120, memFrameRect.top - 60);
+                spliceChip.style.left = `${startX}px`;
+                spliceChip.style.top = `${startY}px`;
+                spliceChip.style.opacity = '0';
+                overlay.appendChild(spliceChip);
+
+                gsap.fromTo(spliceChip, 
+                  { opacity: 0, scale: 0.8 }, 
+                  { 
+                    opacity: 1, 
+                    scale: 1.05, 
+                    duration: 0.4 / State.speed,
+                    ease: "back.out(1.5)",
+                    onComplete: () => {
+                      gsap.to(spliceChip, {
+                        x: (memFrameRect.left + memFrameRect.width / 2) - (startX + 150),
+                        y: (memFrameRect.top + memFrameRect.height / 2) - (startY + 15),
+                        scale: 0.9,
+                        opacity: 0.2,
+                        duration: 0.75 / State.speed,
+                        ease: "power2.inOut",
+                        onComplete: () => {
+                          spliceChip.remove();
+
+                          // 【阶段 6/6】：最后进程对应的页移动到相应的页框
+                          updateMMUState(`【阶段 6/6：物理装载完成】进程 ${pageName} 逻辑页平滑移入物理页框 ${frameNum}，两级页表映射完成！`);
+                          const procRect = procEl.getBoundingClientRect();
+                          const movingPage = document.createElement('div');
+                          movingPage.className = "flying-chip p-3 bg-white border-2 border-emerald-500 rounded-xl font-mono text-xs font-bold text-stone-800 shadow-2xl flex flex-col justify-between overflow-hidden";
+                          movingPage.style.left = `${procRect.left}px`;
+                          movingPage.style.top = `${procRect.top}px`;
+                          movingPage.style.width = `${procRect.width}px`;
+                          movingPage.style.height = `${procRect.height}px`;
+                          movingPage.innerHTML = `
+                            <div class="flex items-center justify-between">
+                              <span class="text-emerald-700">⚡ 装入: ${pageName}</span>
+                              <span class="text-[10px] text-stone-400">两级映射就位</span>
+                            </div>
+                            <div class="text-[11px] text-stone-600 my-auto text-center font-sans">
+                              物理地址: <span class="font-mono text-emerald-700 font-bold">${physicalAddr}</span>
+                            </div>
+                            <div class="text-right text-[10px] text-emerald-600 font-bold">&rarr; 页框 ${frameNum}</div>
+                          `;
+                          overlay.appendChild(movingPage);
+
+                          gsap.to(movingPage, {
+                            x: memFrameRect.left - procRect.left,
+                            y: memFrameRect.top - procRect.top,
+                            width: memFrameRect.width,
+                            height: memFrameRect.height,
+                            duration: 0.95 / State.speed,
+                            ease: "power3.inOut",
+                            onComplete: () => {
+                              movingPage.remove();
+                              clearFlyingOverlay();
+                              State.isAnimating = false;
+                              if (onComplete) onComplete();
+                            }
+                          });
+                        }
+                      });
+                    }
+                  }
+                );
+
+              }, 450 / State.speed);
+
+            }
+          });
+
+        }, 950 / State.speed);
+
+      }
+    });
+
+  }, 700 / State.speed);
 }
 
 // ============================================================
@@ -1165,6 +1653,74 @@ function executeStep(stepIndex, isAuto = false) {
         label: '段1 两级装入',
         onComplete: () => {
           State.currentStep = 4;
+          renderCurrentMode();
+          if (isAuto && State.isPlaying) checkAutoPlayNext();
+        }
+      });
+      return;
+    }
+  } else if (State.mode === 'twolevel') {
+    if (stepIndex === 1) {
+      runTwoLevelMatchingAnimation({
+        stepIndex: 1,
+        dirNo: 0,
+        pageNo: 0,
+        topRowIndex: 0,
+        level2TableId: 'twolevel-table-box-0',
+        level2RowId: 'twolevel-row-0-0',
+        level2FrameCellId: 'twolevel-frame-cell-0-0',
+        targetFrameId: 'memory-frame-3',
+        processItemSelector: '#proc-item-twolevel-0',
+        offset: '0x1A8',
+        frameNum: 3,
+        physicalAddr: '0x31A8',
+        pageName: 'Page 0',
+        onComplete: () => {
+          State.currentStep = 1;
+          renderCurrentMode();
+          if (isAuto && State.isPlaying) checkAutoPlayNext();
+        }
+      });
+      return;
+    } else if (stepIndex === 2) {
+      runTwoLevelMatchingAnimation({
+        stepIndex: 2,
+        dirNo: 0,
+        pageNo: 1,
+        topRowIndex: 1,
+        level2TableId: 'twolevel-table-box-0',
+        level2RowId: 'twolevel-row-0-1',
+        level2FrameCellId: 'twolevel-frame-cell-0-1',
+        targetFrameId: 'memory-frame-7',
+        processItemSelector: '#proc-item-twolevel-1',
+        offset: '0x2F0',
+        frameNum: 7,
+        physicalAddr: '0x72F0',
+        pageName: 'Page 1',
+        onComplete: () => {
+          State.currentStep = 2;
+          renderCurrentMode();
+          if (isAuto && State.isPlaying) checkAutoPlayNext();
+        }
+      });
+      return;
+    } else if (stepIndex === 3) {
+      runTwoLevelMatchingAnimation({
+        stepIndex: 3,
+        dirNo: 1,
+        pageNo: 0,
+        topRowIndex: 2,
+        level2TableId: 'twolevel-table-box-1',
+        level2RowId: 'twolevel-row-1-0',
+        level2FrameCellId: 'twolevel-frame-cell-1-0',
+        targetFrameId: 'memory-frame-1',
+        processItemSelector: '#proc-item-twolevel-2',
+        offset: '0x4C0',
+        frameNum: 1,
+        physicalAddr: '0x14C0',
+        pageName: 'Page 2',
+        onComplete: () => {
+          State.currentStep = 3;
           renderCurrentMode();
           if (isAuto && State.isPlaying) checkAutoPlayNext();
         }

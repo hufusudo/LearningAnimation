@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>哈夫曼树与变长子网划分 (VLSM) - 408 核心可视化</title>
+
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['-apple-system', 'BlinkMacSystemFont', 'SF Pro Display', 'Segoe UI', 'Roboto', 'sans-serif'],
+            mono: ['JetBrains Mono', 'Fira Code', 'monospace'],
+            serif: ['Newsreader', 'Georgia', 'serif']
+          }
+        }
+      }
+    }
+  </script>
+
+  <!-- GSAP CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+
+  <!-- KaTeX CDN -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+
+  <!-- Custom CSS -->
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="min-h-screen bg-[#FAF9F5] text-stone-900 flex flex-col justify-between antialiased selection:bg-stone-200">
+
+  <!-- ============================================================ -->
+  <!-- 极简顶栏 Header -->
+  <!-- ============================================================ -->
+  <header class="border-b border-[#E5E4DC] bg-[#FAF9F5]/90 backdrop-blur sticky top-0 z-30 px-6 py-2.5">
+    <div class="max-w-7xl mx-auto flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <a href="../index.html#net" class="w-7 h-7 rounded-lg bg-stone-900 text-white flex items-center justify-center font-mono font-bold text-xs hover:bg-stone-800 transition-colors shadow-sm" title="返回计算机网络展厅">
+          ←
+        </a>
+        <div>
+          <h1 class="text-base font-bold tracking-tight text-stone-900 flex items-center gap-2">
+            哈夫曼树与变长子网划分 (VLSM)
+            <span class="text-xs font-mono font-normal px-2 py-0.5 rounded bg-sky-50 text-sky-800 border border-sky-200">408 核心考点</span>
+            <span class="hidden sm:inline-block text-xs font-mono font-normal px-2 py-0.5 rounded bg-emerald-50 text-emerald-800 border border-emerald-200">二叉前缀树</span>
+          </h1>
+        </div>
+      </div>
+
+      <!-- 模式切换控制器 -->
+      <div class="flex items-center gap-2">
+        <div class="flex items-center p-1 bg-stone-200/70 rounded-xl text-xs font-mono">
+          <button id="tab-mode-step" onclick="switchMainMode('step')" class="px-3 py-1.5 rounded-lg font-bold bg-white text-stone-900 shadow-sm transition-all">
+            分步教学推演
+          </button>
+          <button id="tab-mode-sandbox" onclick="switchMainMode('sandbox')" class="px-3 py-1.5 rounded-lg font-medium text-stone-600 hover:text-stone-900 transition-all">
+            自由拓扑探究
+          </button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- ============================================================ -->
+  <!-- 主工作舞台 -->
+  <!-- ============================================================ -->
+  <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-4 space-y-4">
+
+    <!-- 控制卡片与步骤指示器 -->
+    <section class="taste-card p-4 space-y-3">
+      <div class="flex items-center justify-between flex-wrap gap-3">
+        <!-- 播放控制按键组 -->
+        <div class="flex items-center gap-2 flex-wrap">
+          <button id="btn-play" onclick="toggleAutoPlay()" class="px-4 py-1.5 rounded-lg text-xs font-semibold bg-stone-900 text-white hover:bg-stone-800 transition-colors shadow-sm flex items-center gap-1.5">
+            <span id="play-icon">▶</span> <span id="play-text">自动连续演示</span>
+          </button>
+          <button id="btn-prev" onclick="prevStep()" class="ctl-btn">
+            ⏮ 上一步
+          </button>
+          <button id="btn-next" onclick="nextStep()" class="ctl-btn font-semibold">
+            下一步 ⏭
+          </button>
+          <button id="btn-reset" onclick="resetToStep(1)" class="ctl-btn">
+            ↺ 复位
+          </button>
+
+          <div class="h-4 w-px bg-stone-300 mx-1 hidden sm:block"></div>
+
+          <!-- 动画播放速度 -->
+          <div class="flex items-center gap-1 font-mono text-xs">
+            <span class="text-stone-400 mr-1 hidden sm:inline">速度:</span>
+            <button onclick="setSpeed(0.5)" id="speed-btn-05" class="px-2 py-0.5 rounded border border-stone-200 text-stone-600 hover:border-stone-400">0.5x</button>
+            <button onclick="setSpeed(1.0)" id="speed-btn-10" class="px-2 py-0.5 rounded border border-stone-900 bg-stone-900 text-white font-bold">1.0x</button>
+            <button onclick="setSpeed(1.5)" id="speed-btn-15" class="px-2 py-0.5 rounded border border-stone-200 text-stone-600 hover:border-stone-400">1.5x</button>
+          </div>
+        </div>
+
+        <!-- 提示徽章 -->
+        <div class="text-xs font-mono text-stone-500 flex items-center gap-2">
+          <span class="inline-block w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+          <span id="header-status-hint">阶段 1/6：初始网段点分十进制与32位二进制结构</span>
+        </div>
+      </div>
+
+      <!-- 步骤时间线胶囊栏 -->
+      <div id="step-timeline" class="flex items-center gap-2 overflow-x-auto pt-2 border-t border-[#E5E4DC]">
+        <button onclick="goToStep(1)" id="step-pill-1" class="step-pill active">
+          1. 初始网段与二进制
+        </button>
+        <button onclick="goToStep(2)" id="step-pill-2" class="step-pill">
+          2. 首次二叉分裂 (左0右1)
+        </button>
+        <button onclick="goToStep(3)" id="step-pill-3" class="step-pill">
+          3. 地址演进与+1分尽证明
+        </button>
+        <button onclick="goToStep(4)" id="step-pill-4" class="step-pill">
+          4. 再次分裂 (4个/26)
+        </button>
+        <button onclick="goToStep(5)" id="step-pill-5" class="step-pill">
+          5. 错误示范：父子冲突
+        </button>
+        <button onclick="goToStep(6)" id="step-pill-6" class="step-pill">
+          6. 正确示范：选取3个子网
+        </button>
+      </div>
+    </section>
+
+    <!-- ============================================================ -->
+    <!-- 上半区：哈夫曼前缀树 (左) + 32位二进制结构 & 地址空间 (右) -->
+    <!-- ============================================================ -->
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-4">
+
+      <!-- 左侧：前缀二叉树画布 (7 列) -->
+      <div class="lg:col-span-7 taste-card p-4 flex flex-col justify-between relative overflow-hidden min-h-[380px]">
+        <!-- 树顶标题栏 -->
+        <div class="flex items-center justify-between pb-2 border-b border-[#E5E4DC]">
+          <div class="flex items-center gap-2">
+            <span class="w-2.5 h-2.5 rounded-full bg-stone-900"></span>
+            <h2 class="text-xs font-bold text-stone-900 uppercase font-mono tracking-wider">
+              哈夫曼前缀编码二叉树 (CIDR Trie Tree)
+            </h2>
+          </div>
+          <div class="flex items-center gap-3 text-xs font-mono">
+            <span class="inline-flex items-center gap-1 text-sky-700">
+              <span class="w-2 h-2 rounded-full bg-sky-500"></span> 左分支: 0
+            </span>
+            <span class="inline-flex items-center gap-1 text-indigo-700">
+              <span class="w-2 h-2 rounded-full bg-indigo-500"></span> 右分支: 1
+            </span>
+          </div>
+        </div>
+
+        <!-- 树结构容器 (SVG 连接线 + DOM 节点绝对定位) -->
+        <div class="relative flex-1 w-full my-2 min-h-[310px]" id="tree-container">
+          <svg id="tree-edges-svg" class="absolute inset-0 w-full h-full pointer-events-none" style="z-index: 1;">
+            <!-- 动态生成的树边与 0/1 标签 -->
+          </svg>
+          <div id="tree-nodes-container" class="absolute inset-0 w-full h-full pointer-events-auto" style="z-index: 2;">
+            <!-- 动态渲染的二叉树卡片节点 -->
+          </div>
+        </div>
+
+        <!-- 树底状态脚标 -->
+        <div class="pt-2 border-t border-[#E5E4DC] flex items-center justify-between text-[11px] font-mono text-stone-500">
+          <span id="tree-legend">节点交互：分步模式由步骤指引，自由模式可点击勾选</span>
+          <span id="tree-status-tag" class="px-2 py-0.5 rounded bg-stone-100 text-stone-700">单网段根节点</span>
+        </div>
+      </div>
+
+      <!-- 右侧：当前节点 IP、32位二进制位元、地址条 (5 列) -->
+      <div class="lg:col-span-5 taste-card p-4 flex flex-col justify-between space-y-3">
+        <!-- 标题 -->
+        <div class="flex items-center justify-between pb-2 border-b border-[#E5E4DC]">
+          <h3 class="text-xs font-bold text-stone-900 uppercase font-mono tracking-wider">
+            IP 地址写法与 32 位二进制透视
+          </h3>
+          <span id="inspector-level-badge" class="text-[11px] font-mono px-2 py-0.5 rounded bg-rose-50 text-rose-700 border border-rose-200">
+            初始 /24 网段
+          </span>
+        </div>
+
+        <!-- 1. 点分十进制与 CIDR 记法 -->
+        <div class="p-3 rounded-xl bg-stone-50 border border-[#E5E4DC] space-y-1">
+          <div class="flex items-center justify-between">
+            <span class="text-[11px] font-mono text-stone-500">点分十进制与前缀掩码:</span>
+            <span id="inspector-capacity" class="text-[11px] font-mono text-emerald-700 font-semibold bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">
+              包含 256 个 IP 地址
+            </span>
+          </div>
+          <div class="flex items-baseline justify-between flex-wrap gap-2">
+            <div class="text-xl font-bold font-mono text-stone-900 tracking-tight" id="inspector-cidr-text">
+              192.168.1.0 / 24
+            </div>
+            <div class="text-xs font-mono text-stone-500" id="inspector-mask-text">
+              子网掩码: 255.255.255.0
+            </div>
+          </div>
+        </div>
+
+        <!-- 2. 32 位二进制位元详细排列 (核心高亮要求) -->
+        <div class="space-y-2">
+          <div class="flex items-center justify-between text-[11px] font-mono">
+            <span class="text-stone-500">32 位点分二进制结构:</span>
+            <div class="flex items-center gap-2">
+              <span class="inline-flex items-center gap-1 text-rose-600 font-semibold">
+                <span class="w-2 h-2 rounded bg-rose-500"></span> 网络号(红)
+              </span>
+              <span class="inline-flex items-center gap-1 text-amber-600 font-semibold" id="legend-subnet-bit">
+                <span class="w-2 h-2 rounded bg-amber-500"></span> 子网位
+              </span>
+              <span class="inline-flex items-center gap-1 text-emerald-600 font-semibold">
+                <span class="w-2 h-2 rounded bg-emerald-500"></span> 主机号(绿)
+              </span>
+            </div>
+          </div>
+
+          <!-- 4 字节点分网格 -->
+          <div class="p-2.5 rounded-xl bg-white border border-[#E5E4DC] flex flex-col gap-2 overflow-x-auto">
+            <!-- 前 3 字节 (全网络号标红) -->
+            <div class="flex items-center gap-1 font-mono text-xs">
+              <span class="text-[10px] text-stone-400 w-12 flex-shrink-0">网络前缀:</span>
+              <div class="flex items-center gap-0.5" id="byte1-container">
+                <!-- 11000000 -->
+              </div>
+              <span class="text-stone-400 font-bold">.</span>
+              <div class="flex items-center gap-0.5" id="byte2-container">
+                <!-- 10101000 -->
+              </div>
+              <span class="text-stone-400 font-bold">.</span>
+              <div class="flex items-center gap-0.5" id="byte3-container">
+                <!-- 00000001 -->
+              </div>
+            </div>
+
+            <!-- 第 4 字节 (第25~32位，子网划分关键字节) -->
+            <div class="flex items-center gap-1 font-mono text-xs pt-1 border-t border-dashed border-stone-200">
+              <span class="text-[10px] text-stone-900 font-bold w-12 flex-shrink-0">主机字节:</span>
+              <div class="flex items-center gap-1 flex-1" id="byte4-container">
+                <!-- 动态渲染第4字节的8个位 -->
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 3. 地址空间覆盖条 (Address Space Bar 0~255) -->
+        <div class="space-y-1.5">
+          <div class="flex items-center justify-between text-[11px] font-mono">
+            <span class="text-stone-600 font-medium">地址空间分片覆盖 (0 ~ 255):</span>
+            <span id="coverage-percentage" class="font-bold text-stone-800">256 / 256 (100% 覆盖)</span>
+          </div>
+          <div class="address-strip" id="address-strip">
+            <!-- 动态生成的地址覆盖条 -->
+          </div>
+          <div class="flex items-center justify-between text-[10px] font-mono text-stone-400 px-0.5">
+            <span>.0</span>
+            <span>.63 / .64</span>
+            <span>.127 / .128</span>
+            <span>.191 / .192</span>
+            <span>.255</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============================================================ -->
+    <!-- 下半区：重点动画讲解看板 (加法进位特写 / 冲突错误剖析 / 合法前缀) -->
+    <!-- ============================================================ -->
+    <section class="taste-card p-4 space-y-4" id="explanation-stage">
+      
+      <!-- 讲解板块标题栏 -->
+      <div class="flex items-center justify-between border-b border-[#E5E4DC] pb-2">
+        <div class="flex items-center gap-2">
+          <span class="px-2 py-0.5 rounded text-xs font-mono font-bold bg-stone-900 text-white" id="step-badge">
+            STEP 1
+          </span>
+          <h2 class="text-sm font-bold text-stone-900" id="step-title">
+            初始网段设定与二进制边界
+          </h2>
+        </div>
+        <div class="text-xs font-mono text-stone-400" id="step-math-summary">
+          空间总计: 2^8 = 256 个地址
+        </div>
+      </div>
+
+      <!-- 动态视口：根据当前步骤切换展示 -->
+      <div id="step-content-viewport" class="min-h-[140px] flex flex-col justify-center">
+        <!-- 动态注入步骤内容 -->
+      </div>
+    </section>
+
+  </main>
+
+  <!-- 极简页脚 -->
+  <footer class="border-t border-[#E5E4DC] py-3.5 px-6 text-center text-xs font-mono text-stone-400">
+    408 计算机网络 · 哈夫曼树变长子网划分 (VLSM / 二叉前缀树) · 高性能 60fps 动态可视化
+  </footer>
+
+  <!-- 引入主逻辑脚本 -->
+  <script src="app.js"></script>
+</body>
+</html>

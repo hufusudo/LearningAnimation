@@ -30,7 +30,7 @@
             离散分配存储管理动态演示系统
           </h1>
           <p class="text-xs text-stone-500 font-mono mt-0.5">
-            408 核心考点 · 基本分页 / 基本分段 / 段页式动态地址映射与物理装入
+            408 核心考点 · 基本分页 / 基本分段 / 段页式 / 二级页表动态地址映射与物理装入
           </p>
         </div>
       </div>
@@ -47,8 +47,8 @@
     <div class="card-panel rounded-2xl p-4 flex flex-col gap-3 shadow-sm bg-white">
       <div class="flex items-center justify-between flex-wrap gap-3 pb-3 border-b border-[#ECEBE4]">
         
-        <!-- 三大分配模式切换 -->
-        <div class="flex items-center gap-1.5 bg-stone-100/80 p-1 rounded-xl border border-stone-200/80">
+        <!-- 四大分配模式切换 -->
+        <div class="flex items-center gap-1.5 bg-stone-100/80 p-1 rounded-xl border border-stone-200/80 flex-wrap">
           <button id="tab-paging" class="tab-btn active" onclick="switchMode('paging')">
             <span class="w-2 h-2 rounded-full bg-blue-600"></span>
             <span>1. 分页存储管理 (Paging)</span>
@@ -60,6 +60,10 @@
           <button id="tab-segpage" class="tab-btn" onclick="switchMode('segpage')">
             <span class="w-2 h-2 rounded-full bg-purple-600"></span>
             <span>3. 段页式存储管理 (Segmented Paging)</span>
+          </button>
+          <button id="tab-twolevel" class="tab-btn" onclick="switchMode('twolevel')">
+            <span class="w-2 h-2 rounded-full bg-emerald-600"></span>
+            <span>4. 二级页表存储管理 (Two-Level Paging)</span>
           </button>
         </div>
 
@@ -263,7 +267,7 @@
 
     <!-- 底部：408 核心机制与对比分析栏 -->
     <div class="card-panel rounded-2xl p-4 bg-white">
-      <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 text-xs">
         <div class="flex flex-col gap-1 p-2.5 rounded-xl bg-stone-50 border border-stone-200/60">
           <div class="font-bold text-stone-900 font-mono flex items-center gap-1.5">
             <span class="w-2 h-2 rounded-full bg-blue-500"></span>
@@ -291,6 +295,16 @@
           </div>
           <p class="text-stone-600 leading-relaxed font-sans">
             先逻辑分段，段内再离散分页。兼顾分段的共享/保护灵活性与分页无外部碎片的内存利用率。需先查段表再查页表。
+          </p>
+        </div>
+
+        <div class="flex flex-col gap-1 p-2.5 rounded-xl bg-stone-50 border border-stone-200/60">
+          <div class="font-bold text-stone-900 font-mono flex items-center gap-1.5">
+            <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
+            <span>二级页表存储 (Two-Level Paging)</span>
+          </div>
+          <p class="text-stone-600 leading-relaxed font-sans">
+            将连续庞大的页表离散化。顶级页表（页目录表）常驻内存，二级页表可按需动态建立与调入，极大减少了单级大页表的连续内存占用。
           </p>
         </div>
       </div>
