@@ -1,0 +1,205 @@
+/* ==========================================================================
+   极限定义的几何直观 (Geometric Intuition of Limits) - Taste-Skill Light Editorial
+   ========================================================================== */
+
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400;1,6..72,600&display=swap');
+
+:root {
+  --bg-page: #FAF9F5;
+  --bg-surface: #FFFFFF;
+  --bg-surface-subtle: #F4F3EE;
+  --bg-surface-hover: #ECEBE5;
+
+  --border-main: #E5E4DC;
+  --border-subtle: #ECEBE4;
+  --border-active: #C8C7BD;
+
+  --text-primary: #1C1917;
+  --text-secondary: #57534E;
+  --text-muted: #78716C;
+  --text-dim: #A8A29E;
+
+  /* Math Theme Semantics */
+  --limit-a-color: #1D4ED8;     /* Royal Indigo for y=a */
+  --limit-a-bg: #EFF6FF;
+  --limit-a-border: #BFDBFE;
+
+  --band-c-color: #D97706;      /* Amber / Warm Ochre for y=a±c */
+  --band-c-bg: #FFFBEB;
+  --band-c-fill: rgba(245, 158, 11, 0.08);
+
+  --thresh-x-color: #E11D48;    /* Crimson / Rose for threshold X and N */
+  --thresh-x-bg: #FFF1F2;
+  --thresh-x-border: #FECDD3;
+  --safe-zone-fill: rgba(16, 185, 129, 0.04);
+
+  --curve-color: #2563EB;       /* Vibrant Blue for Continuous f(x) */
+  --point-in-color: #059669;    /* Emerald Green for inside U(a,c) */
+  --point-out-color: #E11D48;   /* Crimson Red for outside U(a,c) */
+  --probe-color: #7C3AED;       /* Purple for moving cursor probe */
+
+  --shadow-subtle: 0 1px 3px 0 rgba(0, 0, 0, 0.04), 0 1px 2px -1px rgba(0, 0, 0, 0.03);
+  --shadow-elevated: 0 4px 12px 0 rgba(0, 0, 0, 0.05), 0 2px 4px -2px rgba(0, 0, 0, 0.03);
+}
+
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+body {
+  background-color: var(--bg-page);
+  color: var(--text-primary);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.font-serif-math {
+  font-family: 'Newsreader', Georgia, Cambria, 'Times New Roman', serif;
+}
+
+.font-mono-num {
+  font-family: 'JetBrains Mono', SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+/* Card Surface */
+.card-surface {
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-main);
+  border-radius: 1rem;
+  box-shadow: var(--shadow-subtle);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.card-surface:hover {
+  border-color: var(--border-active);
+  box-shadow: var(--shadow-elevated);
+}
+
+/* Interactive Buttons */
+.btn-action {
+  transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+  user-select: none;
+}
+
+.btn-action:active {
+  transform: scale(0.97);
+}
+
+/* Custom Range Slider */
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 6px;
+  background: #E5E4DC;
+  border-radius: 9999px;
+  outline: none;
+  transition: background 0.2s;
+}
+
+input[type="range"]:hover {
+  background: #D6D3CD;
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #1C1917;
+  border: 2px solid #FFFFFF;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+  cursor: pointer;
+  transition: transform 0.1s, background 0.1s;
+}
+
+input[type="range"]::-webkit-slider-thumb:hover {
+  transform: scale(1.15);
+  background: #2563EB;
+}
+
+input[type="range"]::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #1C1917;
+  border: 2px solid #FFFFFF;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+  cursor: pointer;
+  transition: transform 0.1s, background 0.1s;
+}
+
+/* Tab Navigation */
+.tab-pill {
+  transition: all 0.2s ease;
+}
+
+.tab-pill.active {
+  background-color: #FFFFFF;
+  color: #1C1917;
+  font-weight: 600;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+/* SVG Chart Elements */
+.axis-line {
+  stroke: #A8A29E;
+  stroke-width: 1.5;
+  shape-rendering: crispEdges;
+}
+
+.grid-line {
+  stroke: #ECEBE4;
+  stroke-width: 1;
+  stroke-dasharray: 2 2;
+  shape-rendering: crispEdges;
+}
+
+.limit-line {
+  stroke: var(--limit-a-color);
+  stroke-width: 2.2;
+}
+
+.band-line {
+  stroke: var(--band-c-color);
+  stroke-width: 1.8;
+  stroke-dasharray: 6 4;
+}
+
+.thresh-line {
+  stroke: var(--thresh-x-color);
+  stroke-width: 2;
+  stroke-dasharray: 5 4;
+}
+
+/* Math Callout Boxes */
+.callout-box {
+  border-radius: 0.75rem;
+  padding: 0.875rem 1rem;
+  border-width: 1px;
+}
+
+.callout-note {
+  background-color: #F0FDF4;
+  border-color: #BBF7D0;
+  color: #166534;
+}
+
+.callout-amber {
+  background-color: #FFFBEB;
+  border-color: #FDE68A;
+  color: #92400E;
+}
+
+.callout-blue {
+  background-color: #EFF6FF;
+  border-color: #BFDBFE;
+  color: #1E40AF;
+}
+
+.callout-rose {
+  background-color: #FFF1F2;
+  border-color: #FECDD3;
+  color: #9F1239;
+}

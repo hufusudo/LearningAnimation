@@ -70,7 +70,7 @@
             学科大厅
           </button>
           <button onclick="switchView('all')" id="nav-all" class="pill-btn px-3 py-1.5 rounded-lg border border-[#E5E4DC] text-stone-600 hover:text-stone-900 bg-white">
-            全部模块 (16)
+            全部模块 (17)
           </button>
         </nav>
       </div>
@@ -89,7 +89,7 @@
         <h2 class="text-xl md:text-2xl font-bold tracking-tight text-stone-900">
           选择学科进入专题演示
         </h2>
-        <span class="text-xs font-mono text-stone-500 whitespace-nowrap">6 大学科门类 · 16 个独立系统</span>
+        <span class="text-xs font-mono text-stone-500 whitespace-nowrap">6 大学科门类 · 17 个独立系统</span>
       </div>
 
       <!-- Discipline Cards Grid (2x3 or 3x2 responsive) -->
@@ -112,7 +112,7 @@
                 </div>
               </div>
               <span class="text-xs font-mono text-blue-600 font-semibold bg-blue-50 px-2 py-0.5 rounded border border-blue-200 whitespace-nowrap flex-shrink-0">
-                3 个模块
+                4 个模块
               </span>
             </div>
 
@@ -129,6 +129,10 @@
               <div class="flex items-center gap-2 text-xs text-stone-800 font-medium py-1.5 px-2.5 rounded-lg bg-stone-50 border border-stone-200/80 group-hover:border-blue-200 transition-colors">
                 <span class="w-1.5 h-1.5 rounded-full bg-blue-500 flex-shrink-0"></span>
                 <span class="truncate">柯西中值定理几何直观与交互可视化</span>
+              </div>
+              <div class="flex items-center gap-2 text-xs text-stone-800 font-medium py-1.5 px-2.5 rounded-lg bg-stone-50 border border-stone-200/80 group-hover:border-blue-200 transition-colors">
+                <span class="w-1.5 h-1.5 rounded-full bg-blue-500 flex-shrink-0"></span>
+                <span class="truncate">极限定义的几何直观（函数与数列）</span>
               </div>
             </div>
           </div>
@@ -368,7 +372,7 @@
       <!-- Bottom Jump Links to All Projects & 408 Overall -->
       <div class="pt-6 flex flex-wrap items-center justify-center gap-4 text-center border-t border-[#E5E4DC]">
         <button onclick="switchView('all')" class="text-xs font-mono text-stone-500 hover:text-stone-900 transition-colors inline-flex items-center gap-1 py-1.5 px-3 rounded-lg hover:bg-stone-200/50">
-          <span>展开全部 15 个独立演示卡片</span>
+          <span>展开全部 17 个独立演示卡片</span>
           <span>&darr;</span>
         </button>
         <span class="text-stone-300">|</span>
@@ -532,6 +536,36 @@
 
           <div class="pt-4 border-t border-[#ECEBE4] flex items-center justify-between font-mono text-xs text-stone-500">
             <span>[f(b)-f(a)]/[g(b)-g(a)] = f'(ξ)/g'(ξ)</span>
+            <span class="text-stone-900 font-medium group-hover:translate-x-1 transition-transform inline-flex items-center gap-1">
+              进入演示 &rarr;
+            </span>
+          </div>
+        </a>
+
+        <!-- Card: Limit Definition (Function & Sequence) -->
+        <a href="极限定义的几何直观/index.html" data-discipline="math" class="card-project rounded-2xl p-6 flex flex-col justify-between gap-6 group">
+          <div class="flex flex-col gap-3">
+            <div class="flex items-center justify-between">
+              <span class="px-2.5 py-1 rounded-md text-[11px] font-mono font-semibold bg-blue-50 text-blue-700 border border-blue-200">
+                高等数学
+              </span>
+              <span class="text-xs font-mono text-emerald-600 font-medium flex items-center gap-1">
+                <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
+                60fps 连续互动
+              </span>
+            </div>
+
+            <h3 class="text-lg font-semibold text-stone-900 group-hover:text-blue-600 transition-colors">
+              极限定义的几何直观（函数与数列）
+            </h3>
+
+            <p class="text-xs text-stone-600 leading-relaxed">
+              ε-X 与 ε-N 精确语言：y=a 极限基准线、y=a±c 误差邻域带、门槛点 X 与 N 动态求解、c→0 连续收缩演播及连续/离散同屏对照。
+            </p>
+          </div>
+
+          <div class="pt-4 border-t border-[#ECEBE4] flex items-center justify-between font-mono text-xs text-stone-500">
+            <span>∀c&gt;0, ∃X&gt;0: ∀x&gt;X ⇒ |f(x)-a|&lt;c</span>
             <span class="text-stone-900 font-medium group-hover:translate-x-1 transition-transform inline-flex items-center gap-1">
               进入演示 &rarr;
             </span>
@@ -955,7 +989,7 @@
         title: '高等数学',
         badge: '高等数学',
         badgeColor: 'bg-blue-50 text-blue-700 border-blue-200',
-        count: '共 3 个独立演示模块',
+        count: '共 4 个独立演示模块',
         desc: ''
       },
       prob: {
@@ -1004,7 +1038,7 @@
         title: '全部学科演示模块清单',
         badge: '全学科总览',
         badgeColor: 'bg-stone-100 text-stone-800 border-stone-300',
-        count: '共 16 个独立演示模块',
+        count: '共 17 个独立演示模块',
         desc: ''
       }
     };
