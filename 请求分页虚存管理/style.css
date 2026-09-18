@@ -1,0 +1,363 @@
+/*
+ * 请求分页虚存管理演示系统 (以 MMU 为中心 · CSS Grid 架构)
+ * 严格语义配色：逻辑地址蓝 / 物理地址紫 / 页号橙 / 帧号绿 / 命中绿 / 未命中黄 / 缺页红 / 磁盘灰 / 更新紫
+ */
+
+:root {
+  --bg-main: #FAF9F5;
+  --bg-card: #FFFFFF;
+  --border-subtle: #E5E4DC;
+  --border-strong: #D1D0C5;
+  --text-main: #1C1917;
+  --text-muted: #78716C;
+
+  /* 语义色彩 */
+  --la-blue: #2563EB;
+  --la-blue-soft: #EFF6FF;
+  --pa-purple: #7C3AED;
+  --pa-purple-soft: #F5F3FF;
+  --p-orange: #EA580C;
+  --p-orange-soft: #FFF7ED;
+  --f-green: #059669;
+  --f-green-soft: #ECFDF5;
+  --hit-green: #10B981;
+  --miss-yellow: #F59E0B;
+  --fault-red: #EF4444;
+  --disk-gray: #475569;
+  --update-purple: #8B5CF6;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  background-color: var(--bg-main);
+  color: var(--text-main);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  overflow-x: hidden;
+  margin: 0;
+  padding: 0;
+}
+
+/* 核心网格布局容器 */
+.layout-grid {
+  display: grid;
+  grid-template-columns: 280px minmax(360px, 440px) minmax(320px, 400px);
+  grid-template-rows: auto auto auto;
+  gap: 16px;
+  position: relative;
+  align-items: stretch;
+}
+
+/* 网格区域定义 */
+.grid-cpu {
+  grid-column: 1;
+  grid-row: 1 / span 3;
+}
+
+.grid-tlb {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.grid-mmu {
+  grid-column: 2;
+  grid-row: 2;
+}
+
+.grid-pt {
+  grid-column: 2;
+  grid-row: 3;
+}
+
+.grid-ram {
+  grid-column: 3;
+  grid-row: 1 / span 2;
+}
+
+.grid-disk {
+  grid-column: 3;
+  grid-row: 3;
+}
+
+/* 响应式调整 */
+@media (max-width: 1024px) {
+  .layout-grid {
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: auto;
+  }
+  .grid-cpu { grid-column: 1; grid-row: 1; }
+  .grid-tlb { grid-column: 2; grid-row: 1; }
+  .grid-mmu { grid-column: 2; grid-row: 2; }
+  .grid-pt { grid-column: 2; grid-row: 3; }
+  .grid-ram { grid-column: 1; grid-row: 2; }
+  .grid-disk { grid-column: 1; grid-row: 3; }
+}
+
+/* 卡片基类 */
+.panel-box {
+  background-color: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  padding: 14px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.03);
+  position: relative;
+  transition: border-color 0.3s ease, box-shadow 0.3s ease;
+}
+
+/* MMU 中心节点特殊微拟物 */
+.mmu-center-panel {
+  border: 2px solid #D97706;
+  background: linear-gradient(180deg, #FFFFFF 0%, #FFFDF8 100%);
+  box-shadow: 0 4px 16px rgba(217, 119, 6, 0.08);
+}
+.mmu-center-panel.highlight-active {
+  border-color: #B45309;
+  box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.35), 0 6px 20px rgba(245, 158, 11, 0.2);
+}
+
+/* 部件高亮状态 */
+.box-highlight-blue {
+  border-color: var(--la-blue) !important;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.3), 0 4px 14px rgba(37, 99, 235, 0.15) !important;
+}
+.box-highlight-green {
+  border-color: var(--hit-green) !important;
+  box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.35), 0 4px 14px rgba(16, 185, 129, 0.2) !important;
+}
+.box-highlight-purple {
+  border-color: var(--pa-purple) !important;
+  box-shadow: 0 0 0 2px rgba(124, 58, 237, 0.3), 0 4px 14px rgba(124, 58, 237, 0.15) !important;
+}
+.box-highlight-red {
+  border-color: var(--fault-red) !important;
+  box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.35), 0 4px 16px rgba(239, 68, 68, 0.25) !important;
+}
+
+/* TLB 状态动画 */
+.tlb-row-hit {
+  background-color: #ECFDF5 !important;
+  border-color: #10B981 !important;
+  color: #065F46 !important;
+  box-shadow: inset 0 0 0 1.5px #10B981, 0 0 8px rgba(16, 185, 129, 0.3);
+  font-weight: 700;
+  transition: all 0.25s ease;
+}
+.tlb-flash-miss {
+  animation: tlbMissFlash 0.5s ease 2;
+}
+@keyframes tlbMissFlash {
+  0%, 100% { background-color: transparent; }
+  50% { background-color: #FEF3C7; box-shadow: inset 0 0 0 1.5px #F59E0B; }
+}
+.tlb-update-purple {
+  background-color: #F5F3FF !important;
+  border-color: #8B5CF6 !important;
+  box-shadow: inset 0 0 0 1.5px #8B5CF6, 0 0 10px rgba(139, 92, 246, 0.35);
+  transition: all 0.3s ease;
+}
+
+/* 页表行状态 */
+.pt-row-active {
+  background-color: #EFF6FF !important;
+  border-color: #3B82F6 !important;
+  box-shadow: inset 0 0 0 1.5px #3B82F6;
+  font-weight: 700;
+}
+.pt-row-fault {
+  background-color: #FEF2F2 !important;
+  border-color: #EF4444 !important;
+  box-shadow: inset 0 0 0 1.5px #EF4444;
+  color: #991B1B !important;
+  font-weight: 700;
+  animation: pulseFault 0.7s infinite alternate;
+}
+@keyframes pulseFault {
+  from { background-color: #FEF2F2; }
+  to { background-color: #FEE2E2; }
+}
+.pt-update-purple {
+  background-color: #F5F3FF !important;
+  border-color: #8B5CF6 !important;
+  box-shadow: inset 0 0 0 1.5px #8B5CF6;
+}
+
+/* 内存帧高亮 */
+.frame-active-read {
+  background-color: #F5F3FF !important;
+  border-color: #7C3AED !important;
+  box-shadow: 0 0 0 2px rgba(124, 58, 237, 0.4), 0 4px 12px rgba(124, 58, 237, 0.25) !important;
+  transform: scale(1.02);
+}
+.frame-active-write {
+  background-color: #ECFDF5 !important;
+  border-color: #10B981 !important;
+  box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.4), 0 4px 12px rgba(16, 185, 129, 0.25) !important;
+  transform: scale(1.02);
+}
+
+/* 磁盘块状态 */
+.disk-block-reading {
+  border-color: #F59E0B !important;
+  background-color: #FEF3C7 !important;
+  box-shadow: 0 0 8px rgba(245, 158, 11, 0.4);
+}
+
+/* 原地偏移量 D 锁存容器 */
+.offset-stay-box {
+  background-color: #FFFDF5;
+  border: 1.5px dashed #F59E0B;
+  border-radius: 6px;
+  padding: 4px 8px;
+  position: relative;
+}
+
+/* 物理地址组合完成 */
+.pa-assembled-glow {
+  background: linear-gradient(135deg, #F5F3FF 0%, #EDE9FE 100%);
+  border: 1.5px solid #7C3AED;
+  box-shadow: 0 0 12px rgba(124, 58, 237, 0.25);
+  animation: paBounce 0.4s ease;
+}
+@keyframes paBounce {
+  0% { transform: scale(0.95); }
+  50% { transform: scale(1.05); }
+  100% { transform: scale(1); }
+}
+
+/* SVG 箭头连线图层 */
+#svg-network-layer {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 10;
+}
+
+.bus-wire {
+  fill: none;
+  stroke: #CBD5E1;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: stroke 0.3s ease, stroke-width 0.3s ease;
+}
+.bus-wire-active {
+  stroke-width: 3.5;
+  stroke-dasharray: 6 4;
+  animation: busEnergyFlow 0.8s linear infinite;
+}
+.wire-blue { stroke: #2563EB; filter: drop-shadow(0 0 4px rgba(37, 99, 235, 0.5)); }
+.wire-purple { stroke: #7C3AED; filter: drop-shadow(0 0 4px rgba(124, 58, 237, 0.5)); }
+.wire-green { stroke: #10B981; filter: drop-shadow(0 0 4px rgba(16, 185, 129, 0.5)); }
+.wire-orange { stroke: #EA580C; filter: drop-shadow(0 0 4px rgba(234, 88, 12, 0.5)); }
+.wire-red { stroke: #EF4444; filter: drop-shadow(0 0 4px rgba(239, 68, 68, 0.5)); }
+.wire-disk { stroke: #64748B; filter: drop-shadow(0 0 4px rgba(100, 116, 139, 0.5)); }
+
+@keyframes busEnergyFlow {
+  to { stroke-dashoffset: -20; }
+}
+
+/* 箭头旁动态浮现的访存标签 */
+.access-tag-badge {
+  position: absolute;
+  padding: 3px 8px;
+  border-radius: 9999px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 25;
+  transform: translate(-50%, -50%);
+  animation: tagPop 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+@keyframes tagPop {
+  0% { transform: translate(-50%, -50%) scale(0.6); opacity: 0; }
+  100% { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+}
+
+/* 绝对定位移动的“地址包/数据包” div */
+#packet-container {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 30;
+}
+
+.data-packet {
+  position: absolute;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  font-weight: 700;
+  box-shadow: 0 8px 20px rgba(0,0,0,0.18), 0 2px 6px rgba(0,0,0,0.1);
+  border: 1.5px solid;
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+  z-index: 35;
+}
+
+.packet-la { background-color: #2563EB; color: #FFFFFF; border-color: #93C5FD; }
+.packet-p { background-color: #EA580C; color: #FFFFFF; border-color: #FDBA74; }
+.packet-pa { background-color: #7C3AED; color: #FFFFFF; border-color: #D8B4FE; }
+.packet-f { background-color: #059669; color: #FFFFFF; border-color: #6EE7B7; }
+.packet-data { background-color: #1C1917; color: #F5F5F4; border-color: #A8A29E; }
+.packet-fault { background-color: #DC2626; color: #FFFFFF; border-color: #FCA5A5; }
+.packet-disk { background-color: #475569; color: #FFFFFF; border-color: #CBD5E1; }
+
+/* 访存日志表格 */
+.log-table-container {
+  max-height: 190px;
+  overflow-y: auto;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background-color: #FFFFFF;
+}
+
+.log-row-new {
+  animation: logHighlight 1.5s ease forwards;
+}
+@keyframes logHighlight {
+  0% { background-color: #FEF3C7; }
+  100% { background-color: transparent; }
+}
+
+/* 场景胶囊指示器 */
+.scenario-pill {
+  padding: 4px 12px;
+  border-radius: 9999px;
+  font-size: 12px;
+  font-weight: 600;
+  border: 1px solid var(--border-subtle);
+  background-color: #FFFFFF;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  user-select: none;
+}
+.scenario-pill:hover {
+  background-color: #F5F4EE;
+  color: var(--text-main);
+}
+.scenario-pill.active {
+  background-color: #1C1917;
+  color: #FFFFFF;
+  border-color: #1C1917;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.12);
+}
+
+/* 语义色标记小卡片 */
+.badge-la { background-color: var(--la-blue-soft); color: var(--la-blue); border: 1px solid #BFDBFE; }
+.badge-pa { background-color: var(--pa-purple-soft); color: var(--pa-purple); border: 1px solid #DDD6FE; }
+.badge-p { background-color: var(--p-orange-soft); color: var(--p-orange); border: 1px solid #FED7AA; }
+.badge-f { background-color: var(--f-green-soft); color: var(--f-green); border: 1px solid #A7F3D0; }

@@ -89,7 +89,7 @@
         <h2 class="text-xl md:text-2xl font-bold tracking-tight text-stone-900">
           选择学科进入专题演示
         </h2>
-        <span class="text-xs font-mono text-stone-500 whitespace-nowrap">6 大学科门类 · 17 个独立系统</span>
+        <span class="text-xs font-mono text-stone-500 whitespace-nowrap">6 大学科门类 · 18 个独立系统</span>
       </div>
 
       <!-- Discipline Cards Grid (2x3 or 3x2 responsive) -->
@@ -284,7 +284,7 @@
                 </div>
               </div>
               <span class="text-xs font-mono text-purple-700 font-semibold bg-purple-50 px-2 py-0.5 rounded border border-purple-200 whitespace-nowrap flex-shrink-0">
-                3 个模块
+                4 个模块
               </span>
             </div>
 
@@ -301,6 +301,10 @@
               <div class="flex items-center gap-2 text-xs text-stone-800 font-medium py-1.5 px-2.5 rounded-lg bg-stone-50 border border-stone-200/80 group-hover:border-purple-200 transition-colors">
                 <span class="w-1.5 h-1.5 rounded-full bg-purple-500 flex-shrink-0"></span>
                 <span class="truncate">离散分配内存管理（分页/分段/段页式）</span>
+              </div>
+              <div class="flex items-center gap-2 text-xs text-stone-800 font-medium py-1.5 px-2.5 rounded-lg bg-stone-50 border border-stone-200/80 group-hover:border-purple-200 transition-colors">
+                <span class="w-1.5 h-1.5 rounded-full bg-purple-500 flex-shrink-0"></span>
+                <span class="truncate">请求分页虚存管理（TLB快表与地址变换）</span>
               </div>
             </div>
           </div>
@@ -372,12 +376,12 @@
       <!-- Bottom Jump Links to All Projects & 408 Overall -->
       <div class="pt-6 flex flex-wrap items-center justify-center gap-4 text-center border-t border-[#E5E4DC]">
         <button onclick="switchView('all')" class="text-xs font-mono text-stone-500 hover:text-stone-900 transition-colors inline-flex items-center gap-1 py-1.5 px-3 rounded-lg hover:bg-stone-200/50">
-          <span>展开全部 17 个独立演示卡片</span>
+          <span>展开全部 18 个独立演示卡片</span>
           <span>&darr;</span>
         </button>
         <span class="text-stone-300">|</span>
         <button onclick="switchView('cs')" class="text-xs font-mono text-indigo-600 hover:text-indigo-900 transition-colors inline-flex items-center gap-1 py-1.5 px-3 rounded-lg hover:bg-indigo-50">
-          <span>计算机408统考全科综合展厅 (10 个模块)</span>
+          <span>计算机408统考全科综合展厅 (12 个模块)</span>
           <span>&rarr;</span>
         </button>
       </div>
@@ -788,6 +792,36 @@
           </div>
         </a>
 
+        <!-- Card: Demand Paging Virtual Memory (TLB, Address Translation, Page Fault) -->
+        <a href="请求分页虚存管理/index.html" data-discipline="os" class="card-project rounded-2xl p-6 flex flex-col justify-between gap-6 group">
+          <div class="flex flex-col gap-3">
+            <div class="flex items-center justify-between">
+              <span class="px-2.5 py-1 rounded-md text-[11px] font-mono font-semibold bg-purple-50 text-purple-700 border border-purple-200">
+                计算机操作系统
+              </span>
+              <span class="text-xs font-mono text-purple-600 font-medium flex items-center gap-1">
+                <span class="w-2 h-2 rounded-full bg-purple-500"></span>
+                TLB快表 · 原地锁存与位拼接
+              </span>
+            </div>
+
+            <h3 class="text-lg font-semibold text-stone-900 group-hover:text-purple-700 transition-colors">
+              请求分页虚存管理动态演示
+            </h3>
+
+            <p class="text-xs text-stone-600 leading-relaxed">
+              二进制逻辑地址切分、页内偏移量留在原地、页号下移TLB并行比对；TLB命中位拼接直达物理页框；未命中经PTBR计算发起第一次访存查页表，取得页框号拼接后发起第二次访存及缺页中断外存调入。
+            </p>
+          </div>
+
+          <div class="pt-4 border-t border-[#ECEBE4] flex items-center justify-between font-mono text-xs text-stone-500">
+            <span>二进制切分 → 偏移原地保留 → 快表/页表两级访存</span>
+            <span class="text-stone-900 font-medium group-hover:translate-x-1 transition-transform inline-flex items-center gap-1">
+              进入演示 &rarr;
+            </span>
+          </div>
+        </a>
+
         <!-- ==================== DATA STRUCTURES CARDS ==================== -->
 
         <!-- Card: Replacement Selection & Optimal Merge Tree -->
@@ -1017,7 +1051,7 @@
         title: '计算机操作系统',
         badge: '计算机操作系统',
         badgeColor: 'bg-purple-50 text-purple-800 border-purple-200',
-        count: '共 3 个独立演示模块',
+        count: '共 4 个独立演示模块',
         desc: ''
       },
       net: {
@@ -1031,14 +1065,14 @@
         title: '计算机专业基础 (408)',
         badge: '408 全科综合',
         badgeColor: 'bg-indigo-50 text-indigo-700 border-indigo-200',
-        count: '共 11 个独立演示模块',
+        count: '共 12 个独立演示模块',
         desc: ''
       },
       all: {
         title: '全部学科演示模块清单',
         badge: '全学科总览',
         badgeColor: 'bg-stone-100 text-stone-800 border-stone-300',
-        count: '共 17 个独立演示模块',
+        count: '共 18 个独立演示模块',
         desc: ''
       }
     };

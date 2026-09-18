@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>请求分页虚存管理 · 以 MMU 为核心的动态地址变换与缺页调入</title>
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- GSAP CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+  <!-- Google Fonts -->
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700;800&display=swap">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="min-h-screen flex flex-col justify-between">
+
+  <!-- SVG 箭头连线图层与动态地址/数据包图层 -->
+  <svg id="svg-network-layer">
+    <defs>
+      <!-- 箭头标记定义 -->
+      <marker id="arrow-blue" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M 0 1 L 10 5 L 0 9 z" fill="#2563EB"/>
+      </marker>
+      <marker id="arrow-purple" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M 0 1 L 10 5 L 0 9 z" fill="#7C3AED"/>
+      </marker>
+      <marker id="arrow-green" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M 0 1 L 10 5 L 0 9 z" fill="#10B981"/>
+      </marker>
+      <marker id="arrow-orange" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M 0 1 L 10 5 L 0 9 z" fill="#EA580C"/>
+      </marker>
+      <marker id="arrow-red" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M 0 1 L 10 5 L 0 9 z" fill="#EF4444"/>
+      </marker>
+      <marker id="arrow-disk" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M 0 1 L 10 5 L 0 9 z" fill="#64748B"/>
+      </marker>
+    </defs>
+    <!-- 静态总线连线将由 JS 动态创建与精确定位 -->
+    <g id="svg-wires-group"></g>
+  </svg>
+
+  <!-- 动态移动的地址包/数据包容器 -->
+  <div id="packet-container"></div>
+
+  <!-- 极简顶栏 (无冗杂控制栏，仅场景状态与自动循环指示) -->
+  <header class="border-b border-[#E5E4DC] bg-[#FAF9F5]/95 backdrop-blur sticky top-0 z-40 px-6 py-2.5">
+    <div class="max-w-[1400px] mx-auto flex items-center justify-between flex-wrap gap-3">
+      <div class="flex items-center gap-3">
+        <span class="w-7 h-7 rounded-lg bg-stone-900 text-white flex items-center justify-center font-mono font-bold text-xs shadow-sm">
+          MMU
+        </span>
+        <div>
+          <h1 class="text-base font-bold text-stone-900 leading-tight">
+            请求分页虚存管理 · 硬件微架构时序系统
+          </h1>
+          <p class="text-[11px] text-stone-500 font-mono mt-0.5">
+            以 MMU 为中心 · 逻辑地址蓝 · 物理地址紫 · 页号橙 · 帧号绿 · 磁盘灰 · 自动循环运行
+          </p>
+        </div>
+      </div>
+
+      <!-- 场景自动循环指示胶囊 -->
+      <div class="flex items-center gap-2 flex-wrap">
+        <span class="text-xs font-mono text-stone-400 flex items-center gap-1">
+          <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+          <span>自动循环:</span>
+        </span>
+        <button id="pill-sc-a" class="scenario-pill active" onclick="manualJumpScenario('A')">
+          A: TLB 命中 (1次访存)
+        </button>
+        <button id="pill-sc-b" class="scenario-pill" onclick="manualJumpScenario('B')">
+          B: TLB 未命中·页表命中 (2次访存)
+        </button>
+        <button id="pill-sc-c" class="scenario-pill" onclick="manualJumpScenario('C')">
+          C: 缺页中断与外存调入 (调页重执)
+        </button>
+        <button id="btn-pause-cycle" class="scenario-pill text-xs border-stone-300 ml-1" onclick="toggleAutoLoop()">
+          <span id="loop-btn-text">⏸ 暂停循环</span>
+        </button>
+        <button id="btn-speed" class="scenario-pill text-xs border-stone-300 ml-1 font-mono flex items-center gap-1 hover:border-stone-400 hover:bg-stone-100 transition-colors" onclick="cycleSpeed()" title="点击循环切换速度 (0.5x / 1.0x / 1.5x / 2.0x)">
+          <span>⚡ 速度:</span>
+          <span id="speed-text" class="font-bold text-purple-700">1.0x</span>
+        </button>
+        <a href="../index.html" class="text-xs font-mono text-stone-500 hover:text-stone-900 ml-2">
+          &larr; 返回展厅
+        </a>
+      </div>
+    </div>
+  </header>
+
+  <!-- 主体 Grid 工作区 (以 MMU 为中心) -->
+  <main class="flex-1 max-w-[1400px] w-full mx-auto p-4 flex flex-col gap-4">
+
+    <!-- CSS Grid 核心网格布局 -->
+    <div class="layout-grid">
+
+      <!-- ================= 1. 左侧：CPU / 进程 / OS ================= -->
+      <div id="node-cpu" class="grid-cpu panel-box flex flex-col justify-between gap-3">
+        <div>
+          <!-- 标题徽章 -->
+          <div class="flex items-center justify-between border-b border-stone-200 pb-2 mb-3">
+            <div class="flex items-center gap-2">
+              <span class="px-2 py-0.5 rounded bg-stone-900 text-white font-mono font-bold text-xs">CPU / 进程 / OS</span>
+            </div>
+            <span id="cpu-mode-badge" class="text-[10px] font-mono px-1.5 py-0.5 rounded font-bold bg-blue-50 text-blue-700 border border-blue-200">
+              用户态执行
+            </span>
+          </div>
+
+          <!-- 当前指令 -->
+          <div class="p-2.5 rounded-lg bg-stone-50 border border-stone-200 flex flex-col gap-1 mb-3">
+            <span class="text-[10px] text-stone-500 font-mono font-semibold">当前正在执行指令 (Instruction):</span>
+            <div id="cpu-current-inst" class="font-mono text-xs font-bold text-stone-800 bg-white p-1.5 rounded border border-stone-200">
+              LOAD R0, [0x214A]
+            </div>
+          </div>
+
+          <!-- 逻辑地址生成 (LA) -->
+          <div id="cpu-la-box" class="p-2.5 rounded-lg bg-blue-50/60 border border-blue-200 flex flex-col gap-1.5 mb-3 transition-all">
+            <div class="flex items-center justify-between">
+              <span class="text-[11px] font-bold text-blue-800">生成逻辑地址 (LA):</span>
+              <span id="cpu-la-hex" class="font-mono text-xs font-bold text-blue-900 bg-white px-2 py-0.5 rounded border border-blue-200">
+                0x214A
+              </span>
+            </div>
+            <div class="text-[10px] font-mono text-blue-700">
+              二进制: <span id="cpu-la-bin" class="font-bold">0010 0001 0100 1010</span>
+            </div>
+            <p class="text-[10px] text-blue-600 leading-tight">
+              &rarr; 逻辑地址只交给 MMU 进行硬件切分与变换
+            </p>
+          </div>
+
+          <!-- OS 中断/异常处理状态 (缺页时暂停并转 OS) -->
+          <div id="cpu-os-state-box" class="p-2.5 rounded-lg bg-stone-50 border border-stone-200 flex flex-col gap-1 transition-all">
+            <div class="flex items-center justify-between">
+              <span class="text-[11px] font-bold text-stone-700">OS 异常处理机:</span>
+              <span id="os-status-text" class="text-[10px] font-mono font-bold text-stone-500">待命中</span>
+            </div>
+            <p id="os-detail-text" class="text-[10px] text-stone-500 leading-tight font-sans">
+              未发生缺页中断，CPU 正常执行用户代码。
+            </p>
+          </div>
+        </div>
+
+        <!-- 数据接收寄存器 R0 (数据返回 CPU) -->
+        <div id="cpu-data-reg-box" class="p-2.5 rounded-lg bg-stone-100 border border-stone-200 flex items-center justify-between font-mono text-xs transition-all">
+          <span class="font-bold text-stone-700">数据寄存器 R0:</span>
+          <span id="cpu-data-val" class="font-bold px-2 py-0.5 rounded bg-white border border-stone-300 text-stone-400">
+            -- (等待读取)
+          </span>
+        </div>
+      </div>
+
+      <!-- ================= 2. 上方：TLB 快表 ================= -->
+      <div id="node-tlb" class="grid-tlb panel-box flex flex-col gap-2">
+        <div class="flex items-center justify-between border-b border-stone-200 pb-1.5">
+          <div class="flex items-center gap-2">
+            <span class="text-xs font-bold text-stone-900">TLB 快表 (Translation Lookaside Buffer)</span>
+            <span class="text-[10px] font-mono text-stone-400">SRAM 高速联想</span>
+          </div>
+          <span id="tlb-state-badge" class="text-[10px] font-mono font-bold px-1.5 py-0.2 rounded bg-stone-100 text-stone-600 border border-stone-200">
+            就绪
+          </span>
+        </div>
+
+        <!-- TLB 表格: 列 V / P / F -->
+        <div class="rounded border border-stone-200 overflow-hidden text-[11px] font-mono bg-white">
+          <div class="grid grid-cols-3 bg-stone-100 text-stone-600 font-semibold py-1 px-2 text-center border-b border-stone-200">
+            <span>V (有效位)</span>
+            <span class="text-orange-700 font-bold">P (虚拟页号)</span>
+            <span class="text-emerald-700 font-bold">F (物理帧号)</span>
+          </div>
+          <div id="tlb-table-body" class="divide-y divide-stone-100">
+            <!-- 由 JS 渲染 4 行 TLB 条目 -->
+          </div>
+        </div>
+      </div>
+
+      <!-- ================= 3. 中心：MMU 内存管理单元 ================= -->
+      <div id="node-mmu" class="grid-mmu panel-box mmu-center-panel flex flex-col gap-3">
+        <div class="flex items-center justify-between border-b border-amber-200 pb-1.5">
+          <div class="flex items-center gap-2">
+            <span class="px-2 py-0.5 rounded bg-amber-600 text-white font-mono font-bold text-xs">MMU</span>
+            <span class="text-xs font-bold text-stone-900">内存管理单元 (转换核心)</span>
+          </div>
+          <span id="mmu-state-badge" class="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-300">
+            待命 (IDLE)
+          </span>
+        </div>
+
+        <!-- 接收并拆分: 页号 P 和页内偏移 D (留在原地) -->
+        <div class="grid grid-cols-2 gap-2">
+          <!-- 拆分出的页号 P (橙色) -->
+          <div id="mmu-p-cell" class="p-2 rounded-lg bg-orange-50/80 border border-orange-200 flex flex-col gap-0.5 transition-all">
+            <span class="text-[10px] font-bold text-orange-800">拆分页号 P (高4位):</span>
+            <div class="flex items-center justify-between font-mono">
+              <span id="mmu-p-val" class="text-sm font-bold text-orange-900 bg-white px-2 py-0.5 rounded border border-orange-300">P = 2</span>
+              <span class="text-[9px] text-orange-700 font-sans">查 TLB / 页表</span>
+            </div>
+          </div>
+
+          <!-- 原地保留的偏移量 D (留在原地，不参与转换) -->
+          <div id="mmu-d-cell" class="p-2 rounded-lg offset-stay-box flex flex-col gap-0.5 transition-all">
+            <div class="flex items-center justify-between">
+              <span class="text-[10px] font-bold text-amber-800">页内偏移量 D (低12位):</span>
+              <span class="text-[8px] bg-amber-200 text-amber-900 font-bold px-1 rounded font-mono">原地保留</span>
+            </div>
+            <div class="flex items-center justify-between font-mono">
+              <span id="mmu-d-val" class="text-sm font-bold text-amber-900 bg-white px-2 py-0.5 rounded border border-amber-300">D = 0x14A</span>
+              <span class="text-[9px] text-amber-700 font-sans">直通物理地址</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- MMU 决策与异常提示条 -->
+        <div id="mmu-action-banner" class="p-2 rounded-lg bg-stone-50 border border-stone-200 text-xs font-mono text-stone-700 flex items-center justify-between">
+          <span class="font-sans font-medium text-[11px]" id="mmu-action-text">等待逻辑地址输入...</span>
+          <span id="mmu-fault-flag" class="hidden text-[10px] px-1.5 py-0.5 rounded bg-rose-600 text-white font-bold">缺页异常发出!</span>
+        </div>
+
+        <!-- 物理地址合成器 (PA = F + D) -->
+        <div id="mmu-pa-box" class="p-2 rounded-lg bg-purple-50/70 border border-purple-200 flex flex-col gap-1 transition-all">
+          <div class="flex items-center justify-between">
+            <span class="text-[11px] font-bold text-purple-900">合成物理地址 (PA = F + D):</span>
+            <span id="mmu-pa-val" class="font-mono text-xs font-bold text-purple-900 bg-white px-2 py-0.5 rounded border border-purple-300">
+              PA: --
+            </span>
+          </div>
+          <div class="text-[10px] font-mono text-purple-700 flex items-center justify-between">
+            <span>[物理帧号 F: <strong id="mmu-calc-f">--</strong>]</span>
+            <span>+</span>
+            <span>[原地偏移量 D: <strong id="mmu-calc-d">0x14A</strong>]</span>
+            <span class="text-[9px] text-purple-600 font-sans">&rarr; 输出给物理内存</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- ================= 4. 下方：页表 ================= -->
+      <div id="node-pt" class="grid-pt panel-box flex flex-col gap-2">
+        <div class="flex items-center justify-between border-b border-stone-200 pb-1.5">
+          <div class="flex items-center gap-2">
+            <span class="text-xs font-bold text-stone-900">主存页表 (Page Table in RAM)</span>
+            <span class="text-[10px] font-mono text-stone-400">始址 PTBR: 0x1000</span>
+          </div>
+          <span id="pt-state-badge" class="text-[10px] font-mono font-bold px-1.5 py-0.2 rounded bg-stone-100 text-stone-600 border border-stone-200">
+            就绪
+          </span>
+        </div>
+
+        <!-- 页表格: 列 P / V / F / 磁盘块 -->
+        <div class="rounded border border-stone-200 overflow-hidden text-[11px] font-mono bg-white">
+          <div class="grid grid-cols-4 bg-stone-100 text-stone-600 font-semibold py-1 px-2 text-center border-b border-stone-200">
+            <span class="text-orange-700 font-bold">P (页号)</span>
+            <span>V (有效位)</span>
+            <span class="text-emerald-700 font-bold">F (帧号)</span>
+            <span class="text-stone-500 font-bold">磁盘块</span>
+          </div>
+          <div id="pt-table-body" class="divide-y divide-stone-100 max-h-[140px] overflow-y-auto">
+            <!-- 由 JS 渲染各页表行 -->
+          </div>
+        </div>
+      </div>
+
+      <!-- ================= 5. 右侧上半：物理内存 ================= -->
+      <div id="node-ram" class="grid-ram panel-box flex flex-col gap-2.5">
+        <div class="flex items-center justify-between border-b border-stone-200 pb-1.5">
+          <div class="flex items-center gap-2">
+            <span class="px-2 py-0.5 rounded bg-purple-700 text-white font-mono font-bold text-xs">RAM</span>
+            <span class="text-xs font-bold text-stone-900">物理主存 (帧网格 0 ~ 7)</span>
+          </div>
+          <span class="text-[10px] font-mono text-purple-700 font-semibold">帧大小: 4KB</span>
+        </div>
+
+        <!-- 8 个物理内存帧网格 -->
+        <div id="ram-frames-grid" class="grid grid-cols-2 gap-2 text-xs font-mono">
+          <!-- 由 JS 渲染 8 个物理帧卡片 -->
+        </div>
+      </div>
+
+      <!-- ================= 6. 右侧下半：磁盘 ================= -->
+      <div id="node-disk" class="grid-disk panel-box flex flex-col gap-2">
+        <div class="flex items-center justify-between border-b border-stone-200 pb-1.5">
+          <div class="flex items-center gap-2">
+            <span class="text-stone-600">💾</span>
+            <span class="text-xs font-bold text-stone-900">磁盘外存 (Disk Storage)</span>
+          </div>
+          <span id="disk-state-badge" class="text-[10px] font-mono text-stone-500">外存待命</span>
+        </div>
+
+        <!-- 磁盘块列表 -->
+        <div id="disk-blocks-container" class="grid grid-cols-2 gap-1.5 text-[11px] font-mono">
+          <!-- 由 JS 渲染 4 个磁盘块 -->
+        </div>
+      </div>
+
+    </div>
+
+    <!-- ================= 7. 底部：访存日志 (Memory Access Log) ================= -->
+    <div class="panel-box flex flex-col gap-2 bg-white">
+      <div class="flex items-center justify-between border-b border-stone-200 pb-1.5">
+        <div class="flex items-center gap-2">
+          <span class="w-2 h-2 rounded-full bg-stone-900"></span>
+          <span class="text-xs font-bold text-stone-900">访存时序日志 (Memory Access Trace Log)</span>
+        </div>
+        <span class="text-[10px] font-mono text-stone-400">每次访问 TLB/页表/内存/磁盘/写表 均生成编号与记录</span>
+      </div>
+
+      <!-- 日志表格 -->
+      <div class="log-table-container">
+        <table class="w-full text-left font-mono text-[11px]">
+          <thead class="bg-stone-100 text-stone-700 sticky top-0 border-b border-stone-200">
+            <tr>
+              <th class="py-1 px-2 w-20">访存#n</th>
+              <th class="py-1 px-2 w-24">阶段</th>
+              <th class="py-1 px-2 w-24">访问对象</th>
+              <th class="py-1 px-2 w-32">地址 / 页号</th>
+              <th class="py-1 px-2 w-24 text-center">结果</th>
+              <th class="py-1 px-2 w-24 text-center">是否主存访问</th>
+              <th class="py-1 px-3">说明</th>
+            </tr>
+          </thead>
+          <tbody id="access-log-tbody" class="divide-y divide-stone-100">
+            <!-- 动态追加行 -->
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+  </main>
+
+  <!-- 底部说明栏 -->
+  <footer class="border-t border-[#E5E4DC] bg-[#FAF9F5] px-6 py-2 text-center text-xs font-mono text-stone-400">
+    LearningAnimation · 408 操作系统 · 请求分页虚存管理 (以 MMU 为核心)
+  </footer>
+
+  <!-- 核心逻辑脚本 -->
+  <script src="app.js"></script>
+</body>
+</html>
