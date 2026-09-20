@@ -1,0 +1,534 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>时钟页面置换算法 · 改进型 Clock 与圆盘扫描演进</title>
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- GSAP CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+  <!-- Google Fonts -->
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700;800&display=swap">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="min-h-screen flex flex-col justify-between">
+
+  <!-- 浮动提示粒子/气泡层 -->
+  <div id="toast-layer" class="fixed inset-0 pointer-events-none z-50"></div>
+
+  <!-- 顶栏导航与场景控制 -->
+  <header class="border-b border-[#E5E4DC] bg-[#FAF9F5]/95 backdrop-blur sticky top-0 z-40 px-6 py-3">
+    <div class="max-w-[1400px] mx-auto flex items-center justify-between flex-wrap gap-4">
+      <div class="flex items-center gap-3">
+        <span class="w-8 h-8 rounded-lg bg-purple-700 text-white flex items-center justify-center font-mono font-bold text-xs shadow-sm">
+          CLOCK
+        </span>
+        <div>
+          <h1 class="text-base font-bold text-stone-900 leading-tight flex items-center gap-2">
+            时钟页面置换算法 · 改进型 Clock 与圆盘扫描演进
+            <span class="text-xs px-2 py-0.5 rounded-full bg-purple-50 text-purple-700 border border-purple-200 font-mono">
+              驻留集 = 4
+            </span>
+          </h1>
+          <p class="text-[11px] text-stone-500 font-mono mt-0.5">
+            顺时针旋转扫描 · 访问位 R (翡翠绿) · 修改位 M (琥珀橙/脏页) · 4轮优先级淘汰与位翻转
+          </p>
+        </div>
+      </div>
+
+      <!-- 场景控制胶囊群 -->
+      <div class="flex items-center gap-2 flex-wrap">
+        <span class="text-xs font-mono text-stone-400 flex items-center gap-1">
+          <span class="w-2 h-2 rounded-full bg-purple-500 animate-pulse"></span>
+          <span>预设场景:</span>
+        </span>
+        <button id="pill-sc-1" class="scenario-pill active" onclick="loadScenario(1)">
+          1: 考研经典混合读写
+        </button>
+        <button id="pill-sc-2" class="scenario-pill" onclick="loadScenario(2)">
+          2: 一轮速中 (0,0)
+        </button>
+        <button id="pill-sc-3" class="scenario-pill" onclick="loadScenario(3)">
+          3: 二轮 R清零 淘汰 (0,1)
+        </button>
+        <button id="pill-sc-4" class="scenario-pill" onclick="loadScenario(4)">
+          4: 四轮极限淘汰
+        </button>
+        <button id="pill-sc-5" class="scenario-pill" onclick="loadScenario(5)">
+          5: 读写命中测试
+        </button>
+        
+        <div class="h-4 w-px bg-stone-300 mx-1"></div>
+
+        <!-- 播放与单步控制 -->
+        <button id="btn-step" class="scenario-pill text-xs bg-white text-stone-800 border-stone-300 hover:bg-stone-100 flex items-center gap-1 font-bold" onclick="stepForward()" title="执行下一步微操作">
+          <span>⏯ 单步执行</span>
+        </button>
+        <button id="btn-play-pause" class="scenario-pill text-xs border-stone-300 flex items-center gap-1" onclick="toggleAutoPlay()">
+          <span id="play-btn-text">▶ 自动播放</span>
+        </button>
+        <button id="btn-speed" class="scenario-pill text-xs border-stone-300 font-mono flex items-center gap-1 hover:border-stone-400" onclick="cycleSpeed()" title="点击切换速度">
+          <span>⚡ 速度:</span>
+          <span id="speed-text" class="font-bold text-purple-700">1.0x</span>
+        </button>
+        <button id="btn-reset" class="scenario-pill text-xs border-stone-300 text-stone-600 hover:text-stone-900" onclick="resetAll()">
+          <span>↺ 重置</span>
+        </button>
+
+        <a href="../index.html" class="text-xs font-mono text-stone-500 hover:text-stone-900 ml-2">
+          &larr; 返回展厅
+        </a>
+      </div>
+    </div>
+  </header>
+
+  <!-- 主体工作区 -->
+  <main class="flex-1 max-w-[1400px] w-full mx-auto p-4 flex flex-col gap-4">
+
+    <!-- 顶部序列与控制行 -->
+    <div class="panel-box flex flex-col md:flex-row items-center justify-between gap-4 py-3">
+      <!-- 访问请求队列 -->
+      <div class="flex items-center gap-3 overflow-x-auto w-full md:w-auto pb-1 md:pb-0">
+        <span class="text-xs font-mono text-stone-500 font-semibold whitespace-nowrap flex items-center gap-1">
+          <span>访问序列</span>
+          <span class="text-[10px] px-1.5 py-0.2 rounded bg-stone-100 text-stone-600 border border-stone-200" id="queue-progress-badge">0 / 8</span>:
+        </span>
+        <div id="request-queue-container" class="flex items-center gap-2">
+          <!-- 动态渲染访问队列胶囊 -->
+        </div>
+      </div>
+
+      <!-- 快速手动发起访问 -->
+      <div class="flex items-center gap-2 flex-shrink-0 w-full md:w-auto justify-end border-t md:border-t-0 pt-2 md:pt-0 border-stone-200">
+        <span class="text-xs font-mono text-stone-500 font-semibold">手动请求:</span>
+        <div class="flex items-center gap-1 bg-stone-100 p-1 rounded-lg border border-stone-200">
+          <span class="text-xs font-mono pl-1 text-stone-500">Page:</span>
+          <input type="number" id="input-page-id" min="1" max="9" value="5" class="w-12 text-center text-xs font-mono font-bold bg-white border border-stone-300 rounded py-1 focus:outline-none focus:border-purple-600">
+          <select id="select-op-type" class="text-xs font-mono bg-white border border-stone-300 rounded py-1 px-1 focus:outline-none focus:border-purple-600">
+            <option value="R">读访问 (R=1)</option>
+            <option value="W">写访问 (R=1, M=1)</option>
+          </select>
+          <button onclick="handleManualAccess()" class="px-2.5 py-1 rounded bg-purple-700 text-white text-xs font-bold hover:bg-purple-800 transition-colors shadow-sm">
+            访问
+          </button>
+        </div>
+
+        <!-- 算法模式切换 -->
+        <div class="flex items-center bg-stone-100 p-1 rounded-lg border border-stone-200 text-xs font-mono">
+          <button id="btn-mode-enhanced" onclick="setAlgorithmMode('enhanced')" class="px-2 py-1 rounded font-bold bg-white shadow-xs text-purple-700">
+            改进型 (R,M)
+          </button>
+          <button id="btn-mode-basic" onclick="setAlgorithmMode('basic')" class="px-2 py-1 rounded text-stone-500 hover:text-stone-800">
+            简单 Clock (R)
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 进程逻辑地址空间与所有页展示 (上方) -->
+    <div class="panel-box flex flex-col gap-2.5 py-3 border-blue-200/80 bg-gradient-to-r from-blue-50/30 via-white to-purple-50/20">
+      <div class="flex items-center justify-between flex-wrap gap-2">
+        <div class="flex items-center gap-2">
+          <span class="w-2.5 h-2.5 rounded-full bg-blue-600 animate-pulse"></span>
+          <h2 class="text-xs font-bold text-stone-900 font-mono flex items-center gap-2">
+            <span>进程逻辑地址空间 (Process Virtual Space)</span>
+            <span class="text-[11px] font-normal text-stone-500">· 进程被分成的所有页：依次标上页号 P1 ~ P8</span>
+          </h2>
+        </div>
+        <div class="flex items-center gap-3 text-xs font-mono text-stone-500 flex-wrap">
+          <span class="flex items-center gap-1">
+            <span class="w-2 h-2 rounded-full bg-emerald-500"></span> 在内存(驻留集)
+          </span>
+          <span class="flex items-center gap-1">
+            <span class="w-2 h-2 rounded border border-dashed border-stone-400 bg-stone-100"></span> 在外存磁盘
+          </span>
+          <span class="text-[11px] text-blue-700 font-semibold bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
+            💡 核心考点：置换时页框号(物理槽位)保持不变，仅装入的页号改变
+          </span>
+        </div>
+      </div>
+
+      <!-- 8个进程逻辑页水平排列容器 -->
+      <div id="process-pages-container" class="grid grid-cols-4 sm:grid-cols-8 gap-2 pt-1">
+        <!-- 动态生成 8 个进程页卡片 -->
+      </div>
+    </div>
+
+    <!-- 核心视觉布局网格 (左侧：圆盘表盘 / 右侧：位变化显微镜与轮次判定) -->
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-4 items-stretch">
+
+      <!-- ================= 1. 左侧：圆盘与 4 驻留集扇区 (占 7 列) ================= -->
+      <div class="lg:col-span-7 panel-box flex flex-col justify-between items-center relative overflow-hidden min-h-[540px]">
+        <!-- 舞台标题与状态浮标 -->
+        <div class="w-full flex items-center justify-between border-b border-stone-200 pb-2 mb-2 z-30">
+          <div class="flex items-center gap-2">
+            <span class="px-2 py-0.5 rounded bg-stone-900 text-white font-mono font-bold text-xs">驻留集圆盘 (Resident Set Dial)</span>
+            <span id="current-scan-badge" class="text-xs font-mono px-2 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-200 font-semibold">
+              指针当前指向: Frame 0
+            </span>
+          </div>
+          <div class="flex items-center gap-2 font-mono text-xs text-stone-500">
+            <span class="flex items-center gap-1">
+              <span class="inline-block w-2.5 h-2.5 rounded-full bg-emerald-500"></span> R=1已访
+            </span>
+            <span class="flex items-center gap-1" id="legend-m-bit">
+              <span class="inline-block w-2.5 h-2.5 rounded-full bg-amber-500"></span> M=1脏页
+            </span>
+            <span class="text-stone-400">↻ 顺时针旋转</span>
+          </div>
+        </div>
+
+        <!-- 圆盘舞台核心 -->
+        <div class="clock-dial-stage my-auto">
+          <!-- 圆盘背景与刻度 -->
+          <div class="clock-disc"></div>
+          
+          <!-- 刻度十字虚线 -->
+          <div class="clock-crosshair-h"></div>
+          <div class="clock-crosshair-v"></div>
+
+          <!-- 顺时针导引环 -->
+          <div class="clockwise-guide-ring"></div>
+
+          <!-- 顺时针旋转方向箭头指示 -->
+          <div class="absolute top-10 right-16 text-stone-300 font-mono text-xs select-none pointer-events-none flex items-center gap-1 font-bold">
+            <span>顺时针扫描</span>
+            <svg class="w-4 h-4 animate-spin text-stone-400" style="animation-duration: 6s;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+            </svg>
+          </div>
+
+          <!-- 时钟指针 (Hand) -->
+          <div id="clock-hand-wrapper" class="clock-hand-wrapper">
+            <div class="clock-hand">
+              <!-- 指针前端箭头样式 -->
+              <div class="clock-hand-arrow">
+                <svg viewBox="0 0 24 28" class="w-5 h-6 text-blue-600 drop-shadow-md fill-current">
+                  <path d="M12 0 L24 24 L12 18 L0 24 Z" />
+                </svg>
+              </div>
+            </div>
+          </div>
+
+          <!-- 机械中心轴 -->
+          <div class="clock-pivot">
+            <div class="clock-pivot-inner"></div>
+          </div>
+
+          <!-- ================= 4 个页框扇区卡片 (Frame 0 ~ 3) ================= -->
+          
+          <!-- Frame 0: 顶部 (12点方向, 0°) -->
+          <div id="frame-card-0" class="frame-card frame-pos-0 is-pointing">
+            <div class="flex items-center justify-between border-b border-stone-200/70 pb-1 mb-1.5">
+              <div class="flex items-center gap-1">
+                <span class="text-[9px] font-mono px-1 py-0.2 rounded bg-purple-100 text-purple-800 font-bold border border-purple-200">页框 0</span>
+                <span class="text-[10px] font-mono font-bold text-stone-600">Frame 0</span>
+              </div>
+              <span id="frame-class-0" class="text-[10px] font-mono font-semibold text-stone-400 bg-stone-100 px-1 rounded">
+                (0,0)
+              </span>
+            </div>
+            <div class="flex items-center justify-between mb-1.5 bg-stone-50/80 p-1 rounded border border-stone-200/60">
+              <span class="text-[11px] text-stone-500 font-mono">装入页号:</span>
+              <span id="frame-page-0" class="font-mono font-bold text-sm text-stone-900 bg-white px-2 py-0.5 rounded border border-stone-200 shadow-2xs">
+                Page 1
+              </span>
+            </div>
+            <!-- 位状态徽章 -->
+            <div class="flex items-center justify-between gap-1 pt-1 border-t border-stone-100">
+              <div class="flex items-center gap-1">
+                <span class="text-[10px] text-stone-400 font-mono font-bold">R:</span>
+                <span id="bit-r-0" class="bit-badge bit-r-1" title="访问位 (Reference Bit)">1</span>
+              </div>
+              <div class="flex items-center gap-1" id="wrap-bit-m-0">
+                <span class="text-[10px] text-stone-400 font-mono font-bold">M:</span>
+                <span id="bit-m-0" class="bit-badge bit-m-0" title="修改位 (Modify Bit / Dirty)">0</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Frame 1: 右侧 (3点方向, 90°) -->
+          <div id="frame-card-1" class="frame-card frame-pos-1">
+            <div class="flex items-center justify-between border-b border-stone-200/70 pb-1 mb-1.5">
+              <div class="flex items-center gap-1">
+                <span class="text-[9px] font-mono px-1 py-0.2 rounded bg-purple-100 text-purple-800 font-bold border border-purple-200">页框 1</span>
+                <span class="text-[10px] font-mono font-bold text-stone-600">Frame 1</span>
+              </div>
+              <span id="frame-class-1" class="text-[10px] font-mono font-semibold text-stone-400 bg-stone-100 px-1 rounded">
+                (0,0)
+              </span>
+            </div>
+            <div class="flex items-center justify-between mb-1.5 bg-stone-50/80 p-1 rounded border border-stone-200/60">
+              <span class="text-[11px] text-stone-500 font-mono">装入页号:</span>
+              <span id="frame-page-1" class="font-mono font-bold text-sm text-stone-900 bg-white px-2 py-0.5 rounded border border-stone-200 shadow-2xs">
+                Page 2
+              </span>
+            </div>
+            <div class="flex items-center justify-between gap-1 pt-1 border-t border-stone-100">
+              <div class="flex items-center gap-1">
+                <span class="text-[10px] text-stone-400 font-mono font-bold">R:</span>
+                <span id="bit-r-1" class="bit-badge bit-r-1" title="访问位 (Reference Bit)">1</span>
+              </div>
+              <div class="flex items-center gap-1" id="wrap-bit-m-1">
+                <span class="text-[10px] text-stone-400 font-mono font-bold">M:</span>
+                <span id="bit-m-1" class="bit-badge bit-m-1" title="修改位 (Modify Bit / Dirty)">1</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Frame 2: 底部 (6点方向, 180°) -->
+          <div id="frame-card-2" class="frame-card frame-pos-2">
+            <div class="flex items-center justify-between border-b border-stone-200/70 pb-1 mb-1.5">
+              <div class="flex items-center gap-1">
+                <span class="text-[9px] font-mono px-1 py-0.2 rounded bg-purple-100 text-purple-800 font-bold border border-purple-200">页框 2</span>
+                <span class="text-[10px] font-mono font-bold text-stone-600">Frame 2</span>
+              </div>
+              <span id="frame-class-2" class="text-[10px] font-mono font-semibold text-stone-400 bg-stone-100 px-1 rounded">
+                (0,0)
+              </span>
+            </div>
+            <div class="flex items-center justify-between mb-1.5 bg-stone-50/80 p-1 rounded border border-stone-200/60">
+              <span class="text-[11px] text-stone-500 font-mono">装入页号:</span>
+              <span id="frame-page-2" class="font-mono font-bold text-sm text-stone-900 bg-white px-2 py-0.5 rounded border border-stone-200 shadow-2xs">
+                Page 3
+              </span>
+            </div>
+            <div class="flex items-center justify-between gap-1 pt-1 border-t border-stone-100">
+              <div class="flex items-center gap-1">
+                <span class="text-[10px] text-stone-400 font-mono font-bold">R:</span>
+                <span id="bit-r-2" class="bit-badge bit-r-0" title="访问位 (Reference Bit)">0</span>
+              </div>
+              <div class="flex items-center gap-1" id="wrap-bit-m-2">
+                <span class="text-[10px] text-stone-400 font-mono font-bold">M:</span>
+                <span id="bit-m-2" class="bit-badge bit-m-1" title="修改位 (Modify Bit / Dirty)">1</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Frame 3: 左侧 (9点方向, 270°) -->
+          <div id="frame-card-3" class="frame-card frame-pos-3">
+            <div class="flex items-center justify-between border-b border-stone-200/70 pb-1 mb-1.5">
+              <div class="flex items-center gap-1">
+                <span class="text-[9px] font-mono px-1 py-0.2 rounded bg-purple-100 text-purple-800 font-bold border border-purple-200">页框 3</span>
+                <span class="text-[10px] font-mono font-bold text-stone-600">Frame 3</span>
+              </div>
+              <span id="frame-class-3" class="text-[10px] font-mono font-semibold text-stone-400 bg-stone-100 px-1 rounded">
+                (0,0)
+              </span>
+            </div>
+            <div class="flex items-center justify-between mb-1.5 bg-stone-50/80 p-1 rounded border border-stone-200/60">
+              <span class="text-[11px] text-stone-500 font-mono">装入页号:</span>
+              <span id="frame-page-3" class="font-mono font-bold text-sm text-stone-900 bg-white px-2 py-0.5 rounded border border-stone-200 shadow-2xs">
+                Page 4
+              </span>
+            </div>
+            <div class="flex items-center justify-between gap-1 pt-1 border-t border-stone-100">
+              <div class="flex items-center gap-1">
+                <span class="text-[10px] text-stone-400 font-mono font-bold">R:</span>
+                <span id="bit-r-3" class="bit-badge bit-r-0" title="访问位 (Reference Bit)">0</span>
+              </div>
+              <div class="flex items-center gap-1" id="wrap-bit-m-3">
+                <span class="text-[10px] text-stone-400 font-mono font-bold">M:</span>
+                <span id="bit-m-3" class="bit-badge bit-m-0" title="修改位 (Modify Bit / Dirty)">0</span>
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- 底部图例提示 -->
+        <div class="w-full pt-2 border-t border-stone-100 flex items-center justify-between text-[11px] text-stone-500 font-mono z-30">
+          <span>优先级分类: (0,0)最佳 &rarr; (0,1)写回 &rarr; (1,0)已访 &rarr; (1,1)已改</span>
+          <span id="dial-tips" class="text-stone-600 font-semibold">指针顺时针扫描寻找淘汰页</span>
+        </div>
+      </div>
+
+      <!-- ================= 2. 右侧：位变化显微镜与轮次侦测 (占 5 列) ================= -->
+      <div class="lg:col-span-5 flex flex-col gap-4">
+
+        <!-- 1. 位变化显微镜 (Bit Change Inspector) -->
+        <div class="panel-box flex flex-col gap-3 border-purple-200 bg-gradient-to-b from-white to-[#FAF9F5]">
+          <div class="flex items-center justify-between border-b border-stone-200 pb-2">
+            <div class="flex items-center gap-2">
+              <span class="w-2 h-2 rounded-full bg-purple-600 animate-ping"></span>
+              <h2 class="text-sm font-bold text-stone-900 font-mono">
+                位变化显微镜 · 实时突显视窗
+              </h2>
+            </div>
+            <span id="inspector-target-frame" class="text-xs font-mono font-bold text-purple-700 bg-purple-50 px-2 py-0.5 rounded border border-purple-200">
+              当前检测: Frame 0
+            </span>
+          </div>
+
+          <!-- 超大字号位状态特写卡片 -->
+          <div class="grid grid-cols-2 gap-3">
+            <!-- 访问位 R 特写 -->
+            <div id="inspector-box-r" class="inspector-bit-box relative overflow-hidden">
+              <div class="text-[11px] font-mono text-stone-500 mb-1 flex items-center justify-between w-full">
+                <span class="font-bold">访问位 (R / Use)</span>
+                <span id="inspector-r-tag" class="text-[10px] px-1 rounded bg-stone-200 text-stone-600 font-bold">未访问</span>
+              </div>
+              <div class="flex items-center gap-2">
+                <span id="inspector-r-prev" class="text-stone-300 font-mono text-lg line-through hidden">1</span>
+                <span id="inspector-r-val" class="inspector-bit-val text-stone-600 transition-all">0</span>
+              </div>
+              <p id="inspector-r-desc" class="text-[10px] text-stone-500 text-center mt-2 leading-tight">
+                为 0 时允许被淘汰；为 1 时获救并清零
+              </p>
+            </div>
+
+            <!-- 修改位 M 特写 -->
+            <div id="inspector-box-m" class="inspector-bit-box relative overflow-hidden">
+              <div class="text-[11px] font-mono text-stone-500 mb-1 flex items-center justify-between w-full">
+                <span class="font-bold">修改位 (M / Dirty)</span>
+                <span id="inspector-m-tag" class="text-[10px] px-1 rounded bg-stone-200 text-stone-600 font-bold">干净</span>
+              </div>
+              <div class="flex items-center gap-2">
+                <span id="inspector-m-prev" class="text-stone-300 font-mono text-lg line-through hidden">0</span>
+                <span id="inspector-m-val" class="inspector-bit-val text-stone-600 transition-all">0</span>
+              </div>
+              <p id="inspector-m-desc" class="text-[10px] text-stone-500 text-center mt-2 leading-tight">
+                为 0 直接覆盖；为 1 淘汰时必须写回外存
+              </p>
+            </div>
+          </div>
+
+          <!-- 实时决策与微操作阐述 -->
+          <div class="p-3 rounded-xl bg-purple-50/70 border border-purple-200 flex flex-col gap-1.5">
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-bold text-purple-900 font-mono flex items-center gap-1.5">
+                <span class="w-1.5 h-1.5 rounded-full bg-purple-600"></span>
+                <span>当前决策动因:</span>
+              </span>
+              <span id="hit-or-fault-badge" class="text-[10px] font-mono px-2 py-0.5 rounded font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                等待请求
+              </span>
+            </div>
+            <p id="action-narrative" class="text-xs text-purple-950 font-sans leading-relaxed">
+              准备就绪。点击“单步执行”或“自动播放”，观察指针顺时针扫描与标志位动态翻转。
+            </p>
+          </div>
+        </div>
+
+        <!-- 2. 改进型 Clock 四轮扫描判决器 (Rounds Tracker) -->
+        <div class="panel-box flex flex-col gap-3">
+          <div class="flex items-center justify-between border-b border-stone-200 pb-2">
+            <h3 class="text-xs font-bold text-stone-800 font-mono flex items-center gap-1.5">
+              <span id="tracker-title">四轮扫描淘汰判决引擎</span>
+              <span class="text-[10px] text-stone-400 font-normal" id="tracker-subtitle">(408 核心考点)</span>
+            </h3>
+            <span id="current-round-indicator" class="text-[10px] font-mono px-1.5 py-0.5 rounded font-bold bg-stone-100 text-stone-600">
+              空闲
+            </span>
+          </div>
+
+          <!-- 四轮状态指示条 -->
+          <div class="grid grid-cols-2 gap-2">
+            <div id="round-card-1" class="round-step-badge flex flex-col gap-1">
+              <div class="flex items-center justify-between">
+                <span>第 1 轮: 找 (0, 0)</span>
+                <span class="text-[9px] text-stone-400">不改位</span>
+              </div>
+              <p class="text-[10px] font-sans text-stone-500 font-normal leading-tight">
+                最佳候选：未访问且未修改，直接替换无需写回。
+              </p>
+            </div>
+
+            <div id="round-card-2" class="round-step-badge flex flex-col gap-1">
+              <div class="flex items-center justify-between">
+                <span>第 2 轮: 找 (0, 1)</span>
+                <span class="text-[9px] text-red-500 font-bold">R: 1&rarr;0</span>
+              </div>
+              <p class="text-[10px] font-sans text-stone-500 font-normal leading-tight">
+                扫描经过时将所有 R 置 0；中则淘汰并写回外存。
+              </p>
+            </div>
+
+            <div id="round-card-3" class="round-step-badge flex flex-col gap-1">
+              <div class="flex items-center justify-between">
+                <span>第 3 轮: 找 (0, 0)</span>
+                <span class="text-[9px] text-stone-400">必能找到</span>
+              </div>
+              <p class="text-[10px] font-sans text-stone-500 font-normal leading-tight">
+                原 (1, 0) 经第 2 轮清 0 后已成为 (0, 0)，此时必中。
+              </p>
+            </div>
+
+            <div id="round-card-4" class="round-step-badge flex flex-col gap-1">
+              <div class="flex items-center justify-between">
+                <span>第 4 轮: 找 (0, 1)</span>
+                <span class="text-[9px] text-stone-400">兜底淘汰</span>
+              </div>
+              <p class="text-[10px] font-sans text-stone-500 font-normal leading-tight">
+                若第 3 轮仍未找到，淘汰原 (1, 1) 变成的 (0, 1)。
+              </p>
+            </div>
+          </div>
+
+          <!-- 外存写回与置换状态框 -->
+          <div id="disk-io-box" class="p-2.5 rounded-lg bg-stone-50 border border-stone-200 flex items-center justify-between text-xs font-mono">
+            <div class="flex items-center gap-2">
+              <span class="w-6 h-6 rounded bg-stone-200 text-stone-700 flex items-center justify-center font-bold text-[10px]">
+                DISK
+              </span>
+              <div>
+                <div class="font-bold text-stone-800" id="disk-io-title">外存磁盘 I/O: 空闲</div>
+                <div class="text-[10px] text-stone-500" id="disk-io-desc">无脏页写回操作</div>
+              </div>
+            </div>
+            <span id="disk-write-badge" class="px-2 py-0.5 rounded text-[10px] font-bold bg-stone-200 text-stone-600">
+              0 次写回
+            </span>
+          </div>
+
+        </div>
+
+      </div>
+
+    </div>
+
+    <!-- ================= 3. 底部：置换历史记录流水与统计 ================= -->
+    <div class="panel-box flex flex-col gap-2.5 py-3">
+      <div class="flex items-center justify-between border-b border-stone-200 pb-2">
+        <div class="flex items-center gap-3 font-mono text-xs">
+          <span class="font-bold text-stone-800">置换流水日志 (Execution Log)</span>
+          <span class="text-stone-400">|</span>
+          <span class="text-stone-600">访问总数: <b id="stat-total" class="text-stone-900">0</b></span>
+          <span class="text-emerald-700">命中数: <b id="stat-hits">0</b></span>
+          <span class="text-red-700">缺页数: <b id="stat-faults">0</b></span>
+          <span class="text-purple-700">命中率: <b id="stat-rate">0.0%</b></span>
+        </div>
+        <button onclick="clearHistoryLog()" class="text-[11px] font-mono text-stone-400 hover:text-stone-700">
+          清空日志
+        </button>
+      </div>
+
+      <!-- 日志表格容器 -->
+      <div class="overflow-x-auto max-h-[140px] overflow-y-auto">
+        <table class="w-full text-left font-mono text-xs">
+          <thead class="text-[11px] text-stone-400 border-b border-stone-200 sticky top-0 bg-white">
+            <tr>
+              <th class="py-1 px-2">#</th>
+              <th class="py-1 px-2">请求页面</th>
+              <th class="py-1 px-2">操作类型</th>
+              <th class="py-1 px-2">判定状态</th>
+              <th class="py-1 px-2">扫描轮次</th>
+              <th class="py-1 px-2">淘汰页面</th>
+              <th class="py-1 px-2">位变化与写回</th>
+              <th class="py-1 px-2">置换后驻留集 [F0, F1, F2, F3]</th>
+            </tr>
+          </thead>
+          <tbody id="history-log-tbody" class="divide-y divide-stone-100 text-stone-700">
+            <!-- 动态生成日志行 -->
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+  </main>
+
+  <!-- 引入核心业务与动画引擎逻辑 -->
+  <script src="app.js"></script>
+</body>
+</html>

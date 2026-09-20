@@ -361,3 +361,62 @@ body {
 .badge-pa { background-color: var(--pa-purple-soft); color: var(--pa-purple); border: 1px solid #DDD6FE; }
 .badge-p { background-color: var(--p-orange-soft); color: var(--p-orange); border: 1px solid #FED7AA; }
 .badge-f { background-color: var(--f-green-soft); color: var(--f-green); border: 1px solid #A7F3D0; }
+
+/* The guide follows one instruction; colour is reserved for its moving information. */
+.flow-guide { background:#fff; border:1px solid var(--border-subtle); border-radius:12px; padding:16px 20px; }
+.flow-heading { display:flex; justify-content:space-between; gap:12px; font-size:12px; color:#57534e; }
+#scenario-title { font-weight:600; }
+#flow-phase { color:#2563eb; flex-shrink:0; }
+.flow-explanation { display:flex; align-items:flex-start; gap:18px; margin:14px 0; min-height:64px; }
+#step-number { font:600 20px 'JetBrains Mono',monospace; color:#a8a29e; white-space:nowrap; padding-top:2px; }
+#step-title { font-size:20px; line-height:1.4; font-weight:700; margin:0 0 5px; }
+#step-detail { margin:0; font-size:13px; line-height:1.7; color:#57534e; max-width:80em; }
+#flow-progress-track { height:3px; background:#e7e5e4; overflow:hidden; border-radius:2px; }
+#flow-progress { height:100%; background:#2563eb; transform:scaleX(0); transform-origin:left; will-change:transform; }
+#step-rail { display:flex; gap:16px; overflow-x:auto; padding:13px 0; scrollbar-width:thin; position:relative; }
+.flow-step { flex-shrink:0; display:flex; align-items:center; gap:6px; font-size:11px; color:#78716c; }
+.flow-step b { display:inline-grid; place-items:center; width:20px; height:20px; border:1px solid #d6d3d1; border-radius:50%; font:500 10px 'JetBrains Mono',monospace; }
+.flow-step.current { color:#1d4ed8; font-weight:700; }
+.flow-step.current b { background:#2563eb; color:white; border-color:#2563eb; }
+.flow-step.done b { background:#ecfdf5; border-color:#a7f3d0; color:#047857; }
+.flow-counters { display:flex; gap:18px; flex-wrap:wrap; align-items:center; border-top:1px solid #f0efeb; padding-top:10px; font-size:12px; color:#57534e; }
+.flow-counters strong { color:#1c1917; font:700 15px 'JetBrains Mono',monospace; margin:0 3px; }
+.flow-counters small { margin-left:auto; color:#78716c; font-size:10px; }
+.flow-focus { border-color:#93b4ed; box-shadow:0 0 0 3px #2563eb12; }
+#svg-network-layer, #packet-container { position:fixed; }
+.bus-wire { opacity:.12; }
+.bus-wire-active { opacity:1; stroke-dasharray:none; animation:none; }
+.data-packet { will-change:transform,opacity; font-size:12px; padding:7px 12px; left:0; top:0; }
+.playback-paused *, .playback-paused *::before, .playback-paused *::after { animation-play-state:paused !important; }
+.scenario-pill:focus-visible { outline:3px solid #93c5fd; outline-offset:3px; }
+.scenario-pill:disabled { opacity:.45; cursor:default; }
+.layout-grid { grid-template-columns:minmax(230px,.85fr) minmax(340px,1.25fr) minmax(280px,1fr); gap:28px; }
+@media (max-width:1100px) {
+  .layout-grid { grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:22px; }
+  .grid-cpu { grid-column:1; grid-row:1; }
+  .grid-tlb { grid-column:2; grid-row:1; }
+  .grid-mmu { grid-column:2; grid-row:2; }
+  .grid-pt { grid-column:2; grid-row:3; }
+  .grid-ram { grid-column:1; grid-row:2; }
+  .grid-disk { grid-column:1; grid-row:3; }
+}
+@media (max-width:640px) {
+  .layout-grid { grid-template-columns:minmax(0,1fr); gap:24px; }
+  .layout-grid > * { grid-column:1; grid-row:auto; min-width:0; }
+  header { position:relative !important; padding:12px !important; }
+  .flow-guide { padding:14px; }
+  .flow-explanation { gap:10px; min-height:110px; }
+  #step-number { font-size:14px; padding-top:5px; }
+  #step-title { font-size:17px; }
+  .flow-counters { gap:8px 14px; }
+  .flow-counters small { margin-left:0; }
+  .flow-heading { flex-wrap:wrap; }
+  .data-packet { max-width:240px; white-space:normal; font-size:11px; }
+  .log-table-container table { min-width:780px; }
+}
+@media (prefers-reduced-motion:reduce) {
+  *, *::before, *::after { animation:none !important; transition:none !important; scroll-behavior:auto !important; }
+}
+#flow-phase[data-phase="缺页处理"] { color:#b91c1c; }
+#flow-phase[data-phase="更新映射"] { color:#7c3aed; }
+#flow-phase[data-phase="重新执行"] { color:#047857; }

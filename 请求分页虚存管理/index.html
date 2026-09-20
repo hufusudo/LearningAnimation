@@ -6,8 +6,6 @@
   <title>请求分页虚存管理 · 以 MMU 为核心的动态地址变换与缺页调入</title>
   <!-- Tailwind CSS CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
-  <!-- GSAP CDN -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
   <!-- Google Fonts -->
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700;800&display=swap">
   <link rel="stylesheet" href="style.css">
@@ -53,10 +51,10 @@
         </span>
         <div>
           <h1 class="text-base font-bold text-stone-900 leading-tight">
-            请求分页虚存管理 · 硬件微架构时序系统
+            请求分页虚存管理 · 跟随一次访存，看懂地址变换
           </h1>
           <p class="text-[11px] text-stone-500 font-mono mt-0.5">
-            以 MMU 为中心 · 逻辑地址蓝 · 物理地址紫 · 页号橙 · 帧号绿 · 磁盘灰 · 自动循环运行
+            以 MMU 为中心 · 逻辑地址蓝 · 物理地址紫 · 页号橙 · 帧号绿 · 磁盘灰 · 页大小 4 KB
           </p>
         </div>
       </div>
@@ -65,7 +63,7 @@
       <div class="flex items-center gap-2 flex-wrap">
         <span class="text-xs font-mono text-stone-400 flex items-center gap-1">
           <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-          <span>自动循环:</span>
+          <span id="playback-status">正在播放</span>
         </span>
         <button id="pill-sc-a" class="scenario-pill active" onclick="manualJumpScenario('A')">
           A: TLB 命中 (1次访存)
@@ -77,8 +75,10 @@
           C: 缺页中断与外存调入 (调页重执)
         </button>
         <button id="btn-pause-cycle" class="scenario-pill text-xs border-stone-300 ml-1" onclick="toggleAutoLoop()">
-          <span id="loop-btn-text">⏸ 暂停循环</span>
+          <span id="loop-btn-text">⏸ 暂停</span>
         </button>
+        <button id="btn-next-step" class="scenario-pill" onclick="playNextStep()">下一步</button>
+        <button class="scenario-pill" onclick="replayScenario()">↺ 重播</button>
         <button id="btn-speed" class="scenario-pill text-xs border-stone-300 ml-1 font-mono flex items-center gap-1 hover:border-stone-400 hover:bg-stone-100 transition-colors" onclick="cycleSpeed()" title="点击循环切换速度 (0.5x / 1.0x / 1.5x / 2.0x)">
           <span>⚡ 速度:</span>
           <span id="speed-text" class="font-bold text-purple-700">1.0x</span>
@@ -92,6 +92,22 @@
 
   <!-- 主体 Grid 工作区 (以 MMU 为中心) -->
   <main class="flex-1 max-w-[1400px] w-full mx-auto p-4 flex flex-col gap-4">
+
+    <section class="flow-guide" aria-label="当前访存步骤">
+      <div class="flow-heading"><span id="scenario-title"></span><span id="flow-phase"></span></div>
+      <div class="flow-explanation" aria-live="polite" aria-atomic="true">
+        <span id="step-number"></span>
+        <div><h2 id="step-title"></h2><p id="step-detail"></p></div>
+      </div>
+      <div id="flow-progress-track" role="progressbar" aria-label="场景进度" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div id="flow-progress"></div></div>
+      <div id="step-rail" aria-label="流程步骤"></div>
+      <div class="flow-counters">
+        <span>主存读取 <strong id="memory-reads">0</strong> 次</span>
+        <span>整页调入 <strong id="page-transfers">0</strong> 次</span>
+        <span>页表写入 <strong id="table-writes">0</strong> 次</span>
+        <small>TLB 查询不计入主存读取；动画时长用于讲解，不代表硬件实际耗时。</small>
+      </div>
+    </section>
 
     <!-- CSS Grid 核心网格布局 -->
     <div class="layout-grid">
@@ -221,16 +237,16 @@
           <span id="mmu-fault-flag" class="hidden text-[10px] px-1.5 py-0.5 rounded bg-rose-600 text-white font-bold">缺页异常发出!</span>
         </div>
 
-        <!-- 物理地址合成器 (PA = F + D) -->
+        <!-- 物理地址合成器 (PA = F × 4096 + D) -->
         <div id="mmu-pa-box" class="p-2 rounded-lg bg-purple-50/70 border border-purple-200 flex flex-col gap-1 transition-all">
           <div class="flex items-center justify-between">
-            <span class="text-[11px] font-bold text-purple-900">合成物理地址 (PA = F + D):</span>
+            <span class="text-[11px] font-bold text-purple-900">合成物理地址 (PA = F × 4096 + D):</span>
             <span id="mmu-pa-val" class="font-mono text-xs font-bold text-purple-900 bg-white px-2 py-0.5 rounded border border-purple-300">
               PA: --
             </span>
           </div>
           <div class="text-[10px] font-mono text-purple-700 flex items-center justify-between">
-            <span>[物理帧号 F: <strong id="mmu-calc-f">--</strong>]</span>
+            <span>[帧基址 F × 4096，F: <strong id="mmu-calc-f">--</strong>]</span>
             <span>+</span>
             <span>[原地偏移量 D: <strong id="mmu-calc-d">0x14A</strong>]</span>
             <span class="text-[9px] text-purple-600 font-sans">&rarr; 输出给物理内存</span>
@@ -305,7 +321,7 @@
           <span class="w-2 h-2 rounded-full bg-stone-900"></span>
           <span class="text-xs font-bold text-stone-900">访存时序日志 (Memory Access Trace Log)</span>
         </div>
-        <span class="text-[10px] font-mono text-stone-400">每次访问 TLB/页表/内存/磁盘/写表 均生成编号与记录</span>
+        <span class="text-[10px] font-mono text-stone-400">传输到达后记录结果 · 事件序号不等于主存访问次数</span>
       </div>
 
       <!-- 日志表格 -->
@@ -313,7 +329,7 @@
         <table class="w-full text-left font-mono text-[11px]">
           <thead class="bg-stone-100 text-stone-700 sticky top-0 border-b border-stone-200">
             <tr>
-              <th class="py-1 px-2 w-20">访存#n</th>
+              <th class="py-1 px-2 w-20">事件序号</th>
               <th class="py-1 px-2 w-24">阶段</th>
               <th class="py-1 px-2 w-24">访问对象</th>
               <th class="py-1 px-2 w-32">地址 / 页号</th>

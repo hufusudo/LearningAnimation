@@ -16,8 +16,6 @@ const CONFIG = {
 let currentScenario = 'A';
 let currentAccessCount = 0;
 let isAutoLooping = true;
-let loopTimer = null;
-let currentStepTimeline = null;
 let currentSpeed = 1.0;
 const SPEED_STEPS = [0.5, 1.0, 1.5, 2.0];
 
@@ -53,8 +51,9 @@ function initHardwareState(scenarioKey) {
     { p: 1, v: 1, f: 3, disk: 'Block 1' },
     { p: 2, v: 1, f: 5, disk: 'Block 2' },
     { p: 3, v: (scenarioKey === 'C' ? 0 : 1), f: (scenarioKey === 'C' ? '-' : 6), disk: 'Block 3' },
-    { p: 4, v: 0, f: '-', disk: 'Block 4' },
-    { p: 5, v: 0, f: '-', disk: 'Block 5' }
+    { p: 4, v: 1, f: 4, disk: 'Block 4' },
+    { p: 5, v: 0, f: '-', disk: 'Block 5' },
+    { p: 7, v: 1, f: 7, disk: 'Block 7' }
   ];
 
   // 物理内存 8 个帧
@@ -83,11 +82,20 @@ function initHardwareState(scenarioKey) {
 // ============================================================
 
 document.addEventListener('DOMContentLoaded', () => {
-  setupWires();
   runScenario('A');
-  window.addEventListener('resize', () => {
-    setupWires();
-  });
+  let resizeFrame;
+  const refreshGeometry = () => {
+    cancelAnimationFrame(resizeFrame);
+    resizeFrame = requestAnimationFrame(() => { setupWires(); positionPacket(); });
+  };
+  window.addEventListener('resize', refreshGeometry);
+  window.addEventListener('scroll', refreshGeometry, { passive: true });
+  if (typeof ResizeObserver !== 'undefined') {
+    new ResizeObserver(refreshGeometry).observe(document.querySelector('.layout-grid'));
+  }
+  document.fonts?.ready.then(refreshGeometry);
+  document.addEventListener('visibilitychange', () => { lastFrameTime = null; });
+  requestAnimationFrame(tick);
 });
 
 function renderAllComponents() {
@@ -181,6 +189,8 @@ function renderDiskBlocks() {
 
 function setupWires() {
   const wiresGroup = document.getElementById('svg-wires-group');
+  const activeWire = document.querySelector('.bus-wire-active');
+  const previousWire = activeWire ? {id:activeWire.id, classes:activeWire.getAttribute('class')} : null;
   wiresGroup.innerHTML = '';
 
   const cpu = document.getElementById('node-cpu');
@@ -206,8 +216,13 @@ function setupWires() {
   createWire('wire-ram-cpu', ram, cpu, 'bottom', 'bottom', 'arrow-green');
   // 6. OS <-> Disk
   createWire('wire-os-disk', cpu, disk, 'bottom', 'left', 'arrow-disk');
+  createWire('wire-mmu-cpu', mmu, cpu, 'left', 'right', 'arrow-red');
+  createWire('wire-cpu-pt', cpu, pt, 'right', 'left', 'arrow-purple');
   // 7. Disk -> RAM (调页调入)
   createWire('wire-disk-ram', disk, ram, 'top', 'bottom', 'arrow-green');
+  if(previousWire && document.getElementById(previousWire.id)) {
+    document.getElementById(previousWire.id).setAttribute('class',previousWire.classes);
+  }
 }
 
 function createWire(id, fromEl, toEl, fromSide, toSide, markerId) {
@@ -267,60 +282,6 @@ function deactivateAllWires() {
   });
 }
 
-// 在连线旁显示访存编号浮动标签
-function showAccessTag(fromEl, toEl, text, bgClass = 'bg-stone-900 text-white') {
-  clearAccessTags();
-  const r1 = fromEl.getBoundingClientRect();
-  const r2 = toEl.getBoundingClientRect();
-
-  const midX = (r1.left + r1.width / 2 + r2.left + r2.width / 2) / 2;
-  const midY = (r1.top + r1.height / 2 + r2.top + r2.height / 2) / 2;
-
-  const badge = document.createElement('div');
-  badge.className = `access-tag-badge ${bgClass}`;
-  badge.id = 'active-access-tag';
-  badge.style.left = `${midX}px`;
-  badge.style.top = `${midY}px`;
-  badge.innerHTML = `<span>${text}</span>`;
-  document.getElementById('packet-container').appendChild(badge);
-}
-
-function clearAccessTags() {
-  const t = document.getElementById('active-access-tag');
-  if (t) t.remove();
-}
-
-// 沿箭头移动的绝对定位“地址包/数据包” div
-function animatePacket(fromEl, toEl, text, packetClass, duration = 0.6, onComplete = null) {
-  const container = document.getElementById('packet-container');
-  const packet = document.createElement('div');
-  packet.className = `data-packet ${packetClass}`;
-  packet.innerText = text;
-  container.appendChild(packet);
-
-  const r1 = fromEl.getBoundingClientRect();
-  const r2 = toEl.getBoundingClientRect();
-
-  const startX = r1.left + r1.width / 2;
-  const startY = r1.top + r1.height / 2;
-  const endX = r2.left + r2.width / 2;
-  const endY = r2.top + r2.height / 2;
-
-  gsap.set(packet, { x: startX, y: startY, scale: 0.8, opacity: 1 });
-
-  gsap.to(packet, {
-    x: endX,
-    y: endY,
-    scale: 1,
-    duration: duration,
-    ease: 'power2.inOut',
-    onComplete: () => {
-      packet.remove();
-      if (onComplete) onComplete();
-    }
-  });
-}
-
 // ============================================================
 // 4. 访存日志系统 (每次访存必记录)
 // ============================================================
@@ -359,534 +320,255 @@ function appendAccessLog(accessId, stage, target, addr, result, isMainMem, desc)
   if (container) container.scrollTop = container.scrollHeight;
 }
 
-// ============================================================
-// 5. 三大场景动画流水线 (严格遵循用户步骤)
-// ============================================================
+// Every transfer, arrival and reading pause shares one animation clock.
+const SCENARIO_DATA = {
+  A: {p:2, f:5, d:'14A', value:'CAFE', title:'快表命中，直接找到物理帧'},
+  B: {p:1, f:3, d:'0C8', value:'5A5A', title:'快表没有映射，继续查主存页表'},
+  C: {p:3, f:6, d:'054', value:'BEEF', title:'页面不在内存，先调页，再重执行'}
+};
+let steps = [], stepIndex = 0, stepElapsed = 0, arrivalApplied = false;
+let scenarioComplete = false, loopElapsed = 0, lastFrameTime = null;
+let memoryReads = 0, pageTransfers = 0, tableWrites = 0;
+let activePacket = null, activePath = null, pathLength = 0;
+let singleStepping = false;
+const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+const $ = id => document.getElementById(id);
+const put = (id, text) => { $(id).innerText = text; };
+const mark = (id, name) => $(id).classList.add(name);
 
-function runScenario(key) {
-  if (currentStepTimeline) {
-    currentStepTimeline.kill();
+function buildSteps(key) {
+  const {p,f,d,value} = SCENARIO_DATA[key];
+  const la = `0x${p}${d}`, pa = `0x${f}${d}`;
+  const list = [];
+  const add = (title, detail, phase, from, to, wire, packet, kind, arrive, log, travel=1100) => {
+    list.push({title,detail,phase,from,to,wire,packet,kind,arrive,log,travel,hold:850});
+  };
+  const split = () => {
+    put('mmu-p-val',`P = ${p}`); put('mmu-d-val',`D = 0x${d}`);
+    put('mmu-calc-d',`0x${d}`); put('mmu-state-badge','页号查映射，偏移量保持不变');
+    mark('mmu-p-cell','box-highlight-blue'); mark('mmu-d-cell','box-highlight-green');
+  };
+  const assemble = () => {
+    put('mmu-calc-f',f); put('mmu-pa-val',pa);
+    put('mmu-state-badge',`PA = ${f} × 0x1000 + 0x${d} = ${pa}`);
+    mark('mmu-pa-box','pa-assembled-glow');
+  };
+  const fillTLB = () => {
+    tlbData[3] = {v:1,p,f,dirty:0}; renderTLBTable();
+    mark('tlb-row-3','tlb-update-purple'); put('tlb-state-badge','新映射已缓存');
+  };
+  const log = (stage,target,addr,result,mem,desc) => [stage,target,addr,result,mem,desc];
+  add('CPU 发出逻辑地址', `地址 ${la} 拆成页号 P=${p} 和偏移 D=0x${d}。只转换页号，偏移量始终保留。`,
+    '地址变换','node-cpu','node-mmu','wire-cpu-mmu',`LA ${la}`,'la',split);
+  add('用页号查询 TLB', '先找高速缓存中的页号→帧号映射。查询 TLB 不计入主存访问次数。',
+    '地址变换','node-mmu','node-tlb','wire-mmu-tlb',`查 P=${p}`,'p',() => {
+      put('tlb-state-badge',key==='A' ? `命中：P=${p} → F=${f}` : '未命中：继续查页表');
+      if(key==='A') mark('tlb-row-0','tlb-row-hit');
+      else mark('node-tlb','tlb-flash-miss');
+    },log('查快表','TLB',`P=${p}`,key==='A'?'命中':'未命中',false,'TLB 缓存的是映射，不是页面内容'));
+  if(key!=='A') {
+    add('读取主存中的页表项',key==='C'?'TLB 未命中不等于缺页；读到页表 V=0，才确定 Page 3 不在主存。':'页表 V=1，页面已在主存；这里不需要磁盘调页。',
+      '地址变换','node-mmu','node-pt','wire-mmu-pt',`PTE[${p}]`,'la',() => {
+        memoryReads++; mark(`pt-row-${p}`,key==='C'?'pt-row-fault':'pt-row-active');
+        put('pt-state-badge',key==='C'?'V=0：页面不在内存':`V=1：找到 F=${f}`);
+      }, log('查页表','主存页表',`P=${p}`,key==='C'?'缺页 (V=0)':`有效 (F=${f})`,true,'读取一个页表项'));
   }
-  if (loopTimer) {
-    clearTimeout(loopTimer);
-  }
-
-  currentScenario = key;
-  currentAccessCount = 0;
-  clearAccessLog();
-  clearAccessTags();
-  deactivateAllWires();
-  resetAllHighlights();
-
-  // 更新胶囊高亮
-  CONFIG.SCENARIOS.forEach(sc => {
-    const pill = document.getElementById(`pill-sc-${sc.toLowerCase()}`);
-    if (pill) {
-      if (sc === key) pill.classList.add('active');
-      else pill.classList.remove('active');
-    }
-  });
-
-  initHardwareState(key);
-  renderAllComponents();
-
-  if (key === 'A') {
-    executeScenarioA();
-  } else if (key === 'B') {
-    executeScenarioB();
-  } else if (key === 'C') {
-    executeScenarioC();
-  }
-}
-
-// ------------------------------------------------------------
-// 场景 A: TLB 命中
-// 步骤：CPU发逻辑地址 -> MMU拆分 -> 访存#1 TLB查P命中 -> MMU合成PA -> 访存#2 内存读F+D -> 数据返回CPU
-// ------------------------------------------------------------
-function executeScenarioA() {
-  const cpu = document.getElementById('node-cpu');
-  const mmu = document.getElementById('node-mmu');
-  const tlb = document.getElementById('node-tlb');
-  const ram = document.getElementById('node-ram');
-
-  // 1. 初始化 CPU 指令与逻辑地址
-  document.getElementById('cpu-current-inst').innerText = 'LOAD R0, [0x214A]';
-  document.getElementById('cpu-la-hex').innerText = '0x214A';
-  document.getElementById('cpu-la-bin').innerText = '0010 0001 0100 1010';
-  document.getElementById('cpu-data-val').innerText = '--';
-  document.getElementById('cpu-data-val').className = 'font-bold px-2 py-0.5 rounded bg-white border border-stone-300 text-stone-400';
-
-  const tl = gsap.timeline();
-  tl.timeScale(currentSpeed);
-  currentStepTimeline = tl;
-
-  // Step 1: CPU 发逻辑地址 -> MMU 接收并拆分
-  tl.add(() => {
-    document.getElementById('cpu-la-box').classList.add('box-highlight-blue');
-    activateWire('wire-cpu-mmu', 'wire-blue');
-    animatePacket(cpu, mmu, 'LA: 0x214A', 'packet-la', 0.65, () => {
-      // MMU 拆分
-      document.getElementById('mmu-p-val').innerText = 'P = 2';
-      document.getElementById('mmu-d-val').innerText = 'D = 0x14A';
-      document.getElementById('mmu-calc-d').innerText = '0x14A';
-      document.getElementById('mmu-state-badge').innerText = '拆分完成 (P=2, D=0x14A)';
-      document.getElementById('node-mmu').classList.add('highlight-active');
-    });
-  }, '+=0.2');
-
-  // Step 2: 访存#1 TLB 查 P=2 命中
-  tl.add(() => {
-    currentAccessCount = 1;
-    activateWire('wire-mmu-tlb', 'wire-orange');
-    showAccessTag(mmu, tlb, '访存#1: TLB 查 P=2', 'bg-orange-600 text-white');
-    appendAccessLog('访存#1', '地址变换', 'TLB 快表', 'P = 2', '命中 (Hit)', false, 'CAM 联想快速查找命中，有效位 V=1，取出帧号 F=5');
-
-    animatePacket(mmu, tlb, '查 P=2', 'packet-p', 0.6, () => {
-      // TLB 命中整行绿色高亮
-      const hitRow = document.getElementById('tlb-row-0');
-      if (hitRow) hitRow.classList.add('tlb-row-hit');
-      document.getElementById('tlb-state-badge').innerText = '⚡ TLB HIT (有效位=1)';
-      document.getElementById('tlb-state-badge').className = 'text-[10px] font-mono font-bold px-1.5 py-0.2 rounded bg-emerald-100 text-emerald-800 border border-emerald-300';
-    });
-  }, '+=1.0');
-
-  // Step 3: TLB 返回 F=5 给 MMU，MMU 合成 PA = F(5) + D(0x14A)
-  tl.add(() => {
-    activateWire('wire-tlb-mmu', 'wire-green');
-    animatePacket(tlb, mmu, 'F = 5', 'packet-f', 0.55, () => {
-      document.getElementById('mmu-calc-f').innerText = '5';
-      document.getElementById('mmu-pa-val').innerText = '0x514A (Frame 5 + 0x14A)';
-      document.getElementById('mmu-pa-box').classList.add('pa-assembled-glow');
-      document.getElementById('mmu-state-badge').innerText = '物理地址合成完成';
-    });
-  }, '+=0.9');
-
-  // Step 4: 访存#2 MMU 发 PA 访问物理内存，读 F=5+D (Frame 5)
-  tl.add(() => {
-    currentAccessCount = 2;
-    activateWire('wire-mmu-ram', 'wire-purple');
-    showAccessTag(mmu, ram, '访存#2: 内存读 Frame 5', 'bg-purple-700 text-white');
-    appendAccessLog('访存#2', '物理访存', '物理主存', 'PA = 0x514A', '命中 (Hit)', true, '主存直接访问 Frame 5 (Page 2)，读取偏移量 0x14A 单元数据');
-
-    animatePacket(mmu, ram, 'PA: 0x514A', 'packet-pa', 0.65, () => {
-      const frameEl = document.getElementById('ram-frame-5');
-      if (frameEl) frameEl.classList.add('frame-active-read');
-    });
-  }, '+=1.0');
-
-  // Step 5: 物理内存读出数据返回 CPU
-  tl.add(() => {
-    clearAccessTags();
-    activateWire('wire-ram-cpu', 'wire-green');
-    animatePacket(ram, cpu, 'Data: 0xCAFE', 'packet-data', 0.75, () => {
-      const dataReg = document.getElementById('cpu-data-val');
-      dataReg.innerText = '0xCAFE (读取成功)';
-      dataReg.className = 'font-bold px-2 py-0.5 rounded bg-emerald-100 border border-emerald-300 text-emerald-800';
-      document.getElementById('cpu-data-reg-box').classList.add('box-highlight-green');
-    });
-  }, '+=1.0');
-
-  // 场景 A 结束，安排循环进入场景 B
-  tl.add(() => {
-    scheduleNextScenario('B');
-  }, '+=1.2');
-}
-
-// ------------------------------------------------------------
-// 场景 B: TLB 未命中，页表命中
-// 步骤：CPU发逻辑地址 -> MMU拆分 -> 访存#1 TLB查P未命中 -> 访存#2 页表查P有效得F -> 访存#3 写TLB -> MMU合成PA -> 访存#4 内存读F+D -> 数据返回CPU
-// ------------------------------------------------------------
-function executeScenarioB() {
-  const cpu = document.getElementById('node-cpu');
-  const mmu = document.getElementById('node-mmu');
-  const tlb = document.getElementById('node-tlb');
-  const pt = document.getElementById('node-pt');
-  const ram = document.getElementById('node-ram');
-
-  document.getElementById('cpu-current-inst').innerText = 'LOAD R0, [0x10C8]';
-  document.getElementById('cpu-la-hex').innerText = '0x10C8';
-  document.getElementById('cpu-la-bin').innerText = '0001 0000 1100 1000';
-  document.getElementById('cpu-data-val').innerText = '--';
-  document.getElementById('cpu-data-val').className = 'font-bold px-2 py-0.5 rounded bg-white border border-stone-300 text-stone-400';
-
-  const tl = gsap.timeline();
-  tl.timeScale(currentSpeed);
-  currentStepTimeline = tl;
-
-  // Step 1: CPU 发逻辑地址 -> MMU 接收拆分
-  tl.add(() => {
-    document.getElementById('cpu-la-box').classList.add('box-highlight-blue');
-    activateWire('wire-cpu-mmu', 'wire-blue');
-    animatePacket(cpu, mmu, 'LA: 0x10C8', 'packet-la', 0.65, () => {
-      document.getElementById('mmu-p-val').innerText = 'P = 1';
-      document.getElementById('mmu-d-val').innerText = 'D = 0x0C8';
-      document.getElementById('mmu-calc-d').innerText = '0x0C8';
-      document.getElementById('mmu-state-badge').innerText = '拆分完成 (P=1, D=0x0C8)';
-      document.getElementById('node-mmu').classList.add('highlight-active');
-    });
-  }, '+=0.2');
-
-  // Step 2: 访存#1 TLB 查 P=1 未命中 (黄色闪烁)
-  tl.add(() => {
-    currentAccessCount = 1;
-    activateWire('wire-mmu-tlb', 'wire-orange');
-    showAccessTag(mmu, tlb, '访存#1: TLB 查 P=1', 'bg-amber-600 text-white');
-    appendAccessLog('访存#1', '地址变换', 'TLB 快表', 'P = 1', '未命中 (Miss)', false, '查 TLB 未找到 P=1 条目，触发 TLB Miss');
-
-    animatePacket(mmu, tlb, '查 P=1', 'packet-p', 0.6, () => {
-      document.getElementById('node-tlb').classList.add('tlb-flash-miss');
-      document.getElementById('tlb-state-badge').innerText = '❌ TLB MISS (未命中)';
-      document.getElementById('tlb-state-badge').className = 'text-[10px] font-mono font-bold px-1.5 py-0.2 rounded bg-amber-100 text-amber-800 border border-amber-300';
-    });
-  }, '+=1.0');
-
-  // Step 3: 访存#2 MMU 发起查页表，PTE 查 P=1 有效，得到 F=3
-  tl.add(() => {
-    currentAccessCount = 2;
-    activateWire('wire-mmu-pt', 'wire-blue');
-    showAccessTag(mmu, pt, '访存#2: 查主存页表 P=1', 'bg-blue-700 text-white');
-    appendAccessLog('访存#2', '查页表', '主存页表', 'P = 1', '有效 (V=1, F=3)', true, '【第一次主存访问】查得有效位 V=1，物理帧号 F=3');
-
-    animatePacket(mmu, pt, '查 PTE 1', 'packet-la', 0.6, () => {
-      const ptRow = document.getElementById('pt-row-1');
-      if (ptRow) ptRow.classList.add('pt-row-active');
-      document.getElementById('pt-state-badge').innerText = 'PTE 命中 (F=3)';
-    });
-  }, '+=1.0');
-
-  // Step 4: 访存#3 写 TLB 回填 P=1 -> F=3 (紫色高亮)
-  tl.add(() => {
-    currentAccessCount = 3;
-    activateWire('wire-pt-mmu', 'wire-green');
-    animatePacket(pt, mmu, 'F = 3', 'packet-f', 0.5, () => {
-      // MMU 收到 F=3，写入 TLB
-      activateWire('wire-mmu-tlb', 'wire-purple');
-      showAccessTag(mmu, tlb, '访存#3: 写 TLB (回填)', 'bg-purple-700 text-white');
-      appendAccessLog('访存#3', '写快表', 'TLB 快表', 'P=1 &rarr; F=3', '写入成功', false, '将新映射 P=1 &rarr; Frame 3 写入 TLB 空闲槽');
-
-      animatePacket(mmu, tlb, '写 P=1&rarr;F=3', 'packet-pa', 0.55, () => {
-        // 更新 TLB 第 4 行
-        tlbData[3] = { v: 1, p: 1, f: 3, dirty: 0 };
-        renderTLBTable();
-        const row3 = document.getElementById('tlb-row-3');
-        if (row3) row3.classList.add('tlb-update-purple');
-        document.getElementById('tlb-state-badge').innerText = 'TLB 回填完成';
+  if(key==='C') {
+    add('缺页异常：原指令暂停', 'MMU 向 CPU 报告缺页，进入内核态。LOAD 尚未完成，R0 仍然没有数据。',
+      '缺页处理','node-mmu','node-cpu','wire-mmu-cpu','缺页异常','fault',() => {
+        $('mmu-fault-flag').classList.remove('hidden');
+        put('cpu-mode-badge','内核态 · OS 接管'); mark('cpu-os-state-box','box-highlight-red');
+        put('os-status-text','原指令等待调页'); put('os-detail-text','OS 选中空闲 Frame 6，准备将 Page 3 从磁盘调入。');
       });
-    });
-  }, '+=1.0');
-
-  // Step 5: MMU 合成物理地址 PA = F(3) + D(0x0C8) = 0x30C8
-  tl.add(() => {
-    document.getElementById('mmu-calc-f').innerText = '3';
-    document.getElementById('mmu-pa-val').innerText = '0x30C8 (Frame 3 + 0x0C8)';
-    document.getElementById('mmu-pa-box').classList.add('pa-assembled-glow');
-    document.getElementById('mmu-state-badge').innerText = '物理地址合成完成';
-  }, '+=0.9');
-
-  // Step 6: 访存#4 MMU 输出 PA 到物理内存读 Frame 3
-  tl.add(() => {
-    currentAccessCount = 4;
-    activateWire('wire-mmu-ram', 'wire-purple');
-    showAccessTag(mmu, ram, '访存#4: 内存读 Frame 3', 'bg-purple-700 text-white');
-    appendAccessLog('访存#4', '物理访存', '物理主存', 'PA = 0x30C8', '命中 (Hit)', true, '【第二次主存访问】访问 Frame 3 (Page 1) 数据单元');
-
-    animatePacket(mmu, ram, 'PA: 0x30C8', 'packet-pa', 0.65, () => {
-      const frameEl = document.getElementById('ram-frame-3');
-      if (frameEl) frameEl.classList.add('frame-active-read');
-    });
-  }, '+=1.0');
-
-  // Step 7: 物理内存返回数据给 CPU
-  tl.add(() => {
-    clearAccessTags();
-    activateWire('wire-ram-cpu', 'wire-green');
-    animatePacket(ram, cpu, 'Data: 0x5A5A', 'packet-data', 0.75, () => {
-      const dataReg = document.getElementById('cpu-data-val');
-      dataReg.innerText = '0x5A5A (读取成功)';
-      dataReg.className = 'font-bold px-2 py-0.5 rounded bg-emerald-100 border border-emerald-300 text-emerald-800';
-      document.getElementById('cpu-data-reg-box').classList.add('box-highlight-green');
-    });
-  }, '+=1.0');
-
-  // 场景 B 结束，安排循环进入场景 C
-  tl.add(() => {
-    scheduleNextScenario('C');
-  }, '+=1.2');
-}
-
-// ------------------------------------------------------------
-// 场景 C: 缺页与外存调入 (Demand Paging)
-// 步骤：CPU发LA -> MMU拆分 -> 访存#1 TLB查P未命中 -> 访存#2 页表查P有效位0缺页 -> MMU发缺页异常 -> CPU/OS暂停 -> OS取磁盘块 -> 访存#3 磁盘读块 -> 页调入空闲帧 -> 访存#4 内存写帧 -> 访存#5 页表写P,V=1,F=帧号 -> 访存#6 写TLB P->F -> 重新执行指令 -> 访存#7 TLB查P命中 -> 访存#8 内存读F+D -> 数据返回CPU
-// ------------------------------------------------------------
-function executeScenarioC() {
-  const cpu = document.getElementById('node-cpu');
-  const mmu = document.getElementById('node-mmu');
-  const tlb = document.getElementById('node-tlb');
-  const pt = document.getElementById('node-pt');
-  const ram = document.getElementById('node-ram');
-  const disk = document.getElementById('node-disk');
-
-  document.getElementById('cpu-current-inst').innerText = 'LOAD R0, [0x3054]';
-  document.getElementById('cpu-la-hex').innerText = '0x3054';
-  document.getElementById('cpu-la-bin').innerText = '0011 0000 0101 0100';
-  document.getElementById('cpu-data-val').innerText = '--';
-  document.getElementById('cpu-data-val').className = 'font-bold px-2 py-0.5 rounded bg-white border border-stone-300 text-stone-400';
-
-  const tl = gsap.timeline();
-  tl.timeScale(currentSpeed);
-  currentStepTimeline = tl;
-
-  // Step 1: CPU 发逻辑地址 -> MMU 接收拆分
-  tl.add(() => {
-    document.getElementById('cpu-la-box').classList.add('box-highlight-blue');
-    activateWire('wire-cpu-mmu', 'wire-blue');
-    animatePacket(cpu, mmu, 'LA: 0x3054', 'packet-la', 0.65, () => {
-      document.getElementById('mmu-p-val').innerText = 'P = 3';
-      document.getElementById('mmu-d-val').innerText = 'D = 0x054';
-      document.getElementById('mmu-calc-d').innerText = '0x054';
-      document.getElementById('mmu-state-badge').innerText = '拆分完成 (P=3, D=0x054)';
-      document.getElementById('node-mmu').classList.add('highlight-active');
-    });
-  }, '+=0.2');
-
-  // Step 2: 访存#1 TLB 查 P=3 未命中
-  tl.add(() => {
-    currentAccessCount = 1;
-    activateWire('wire-mmu-tlb', 'wire-orange');
-    showAccessTag(mmu, tlb, '访存#1: TLB 查 P=3', 'bg-amber-600 text-white');
-    appendAccessLog('访存#1', '地址变换', 'TLB 快表', 'P = 3', '未命中 (Miss)', false, '查快表未命中');
-
-    animatePacket(mmu, tlb, '查 P=3', 'packet-p', 0.6, () => {
-      document.getElementById('node-tlb').classList.add('tlb-flash-miss');
-      document.getElementById('tlb-state-badge').innerText = '❌ TLB MISS';
-    });
-  }, '+=1.0');
-
-  // Step 3: 访存#2 页表查 P=3，有效位 0，缺页！
-  tl.add(() => {
-    currentAccessCount = 2;
-    activateWire('wire-mmu-pt', 'wire-blue');
-    showAccessTag(mmu, pt, '访存#2: 查页表 P=3', 'bg-rose-700 text-white');
-    appendAccessLog('访存#2', '查页表', '主存页表', 'P = 3', '缺页 (V=0)', true, '【第一次主存访问】有效位 V=0，页面不在主存中');
-
-    animatePacket(mmu, pt, '查 PTE 3', 'packet-la', 0.6, () => {
-      const ptRow = document.getElementById('pt-row-3');
-      if (ptRow) ptRow.classList.add('pt-row-fault');
-      document.getElementById('pt-state-badge').innerText = '⚠️ 缺页异常产生';
-    });
-  }, '+=1.0');
-
-  // Step 4: MMU 发缺页异常 -> CPU / OS 暂停并转入内核中断处理
-  tl.add(() => {
-    document.getElementById('mmu-fault-flag').classList.remove('hidden');
-    document.getElementById('mmu-action-text').innerText = '检测到 V=0，向 CPU 发出缺页中断信号！';
-    document.getElementById('node-mmu').classList.add('box-highlight-red');
-
-    // 缺页异常包回传 CPU/OS
-    animatePacket(mmu, cpu, '⚡ 缺页异常中断', 'packet-fault', 0.6, () => {
-      document.getElementById('cpu-mode-badge').innerText = '内核态 (OS 接管)';
-      document.getElementById('cpu-mode-badge').className = 'text-[10px] font-mono px-1.5 py-0.5 rounded font-bold bg-rose-600 text-white';
-      document.getElementById('os-status-text').innerText = '缺页处理程序执行中';
-      document.getElementById('os-status-text').className = 'text-[10px] font-mono font-bold text-rose-700';
-      document.getElementById('os-detail-text').innerText = '指令挂起！OS 正在查找空闲物理帧 (选中 Frame 6) 并调度磁盘调页。';
-      document.getElementById('cpu-os-state-box').classList.add('box-highlight-red');
-    });
-  }, '+=1.0');
-
-  // Step 5: 访存#3 OS 发起磁盘读块 (Block 3)
-  tl.add(() => {
-    currentAccessCount = 3;
-    activateWire('wire-os-disk', 'wire-disk');
-    showAccessTag(cpu, disk, '访存#3: 磁盘读 Block 3', 'bg-slate-700 text-white');
-    appendAccessLog('访存#3', '外存I/O', '磁盘', 'Block 3 (Page 3)', '读取成功', false, 'OS 中断处理程序通过磁盘控制器读取 Block 3 页面');
-
-    animatePacket(cpu, disk, '读 Block 3', 'packet-disk', 0.65, () => {
-      const blockEl = document.getElementById('disk-block-3');
-      if (blockEl) blockEl.classList.add('disk-block-reading');
-      document.getElementById('disk-state-3').innerText = '正在调入内存...';
-    });
-  }, '+=1.1');
-
-  // Step 6: 访存#4 磁盘读出页调入空闲帧，写内存帧 (Frame 6)
-  tl.add(() => {
-    currentAccessCount = 4;
-    activateWire('wire-disk-ram', 'wire-green');
-    showAccessTag(disk, ram, '访存#4: 内存写 Frame 6', 'bg-emerald-700 text-white');
-    appendAccessLog('访存#4', '调页写入', '物理主存', 'Frame 6 (Page 3)', '写入成功', true, '将磁盘读出的 Page 3 实体装入空闲页框 Frame 6');
-
-    animatePacket(disk, ram, '调入 Page 3', 'packet-f', 0.75, () => {
-      // 物理内存 Frame 6 更新
-      ramFrames[6].occupied = true;
-      ramFrames[6].page = 'Page 3 (新调入)';
-      ramFrames[6].data = '0xBEEF';
-      ramFrames[6].color = 'bg-emerald-50 border-emerald-300';
-      renderRAMFrames();
-
-      const frame6 = document.getElementById('ram-frame-6');
-      if (frame6) frame6.classList.add('frame-active-write');
-    });
-  }, '+=1.1');
-
-  // Step 7: 访存#5 OS 更新页表 (P=3, V=1, F=6) (紫色高亮)
-  tl.add(() => {
-    currentAccessCount = 5;
-    showAccessTag(cpu, pt, '访存#5: 页表写 P=3, V=1, F=6', 'bg-purple-700 text-white');
-    appendAccessLog('访存#5', '更新页表', '主存页表', 'P=3 &rarr; F=6', '写表完成', true, '修改 PTE 3：有效位置 1，填入分配的物理帧号 6');
-
-    animatePacket(cpu, pt, '写 PTE 3 (V=1, F=6)', 'packet-pa', 0.6, () => {
-      ptData[3].v = 1;
-      ptData[3].f = 6;
-      renderPageTable();
-
-      const ptRow3 = document.getElementById('pt-row-3');
-      if (ptRow3) ptRow3.classList.add('pt-update-purple');
-    });
-  }, '+=1.0');
-
-  // Step 8: 访存#6 写 TLB (回填 P=3 -> F=6, V=1) (紫色高亮)
-  tl.add(() => {
-    currentAccessCount = 6;
-    activateWire('wire-mmu-tlb', 'wire-purple');
-    showAccessTag(mmu, tlb, '访存#6: 写 TLB (P=3&rarr;F=6)', 'bg-purple-700 text-white');
-    appendAccessLog('访存#6', '写快表', 'TLB 快表', 'P=3 &rarr; F=6', '写入成功', false, '将新映射装入 TLB，加速后续访存');
-
-    animatePacket(mmu, tlb, '写 TLB P=3&rarr;F=6', 'packet-pa', 0.55, () => {
-      tlbData[3] = { v: 1, p: 3, f: 6, dirty: 0 };
-      renderTLBTable();
-
-      const row3 = document.getElementById('tlb-row-3');
-      if (row3) row3.classList.add('tlb-update-purple');
-      document.getElementById('tlb-state-badge').innerText = 'TLB 已回填';
-    });
-  }, '+=1.0');
-
-  // Step 9: 重新执行指令 -> CPU 恢复执行，重新发送逻辑地址 0x3054
-  tl.add(() => {
-    document.getElementById('cpu-mode-badge').innerText = '用户态执行';
-    document.getElementById('cpu-mode-badge').className = 'text-[10px] font-mono px-1.5 py-0.5 rounded font-bold bg-blue-50 text-blue-700 border border-blue-200';
-    document.getElementById('os-status-text').innerText = '调页完成 (正常)';
-    document.getElementById('os-status-text').className = 'text-[10px] font-mono font-bold text-emerald-700';
-    document.getElementById('os-detail-text').innerText = '中断返回！CPU 重新执行原先暂停的 LOAD 指令。';
-    document.getElementById('mmu-fault-flag').classList.add('hidden');
-    document.getElementById('node-mmu').classList.remove('box-highlight-red');
-
-    activateWire('wire-cpu-mmu', 'wire-blue');
-    animatePacket(cpu, mmu, '重新执行: 0x3054', 'packet-la', 0.6, () => {
-      document.getElementById('mmu-state-badge').innerText = '指令重执';
-    });
-  }, '+=1.1');
-
-  // Step 10: 访存#7 TLB 查 P=3 命中！(绿色高亮)
-  tl.add(() => {
-    currentAccessCount = 7;
-    activateWire('wire-mmu-tlb', 'wire-green');
-    showAccessTag(mmu, tlb, '访存#7: TLB 查 P=3 (命中)', 'bg-emerald-700 text-white');
-    appendAccessLog('访存#7', '地址变换', 'TLB 快表', 'P = 3', '命中 (Hit)', false, '重执时快表已回填，直接命中取出 F=6');
-
-    animatePacket(mmu, tlb, '查 P=3', 'packet-p', 0.55, () => {
-      const hitRow = document.getElementById('tlb-row-3');
-      if (hitRow) hitRow.classList.add('tlb-row-hit');
-      document.getElementById('tlb-state-badge').innerText = '⚡ TLB 命中 (F=6)';
-      document.getElementById('tlb-state-badge').className = 'text-[10px] font-mono font-bold px-1.5 py-0.2 rounded bg-emerald-100 text-emerald-800 border border-emerald-300';
-
-      // MMU 合成 PA = 6 + 0x054 = 0x6054
-      document.getElementById('mmu-calc-f').innerText = '6';
-      document.getElementById('mmu-pa-val').innerText = '0x6054 (Frame 6 + 0x054)';
-      document.getElementById('mmu-pa-box').classList.add('pa-assembled-glow');
-    });
-  }, '+=1.0');
-
-  // Step 11: 访存#8 内存读 F=6 + D (Frame 6)
-  tl.add(() => {
-    currentAccessCount = 8;
-    activateWire('wire-mmu-ram', 'wire-purple');
-    showAccessTag(mmu, ram, '访存#8: 内存读 Frame 6', 'bg-purple-700 text-white');
-    appendAccessLog('访存#8', '物理访存', '物理主存', 'PA = 0x6054', '命中 (Hit)', true, '【重新执行访存】直接读取新调入的 Frame 6 数据');
-
-    animatePacket(mmu, ram, 'PA: 0x6054', 'packet-pa', 0.65, () => {
-      const frameEl = document.getElementById('ram-frame-6');
-      if (frameEl) frameEl.classList.add('frame-active-read');
-    });
-  }, '+=1.1');
-
-  // Step 12: 数据返回 CPU R0
-  tl.add(() => {
-    clearAccessTags();
-    activateWire('wire-ram-cpu', 'wire-green');
-    animatePacket(ram, cpu, 'Data: 0xBEEF', 'packet-data', 0.75, () => {
-      const dataReg = document.getElementById('cpu-data-val');
-      dataReg.innerText = '0xBEEF (读取成功)';
-      dataReg.className = 'font-bold px-2 py-0.5 rounded bg-emerald-100 border border-emerald-300 text-emerald-800';
-      document.getElementById('cpu-data-reg-box').classList.add('box-highlight-green');
-    });
-  }, '+=1.0');
-
-  // 场景 C 结束，安排循环回到场景 A
-  tl.add(() => {
-    scheduleNextScenario('A');
-  }, '+=1.5');
-}
-
-// ============================================================
-// 6. 辅助重置与自动循环控制
-// ============================================================
-
-function resetAllHighlights() {
-  document.querySelectorAll('.box-highlight-blue, .box-highlight-green, .box-highlight-purple, .box-highlight-red, .highlight-active, .pa-assembled-glow').forEach(el => {
-    el.classList.remove('box-highlight-blue', 'box-highlight-green', 'box-highlight-purple', 'box-highlight-red', 'highlight-active', 'pa-assembled-glow');
-  });
-
-  document.querySelectorAll('.tlb-row-hit, .tlb-flash-miss, .tlb-update-purple, .pt-row-active, .pt-row-fault, .pt-update-purple, .frame-active-read, .frame-active-write, .disk-block-reading').forEach(el => {
-    el.classList.remove('tlb-row-hit', 'tlb-flash-miss', 'tlb-update-purple', 'pt-row-active', 'pt-row-fault', 'pt-update-purple', 'frame-active-read', 'frame-active-write', 'disk-block-reading');
-  });
-
-  document.getElementById('mmu-fault-flag').classList.add('hidden');
-  document.getElementById('mmu-state-badge').innerText = '待命 (IDLE)';
-  document.getElementById('tlb-state-badge').innerText = '就绪';
-  document.getElementById('tlb-state-badge').className = 'text-[10px] font-mono font-bold px-1.5 py-0.2 rounded bg-stone-100 text-stone-600 border border-stone-200';
-  document.getElementById('pt-state-badge').innerText = '就绪';
-}
-
-function scheduleNextScenario(nextKey) {
-  if (!isAutoLooping) return;
-  loopTimer = setTimeout(() => {
-    runScenario(nextKey);
-  }, CONFIG.LOOP_DELAY / currentSpeed);
-}
-
-function cycleSpeed() {
-  const currentIndex = SPEED_STEPS.indexOf(currentSpeed);
-  const nextIndex = (currentIndex + 1) % SPEED_STEPS.length;
-  setSpeed(SPEED_STEPS[nextIndex]);
-}
-
-function setSpeed(spd) {
-  currentSpeed = spd;
-  const speedText = document.getElementById('speed-text');
-  if (speedText) {
-    speedText.innerText = `${spd.toFixed(1)}x`;
+    add('OS 请求读取磁盘页面','找到 Page 3 对应的 Block 3，并分配空闲 Frame 6。本例有空闲帧，无需页面置换。',
+      '缺页处理','node-cpu','node-disk','wire-os-disk','读取 Block 3','disk',() => {
+        mark('disk-block-3','disk-block-reading'); put('disk-state-3','页面就绪'); put('disk-state-badge','完成磁盘读取');
+      },log('外存 I/O','磁盘','Block 3','读取成功',false,'磁盘 I/O 与主存单次读取分开统计'),1500);
+    add('将完整页面装入空闲帧','搬运的是整个 4 KB 页面，不只是 LOAD 要读取的一个数据。此时页表还没有变为有效。',
+      '缺页处理','node-disk','node-ram','wire-disk-ram','Page 3 · 4 KB','f',() => {
+        pageTransfers++;
+        Object.assign(ramFrames[6],{occupied:true,page:'Page 3 (新调入)',data:'0xBEEF',color:'bg-emerald-50 border-emerald-300'});
+        renderRAMFrames(); mark('ram-frame-6','frame-active-write');
+        put('disk-state-3','已调入 Frame 6'); put('disk-state-badge','外存待命');
+      },log('调页写入','物理主存','Frame 6','整页写入',true,'4 KB 页面传输，不等同于一次字读取'),2000);
+    add('更新页表：现在可以访问了','页面装入完成后，OS 将页表项改为 V=1、F=6，让地址变换能找到新页面。',
+      '更新映射','node-cpu','node-pt','wire-cpu-pt','P=3 · V=1 · F=6','pa',() => {
+        tableWrites++; ptData[3].v=1; ptData[3].f=6; renderPageTable();
+        mark('pt-row-3','pt-update-purple'); put('pt-state-badge','V: 0 → 1，F: — → 6');
+      },log('更新页表','主存页表','P=3 → F=6','写表完成',true,'先装入页面，再将页表标记为有效'));
+    add('回填 TLB 映射','本演示采用调页后回填 TLB 的路径，让重执行时直接命中快表。',
+      '更新映射','node-mmu','node-tlb','wire-mmu-tlb','P=3 → F=6','pa',fillTLB,
+      log('写快表','TLB','P=3 → F=6','写入成功',false,'回填映射，未再次搬运页面'));
+    add('回到原指令，重新执行','还是原来的 LOAD R0, [0x3054]，逻辑地址没有改变；变化的是页面已在内存。',
+      '重新执行','node-cpu','node-mmu','wire-cpu-mmu','重执 LA 0x3054','la',() => {
+        put('cpu-mode-badge','用户态执行'); put('os-status-text','调页完成，恢复原指令');
+        put('os-detail-text','重新进行地址变换，再读取原指令需要的数据。');
+        $('mmu-fault-flag').classList.add('hidden'); split();
+      });
+    add('再次查询 TLB，这次命中','新映射 P=3 → F=6 已经可用，不再触发缺页。',
+      '重新执行','node-mmu','node-tlb','wire-mmu-tlb','查 P=3','p',() => {
+        mark('tlb-row-3','tlb-row-hit'); put('tlb-state-badge','命中：P=3 → F=6');
+      },log('重执查快表','TLB','P=3','命中',false,'使用调页后建立的新映射'));
   }
-  gsap.globalTimeline.timeScale(currentSpeed);
-  if (currentStepTimeline) {
-    currentStepTimeline.timeScale(currentSpeed);
-  }
-}
-
-function manualJumpScenario(key) {
-  if (loopTimer) clearTimeout(loopTimer);
-  runScenario(key);
-}
-
-function toggleAutoLoop() {
-  isAutoLooping = !isAutoLooping;
-  const btnText = document.getElementById('loop-btn-text');
-  if (isAutoLooping) {
-    btnText.innerText = '⏸ 暂停循环';
-    // 立即启动下一步
-    const nextIdx = (CONFIG.SCENARIOS.indexOf(currentScenario) + 1) % CONFIG.SCENARIOS.length;
-    scheduleNextScenario(CONFIG.SCENARIOS[nextIdx]);
+  if(key==='B') {
+    add('页表返回物理帧号','从页表取得 F=3，接着把映射缓存到 TLB。偏移 D=0x0C8 一直留在 MMU。',
+      '地址变换','node-pt','node-mmu','wire-pt-mmu','F = 3','f',() => put('mmu-calc-f',3));
+    add('回填 TLB，方便下次访问','将 P=1 → F=3 写入空闲槽；本次仍只进行了 1 次主存读取。',
+      '更新映射','node-mmu','node-tlb','wire-mmu-tlb','P=1 → F=3','pa',fillTLB,
+      log('写快表','TLB','P=1 → F=3','写入成功',false,'只缓存页号到帧号的映射'));
+    add('帧号与原偏移合成物理地址',`PA = F × 4096 + D = ${pa}。页号被替换，页内偏移不变。`,
+      '地址变换',null,null,null,`F=${f} + D=0x${d}`,'pa',assemble,null,700);
   } else {
-    btnText.innerText = '▶ 继续循环';
-    if (loopTimer) clearTimeout(loopTimer);
+    add('帧号返回 MMU，合成物理地址',`用 F=${f} 替换页号，保留 D=0x${d}：${f} × 0x1000 + 0x${d} = ${pa}。`,
+      key==='C'?'重新执行':'地址变换','node-tlb','node-mmu','wire-tlb-mmu',`F = ${f}`,'f',assemble);
+  }
+  add('用物理地址读取目标数据',`访问 Frame ${f} 中偏移为 0x${d} 的单元。现在读取的是指令需要的数据。`,
+    '读取数据','node-mmu','node-ram','wire-mmu-ram',`PA ${pa}`,'pa',() => {
+      memoryReads++; mark(`ram-frame-${f}`,'frame-active-read'); put('mmu-state-badge','主存已读出目标数据');
+    },log('读取数据','物理主存',pa,'读取成功',true,`Frame ${f}，偏移 0x${d}`));
+  add('数据返回 R0，指令完成',key==='C'?'缺页处理结束后，原指令终于完成。调入页面和读取数据是两个不同的动作。':`R0 获得 0x${value}。本场景共 ${key==='A'?1:2} 次主存读取，TLB 查询不算主存读取。`,
+    '读取数据','node-ram','node-cpu','wire-ram-cpu',`数据 0x${value}`,'data',() => {
+      put('cpu-data-val',`0x${value} (读取成功)`); mark('cpu-data-reg-box','box-highlight-green');
+    });
+  return list;
+}
+
+const transientClasses = ['box-highlight-blue','box-highlight-green','box-highlight-purple','box-highlight-red',
+  'highlight-active','pa-assembled-glow','tlb-row-hit','tlb-flash-miss','tlb-update-purple','pt-row-active',
+  'pt-row-fault','pt-update-purple','frame-active-read','frame-active-write','disk-block-reading','flow-focus'];
+function clearHighlights() {
+  document.querySelectorAll(transientClasses.map(c=>`.${c}`).join(',')).forEach(el=>el.classList.remove(...transientClasses));
+}
+function runScenario(key) {
+  if (!SCENARIO_DATA[key]) return;
+  activePacket?.remove(); activePacket=null; activePath=null;
+  $('packet-container').innerHTML=''; clearHighlights(); deactivateAllWires(); clearAccessLog();
+  currentScenario=key; currentAccessCount=0; memoryReads=0; pageTransfers=0; tableWrites=0;
+  stepIndex=0; stepElapsed=0; loopElapsed=0; lastFrameTime=null; scenarioComplete=false; singleStepping=false;
+  initHardwareState(key); renderAllComponents(); setupWires();
+  const {p,d,title} = SCENARIO_DATA[key];
+  put('cpu-current-inst',`LOAD R0, [0x${p}${d}]`); put('cpu-la-hex',`0x${p}${d}`);
+  put('cpu-la-bin',parseInt(`${p}${d}`,16).toString(2).padStart(16,'0').match(/.{4}/g).join(' '));
+  for (const id of ['mmu-p-val','mmu-d-val','mmu-calc-d','mmu-calc-f','mmu-pa-val','cpu-data-val']) put(id,'—');
+  put('cpu-mode-badge','用户态执行'); put('os-status-text','待命中');
+  put('os-detail-text','尚未发生缺页，CPU 正常执行用户指令。');
+  put('mmu-state-badge','等待逻辑地址'); put('tlb-state-badge','就绪'); put('pt-state-badge','就绪');
+  put('disk-state-badge','外存待命'); $('mmu-fault-flag').classList.add('hidden');
+  put('scenario-title',title);
+  CONFIG.SCENARIOS.forEach(sc=>{
+    $(`pill-sc-${sc.toLowerCase()}`).classList.toggle('active',sc===key);
+    $(`pill-sc-${sc.toLowerCase()}`).setAttribute('aria-pressed',String(sc===key));
+  });
+  steps=buildSteps(key);
+  $('step-rail').innerHTML=steps.map((step,i)=>`<span class="flow-step" title="${step.title}"><b>${i+1}</b>${step.title}</span>`).join('');
+  beginStep(); syncControls(); updateCounters();
+}
+function beginStep() {
+  const step=steps[stepIndex]; arrivalApplied=false; stepElapsed=0;
+  clearHighlights(); deactivateAllWires();
+  if(step.from) mark(step.from,'flow-focus');
+  if(step.to) mark(step.to,'flow-focus');
+  put('step-number',`${String(stepIndex+1).padStart(2,'0')} / ${steps.length}`);
+  put('step-title',step.title); put('step-detail',step.detail); put('flow-phase',step.phase);
+  $('flow-phase').dataset.phase=step.phase;
+  put('mmu-action-text',step.title);
+  document.querySelectorAll('.flow-step').forEach((el,i)=>{
+    el.classList.toggle('current',i===stepIndex); el.classList.toggle('done',i<stepIndex);
+    if(i===stepIndex) el.setAttribute('aria-current','step'); else el.removeAttribute('aria-current');
+  });
+  const selected=document.querySelector('.flow-step.current');
+  if(selected) $('step-rail').scrollLeft=selected.offsetLeft-$('step-rail').offsetLeft-16;
+  if(step.wire) {
+    const colors={la:'blue',p:'orange',f:'green',pa:'purple',data:'green',fault:'red',disk:'disk'};
+    activateWire(step.wire,`wire-${colors[step.kind]}`);
+    activePacket=document.createElement('div'); activePacket.className=`data-packet packet-${step.kind}`;
+    activePacket.textContent=step.packet; $('packet-container').appendChild(activePacket);
+  }
+  positionPacket(); updateProgress();
+}
+function positionPacket() {
+  if(!activePacket) return;
+  const path=$(steps[stepIndex].wire);
+  if(path!==activePath) { activePath=path; pathLength=path.getTotalLength(); }
+  const ratio=Math.min(1,stepElapsed/steps[stepIndex].travel);
+  const eased=ratio*ratio*(3-2*ratio);
+  const pt=path.getPointAtLength(pathLength*(reducedMotion?1:eased));
+  activePacket.style.transform=`translate3d(${pt.x}px,${pt.y}px,0) translate(-50%,-50%)`;
+  activePacket.style.opacity=String(Math.min(1,ratio*8+0.2));
+}
+function applyArrival() {
+  if(arrivalApplied) return;
+  arrivalApplied=true; activePacket?.remove(); activePacket=null;
+  const step=steps[stepIndex]; step.arrive?.();
+  if(step.log) appendAccessLog(`事件 #${++currentAccessCount}`,...step.log);
+  updateCounters();
+}
+function updateCounters() {
+  put('memory-reads',memoryReads); put('page-transfers',pageTransfers); put('table-writes',tableWrites);
+}
+function updateProgress() {
+  const step=steps[stepIndex];
+  const progress=scenarioComplete?1:(stepIndex+Math.min(1,stepElapsed/(step.travel+step.hold)))/steps.length;
+  $('flow-progress').style.transform=`scaleX(${progress})`;
+  $('flow-progress-track').setAttribute('aria-valuenow',Math.round(progress*100));
+}
+function finishStep() {
+  applyArrival();
+  if(stepIndex===steps.length-1) {
+    scenarioComplete=true; loopElapsed=0; deactivateAllWires(); updateProgress();
+    put('flow-phase','本次指令已完成'); syncControls();
+    return;
+  }
+  stepIndex++; beginStep();
+}
+function advancePlayback(delta) {
+  if(!isAutoLooping && !singleStepping) return;
+  if(scenarioComplete) {
+    if(isAutoLooping) {
+      loopElapsed+=delta*currentSpeed;
+      if(loopElapsed>=CONFIG.LOOP_DELAY) runScenario(CONFIG.SCENARIOS[(CONFIG.SCENARIOS.indexOf(currentScenario)+1)%3]);
+    }
+    return;
+  }
+  stepElapsed+=delta*currentSpeed;
+  positionPacket(); updateProgress();
+  const step=steps[stepIndex];
+  if(stepElapsed>=step.travel) applyArrival();
+  if(stepElapsed>=step.travel+step.hold) {
+    if(singleStepping) {
+      singleStepping=false;
+      if(stepIndex===steps.length-1) finishStep();
+      syncControls();
+    }
+    else finishStep();
   }
 }
+function tick(now) {
+  if(lastFrameTime!==null && !document.hidden) advancePlayback(Math.min(80,now-lastFrameTime));
+  lastFrameTime=now;
+  requestAnimationFrame(tick);
+}
+// Single-step leaves the completed state on screen. The following click starts the next transfer.
+function playNextStep() {
+  isAutoLooping=false;
+  if(scenarioComplete) { syncControls(); return; }
+  if(arrivalApplied) finishStep();
+  if(!scenarioComplete) singleStepping=true;
+  syncControls();
+}
+function syncControls() {
+  const moving=isAutoLooping||singleStepping;
+  put('loop-btn-text',moving?'⏸ 暂停':'▶ 继续播放');
+  put('playback-status',scenarioComplete ? (isAutoLooping?'完成后切换下一场景':'已完成 · 可重播') : moving?'正在播放':'已暂停');
+  document.body.classList.toggle('playback-paused',!moving);
+  $('btn-next-step').disabled=scenarioComplete||singleStepping;
+}
+function toggleAutoLoop() {
+  if(singleStepping) { singleStepping=false; isAutoLooping=false; }
+  else isAutoLooping=!isAutoLooping;
+  lastFrameTime=null; syncControls();
+}
+function cycleSpeed() { setSpeed(SPEED_STEPS[(SPEED_STEPS.indexOf(currentSpeed)+1)%SPEED_STEPS.length]); }
+function setSpeed(speed) { if(!SPEED_STEPS.includes(speed)) return; currentSpeed=speed; put('speed-text',`${speed.toFixed(1)}x`); }
+function manualJumpScenario(key) { runScenario(key); }
+function replayScenario() { runScenario(currentScenario); }
