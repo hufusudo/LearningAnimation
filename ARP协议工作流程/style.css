@@ -1,0 +1,375 @@
+/* ==========================================================================
+   Taste-Skill Light Editorial Aesthetic & Micro-Animation Stylesheet
+   ARP 协议工作流程与跨网路由转发 (style.css)
+   ========================================================================== */
+
+/* 基础平滑渲染与选区 */
+html {
+  scroll-behavior: smooth;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  background-color: #FAF9F5;
+  color: #1C1917;
+  font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+}
+
+/* 极简网格底纹 */
+.stage-grid-bg {
+  background-size: 24px 24px;
+  background-image: 
+    linear-gradient(to right, rgba(229, 228, 220, 0.45) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(229, 228, 220, 0.45) 1px, transparent 1px);
+}
+
+/* ==========================================================================
+   控制区与按钮样式
+   ========================================================================== */
+.flow-step-tab {
+  cursor: pointer;
+  transition: all 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.flow-step-tab:hover:not(.active) {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px -2px rgba(0, 0, 0, 0.05);
+}
+
+.flow-step-tab.active {
+  box-shadow: 0 4px 14px -1px rgba(28, 25, 23, 0.2);
+}
+
+.ctrl-btn {
+  cursor: pointer;
+  transition: all 0.18s ease;
+}
+
+.ctrl-btn:hover {
+  transform: translateY(-1px);
+}
+
+.ctrl-btn:active {
+  transform: translateY(0);
+}
+
+.speed-pill {
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.speed-pill.active {
+  pointer-events: none;
+}
+
+/* ==========================================================================
+   主机节点卡片与状态指示
+   ========================================================================== */
+.host-node-card {
+  transition: border-color 0.3s ease, box-shadow 0.3s ease, transform 0.3s ease;
+}
+
+.host-node-card.is-active-src {
+  border-color: #0284C7 !important;
+  box-shadow: 0 0 0 3px rgba(2, 132, 199, 0.15), 0 8px 20px -4px rgba(2, 132, 199, 0.12);
+}
+
+.host-node-card.is-active-dst {
+  border-color: #059669 !important;
+  box-shadow: 0 0 0 3px rgba(5, 150, 105, 0.15), 0 8px 20px -4px rgba(5, 150, 105, 0.12);
+}
+
+.host-node-card.is-discarded {
+  border-color: #F43F5E !important;
+  box-shadow: 0 0 0 2px rgba(244, 63, 94, 0.15);
+}
+
+/* 报文封装演示槽位 */
+.encap-slot {
+  position: relative;
+  overflow: hidden;
+  transition: all 0.25s ease;
+  min-height: 50px;
+}
+
+/* 完整封装外框容器 */
+.mac-outer-frame {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: 8px;
+  border: 1.5px solid #F59E0B;
+  background: rgba(254, 243, 199, 0.7);
+  transition: all 0.3s ease;
+  box-shadow: 0 2px 6px rgba(245, 158, 11, 0.15);
+}
+
+.mac-outer-frame.is-ip-frame {
+  border-color: #0EA5E9;
+  background: rgba(240, 249, 255, 0.8);
+  box-shadow: 0 2px 6px rgba(14, 165, 233, 0.15);
+}
+
+.mac-outer-frame.is-decap-done {
+  border-color: #10B981;
+  background: rgba(236, 253, 245, 0.85);
+  box-shadow: 0 2px 8px rgba(16, 185, 129, 0.2);
+}
+
+/* MAC 帧头标签 (可滑动入场或剥离上浮) */
+.mac-header-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2.5px 7px;
+  background: #1C1917;
+  color: #FFFFFF;
+  border-radius: 5px;
+  font-size: 9px;
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: bold;
+  white-space: nowrap;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+  flex-shrink: 0;
+}
+
+/* 内部载荷块 (ARP) */
+.inner-payload-arp {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2.5px 7px;
+  background: #FEF3C7;
+  border: 1px solid #FCD34D;
+  color: #92400E;
+  border-radius: 5px;
+  font-size: 10px;
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: bold;
+  white-space: nowrap;
+  transition: all 0.25s ease;
+}
+
+/* 内部载荷块 (IP) */
+.inner-payload-ip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2.5px 7px;
+  background: #E0F2FE;
+  border: 1px solid #7DD3FC;
+  color: #0369A1;
+  border-radius: 5px;
+  font-size: 10px;
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: bold;
+  white-space: nowrap;
+  transition: all 0.25s ease;
+}
+
+/* 剥离动画后高亮 */
+.decap-matched-payload {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  background: #D1FAE5;
+  border: 1.5px solid #10B981;
+  color: #065F46;
+  border-radius: 6px;
+  font-size: 10px;
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: bold;
+  box-shadow: 0 0 10px rgba(16, 185, 129, 0.25);
+}
+
+/* ==========================================================================
+   丝滑 ARP 缓存表 (Silky Smooth Cache Table)
+   ========================================================================== */
+.arp-cache-box {
+  transition: all 0.3s ease;
+}
+
+/* 动态新增的缓存行容器 */
+.arp-row-anim {
+  overflow: hidden;
+  transition: background-color 1.2s ease;
+}
+
+.arp-row-anim td {
+  padding-top: 3px;
+  padding-bottom: 3px;
+}
+
+/* 刚刚插入时的高亮脉冲 */
+.arp-row-new {
+  background-color: rgba(16, 185, 129, 0.22);
+}
+
+.arp-row-hit {
+  background-color: rgba(14, 165, 233, 0.2);
+}
+
+/* ==========================================================================
+   飞行报文胶囊与实时跟随浮窗 (Flying Packet & Tooltip)
+   ========================================================================== */
+.flying-packet-wrapper {
+  position: absolute;
+  pointer-events: none;
+  z-index: 50;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+/* 飞行报文上方实时字段指示浮窗 */
+.packet-field-tooltip {
+  white-space: nowrap;
+  padding: 4px 9px;
+  background: rgba(28, 25, 23, 0.92);
+  color: #FFFFFF;
+  border-radius: 8px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  margin-bottom: 6px;
+  backdrop-filter: blur(4px);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  text-align: center;
+  transition: opacity 0.2s ease;
+}
+
+.packet-field-tooltip .tooltip-title {
+  color: #FBBF24;
+  font-weight: bold;
+  font-size: 10px;
+  letter-spacing: 0.02em;
+}
+
+.packet-field-tooltip .tooltip-detail {
+  font-size: 9px;
+  color: #E7E5E4;
+}
+
+/* 报文本体胶囊 */
+.packet-capsule-core {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: 9999px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  font-weight: bold;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.15);
+  border: 1.5px solid transparent;
+}
+
+/* ARP 请求：琥珀黄 */
+.packet-capsule-arp-req {
+  background: #FFFBEB;
+  border-color: #F59E0B;
+  color: #B45309;
+}
+
+/* ARP 响应：翡翠绿 */
+.packet-capsule-arp-rep {
+  background: #ECFDF5;
+  border-color: #10B981;
+  color: #047857;
+}
+
+/* IP 数据报：湖水蓝 */
+.packet-capsule-ip-data {
+  background: #F0F9FF;
+  border-color: #0EA5E9;
+  color: #0369A1;
+}
+
+/* 丢弃标记小浮标 */
+.discard-badge {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  background: #FFE4E6;
+  border: 1px solid #F43F5E;
+  color: #BE123C;
+  border-radius: 6px;
+  font-size: 10px;
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: bold;
+  box-shadow: 0 2px 8px rgba(244, 63, 94, 0.2);
+  z-index: 45;
+  pointer-events: none;
+}
+
+/* 接收解封装成功浮标 */
+.match-badge {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  background: #D1FAE5;
+  border: 1px solid #10B981;
+  color: #065F46;
+  border-radius: 6px;
+  font-size: 10px;
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: bold;
+  box-shadow: 0 2px 8px rgba(16, 185, 129, 0.2);
+  z-index: 45;
+  pointer-events: none;
+}
+
+/* ==========================================================================
+   路由器路由表检索高亮动效
+   ========================================================================== */
+.route-row-matched {
+  background-color: #FEF3C7 !important;
+  border-left: 3px solid #D97706 !important;
+  box-shadow: 0 0 10px rgba(217, 119, 6, 0.2);
+}
+
+.route-row-scanning {
+  background-color: #F5F5F4 !important;
+  border-left: 2px solid #78716C !important;
+}
+
+/* 交换机端口指示灯 */
+.sw-port {
+  transition: all 0.2s ease;
+}
+
+.sw-port.is-active {
+  background-color: #0EA5E9 !important;
+  color: #FFFFFF !important;
+  border-color: #38BDF8 !important;
+  box-shadow: 0 0 8px rgba(14, 165, 233, 0.4);
+}
+
+.sw-port.is-broadcasting {
+  background-color: #F59E0B !important;
+  color: #FFFFFF !important;
+  border-color: #FBBF24 !important;
+  box-shadow: 0 0 8px rgba(245, 158, 11, 0.4);
+}
+
+/* 动画关键帧：微晃动 (丢弃时) */
+@keyframes shakeDiscard {
+  0%, 100% { transform: translateX(0); }
+  20%, 60% { transform: translateX(-3px); }
+  40%, 80% { transform: translateX(3px); }
+}
+
+.animate-shake {
+  animation: shakeDiscard 0.35s ease;
+}

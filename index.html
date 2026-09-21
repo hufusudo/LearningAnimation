@@ -70,7 +70,7 @@
             学科大厅
           </button>
           <button onclick="switchView('all')" id="nav-all" class="pill-btn px-3 py-1.5 rounded-lg border border-[#E5E4DC] text-stone-600 hover:text-stone-900 bg-white">
-            全部模块 (17)
+            全部模块 (20)
           </button>
         </nav>
       </div>
@@ -89,7 +89,7 @@
         <h2 class="text-xl md:text-2xl font-bold tracking-tight text-stone-900">
           选择学科进入专题演示
         </h2>
-        <span class="text-xs font-mono text-stone-500 whitespace-nowrap">6 大学科门类 · 19 个独立系统</span>
+        <span class="text-xs font-mono text-stone-500 whitespace-nowrap">6 大学科门类 · 22 个独立系统</span>
       </div>
 
       <!-- Discipline Cards Grid (2x3 or 3x2 responsive) -->
@@ -338,7 +338,7 @@
                 </div>
               </div>
               <span class="text-xs font-mono text-sky-700 font-semibold bg-sky-50 px-2 py-0.5 rounded border border-sky-200 whitespace-nowrap flex-shrink-0">
-                5 个模块
+                8 个模块
               </span>
             </div>
 
@@ -364,6 +364,18 @@
                 <span class="w-1.5 h-1.5 rounded-full bg-sky-500 flex-shrink-0"></span>
                 <span class="truncate">哈夫曼树与变长子网划分 (VLSM) 机制</span>
               </div>
+              <div class="flex items-center gap-2 text-xs text-stone-800 font-medium py-1.5 px-2.5 rounded-lg bg-stone-50 border border-stone-200/80 group-hover:border-sky-200 transition-colors">
+                <span class="w-1.5 h-1.5 rounded-full bg-sky-500 flex-shrink-0"></span>
+                <span class="truncate">DHCP DORA 四步报文交互过程</span>
+              </div>
+              <div class="flex items-center gap-2 text-xs text-stone-800 font-medium py-1.5 px-2.5 rounded-lg bg-stone-50 border border-stone-200/80 group-hover:border-sky-200 transition-colors">
+                <span class="w-1.5 h-1.5 rounded-full bg-sky-500 flex-shrink-0"></span>
+                <span class="truncate">ARP 协议工作流程与跨网路由转发</span>
+              </div>
+              <div class="flex items-center gap-2 text-xs text-stone-800 font-medium py-1.5 px-2.5 rounded-lg bg-stone-50 border border-stone-200/80 group-hover:border-sky-200 transition-colors">
+                <span class="w-1.5 h-1.5 rounded-full bg-sky-500 flex-shrink-0"></span>
+                <span class="truncate">NAT 网络地址转换与 NAPT 端口多路复用</span>
+              </div>
             </div>
           </div>
 
@@ -380,12 +392,12 @@
       <!-- Bottom Jump Links to All Projects & 408 Overall -->
       <div class="pt-6 flex flex-wrap items-center justify-center gap-4 text-center border-t border-[#E5E4DC]">
         <button onclick="switchView('all')" class="text-xs font-mono text-stone-500 hover:text-stone-900 transition-colors inline-flex items-center gap-1 py-1.5 px-3 rounded-lg hover:bg-stone-200/50">
-          <span>展开全部 19 个独立演示卡片</span>
+          <span>展开全部 22 个独立演示卡片</span>
           <span>&darr;</span>
         </button>
         <span class="text-stone-300">|</span>
         <button onclick="switchView('cs')" class="text-xs font-mono text-indigo-600 hover:text-indigo-900 transition-colors inline-flex items-center gap-1 py-1.5 px-3 rounded-lg hover:bg-indigo-50">
-          <span>计算机408统考全科综合展厅 (13 个模块)</span>
+          <span>计算机408统考全科综合展厅 (16 个模块)</span>
           <span>&rarr;</span>
         </button>
       </div>
@@ -410,10 +422,10 @@
         <!-- Discipline Switcher Pill Bar -->
         <div class="flex flex-wrap items-center bg-[#EBEAE3] p-0.5 rounded-xl border border-[#DCDAD0] text-xs font-medium gap-0.5">
           <button onclick="switchView('all')" id="btn-tab-all" class="pill-btn px-2.5 py-1 rounded-lg text-stone-600 hover:text-stone-900">
-            全部 (16)
+            全部 (20)
           </button>
           <button onclick="switchView('math')" id="btn-tab-math" class="pill-btn px-2.5 py-1 rounded-lg text-stone-600 hover:text-stone-900">
-            高等数学 (3)
+            高等数学 (4)
           </button>
           <button onclick="switchView('prob')" id="btn-tab-prob" class="pill-btn px-2.5 py-1 rounded-lg text-stone-600 hover:text-stone-900">
             概率统计 (2)
@@ -425,13 +437,13 @@
             计组原理 (2)
           </button>
           <button onclick="switchView('os')" id="btn-tab-os" class="pill-btn px-2.5 py-1 rounded-lg text-stone-600 hover:text-stone-900">
-            操作系统 (3)
+            操作系统 (5)
           </button>
           <button onclick="switchView('net')" id="btn-tab-net" class="pill-btn px-2.5 py-1 rounded-lg text-stone-600 hover:text-stone-900">
-            计算机网络 (5)
+            计算机网络 (6)
           </button>
           <button onclick="switchView('cs')" id="btn-tab-cs" class="pill-btn px-2.5 py-1 rounded-lg text-stone-600 hover:text-stone-900">
-            408全科 (11)
+            408全科 (14)
           </button>
         </div>
       </div>
@@ -890,6 +902,36 @@
 
         <!-- ==================== COMPUTER NETWORKS CARDS ==================== -->
 
+        <!-- Card: DHCP DORA Visualizer -->
+        <a href="DHCP工作过程/index.html" data-discipline="net" class="card-project rounded-2xl p-6 flex flex-col justify-between gap-6 group">
+          <div class="flex flex-col gap-3">
+            <div class="flex items-center justify-between">
+              <span class="px-2.5 py-1 rounded-md text-[11px] font-mono font-semibold bg-sky-50 text-sky-700 border border-sky-200">
+                计算机网络
+              </span>
+              <span class="text-xs font-mono text-sky-600 font-medium flex items-center gap-1">
+                <span class="w-2 h-2 rounded-full bg-sky-500"></span>
+                60fps DORA 报文流动画
+              </span>
+            </div>
+
+            <h3 class="text-lg font-semibold text-stone-900 group-hover:text-sky-700 transition-colors">
+              DHCP DORA 四步报文交互过程
+            </h3>
+
+            <p class="text-xs text-stone-600 leading-relaxed">
+              以左侧 DHCP 服务器与右侧客户端为主视觉，逐步演示 Discover、Offer、Request、ACK 报文在链路上的传输方向；实时对照源/目的 IP、源/目的 MAC、UDP 67/68 端口与最终租约生效状态。
+            </p>
+          </div>
+
+          <div class="pt-4 border-t border-[#ECEBE4] flex items-center justify-between font-mono text-xs text-stone-500">
+            <span>DORA · Broadcast · UDP 67/68 · Lease</span>
+            <span class="text-stone-900 font-medium group-hover:translate-x-1 transition-transform inline-flex items-center gap-1">
+              进入演示 &rarr;
+            </span>
+          </div>
+        </a>
+
         <!-- Card: GBN Protocol Visualizer -->
         <a href="回退N帧协议/index.html" data-discipline="net" class="card-project rounded-2xl p-6 flex flex-col justify-between gap-6 group">
           <div class="flex flex-col gap-3">
@@ -1040,6 +1082,66 @@
           </div>
         </a>
 
+        <!-- Project Card 21: ARP Protocol Workflow (ARP 协议工作流程与跨网路由转发) -->
+        <a href="ARP协议工作流程/index.html" class="card-project rounded-2xl p-6 flex flex-col justify-between gap-5 group" data-discipline="net">
+          <div class="flex flex-col gap-3">
+            <div class="flex items-center justify-between">
+              <span class="px-2.5 py-1 rounded-md text-[11px] font-mono font-semibold bg-sky-50 text-sky-700 border border-sky-200">
+                计算机网络
+              </span>
+              <span class="text-xs font-mono text-sky-600 font-medium flex items-center gap-1">
+                <span class="w-2 h-2 rounded-full bg-sky-500"></span>
+                60fps 封装解封与路由表检索
+              </span>
+            </div>
+
+            <h3 class="text-lg font-semibold text-stone-900 group-hover:text-sky-700 transition-colors">
+              ARP 协议工作流程与跨网路由转发
+            </h3>
+
+            <p class="text-xs text-stone-600 leading-relaxed">
+              立足 408 核心考点，涵盖同网络（4台主机、冷启动广播解析、非目的硬件丢弃、目的解封装剥除MAC帧头、丝滑无跳变ARP缓存表更新与缓存命中对比）与跨网络（双子网、路由器动态检索路由表确定出接口与下一跳IP、分段ARP解析与双向转发交付）各3次经典流程。
+            </p>
+          </div>
+
+          <div class="pt-4 border-t border-[#ECEBE4] flex items-center justify-between font-mono text-xs text-stone-500">
+            <span>ARP 广播 vs 单播 · 路由表检索 · 逐跳 MAC 重写 · 丝滑缓存</span>
+            <span class="text-stone-900 font-medium group-hover:translate-x-1 transition-transform inline-flex items-center gap-1">
+              进入演示 &rarr;
+            </span>
+          </div>
+        </a>
+
+        <!-- Project Card 22: NAT & NAPT Address Translation (NAT 网络地址转换与 NAPT 端口多路复用) -->
+        <a href="NAT网络地址转换/index.html" class="card-project rounded-2xl p-6 flex flex-col justify-between gap-5 group" data-discipline="net">
+          <div class="flex flex-col gap-3">
+            <div class="flex items-center justify-between">
+              <span class="px-2.5 py-1 rounded-md text-[11px] font-mono font-semibold bg-sky-50 text-sky-700 border border-sky-200">
+                计算机网络
+              </span>
+              <span class="text-xs font-mono text-sky-600 font-medium flex items-center gap-1">
+                <span class="w-2 h-2 rounded-full bg-sky-500"></span>
+                60fps 渐变地址映射与端口复用
+              </span>
+            </div>
+
+            <h3 class="text-lg font-semibold text-stone-900 group-hover:text-sky-700 transition-colors">
+              NAT 网络地址转换与 NAPT 端口多路复用
+            </h3>
+
+            <p class="text-xs text-stone-600 leading-relaxed">
+              立足 408 核心考点，完整演示普通 NAT（不同公网IP动态分配、私变公 SNAT / 公变私 DNAT 渐变过渡动画、地址池耗尽机制）与 NAPT（单公网IP、源/目的端口多路复用与解复用、同本地端口冲突消解），并配备 NAT 转换表实时丝滑展开与实时报文监视器。
+            </p>
+          </div>
+
+          <div class="pt-4 border-t border-[#ECEBE4] flex items-center justify-between font-mono text-xs text-stone-500">
+            <span>私变公 SNAT · 公变私 DNAT · 端口复用 · 转换表动态更新</span>
+            <span class="text-stone-900 font-medium group-hover:translate-x-1 transition-transform inline-flex items-center gap-1">
+              进入演示 &rarr;
+            </span>
+          </div>
+        </a>
+
       </div>
     </section>
 
@@ -1092,21 +1194,21 @@
         title: '计算机网络',
         badge: '计算机网络',
         badgeColor: 'bg-sky-50 text-sky-800 border-sky-200',
-        count: '共 5 个独立演示模块',
+        count: '共 8 个独立演示模块',
         desc: ''
       },
       cs: {
         title: '计算机专业基础 (408)',
         badge: '408 全科综合',
         badgeColor: 'bg-indigo-50 text-indigo-700 border-indigo-200',
-        count: '共 13 个独立演示模块',
+        count: '共 16 个独立演示模块',
         desc: ''
       },
       all: {
         title: '全部学科演示模块清单',
         badge: '全学科总览',
         badgeColor: 'bg-stone-100 text-stone-800 border-stone-300',
-        count: '共 19 个独立演示模块',
+        count: '共 22 个独立演示模块',
         desc: ''
       }
     };

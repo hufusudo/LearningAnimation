@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NAT 网络地址转换与 NAPT 端口多路复用 - 408 核心可视化</title>
+
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['-apple-system', 'BlinkMacSystemFont', 'SF Pro Display', 'Segoe UI', 'Roboto', 'sans-serif'],
+            mono: ['JetBrains Mono', 'Fira Code', 'monospace']
+          },
+          colors: {
+            paper: '#FAF9F5',
+            line: '#E5E4DC'
+          }
+        }
+      }
+    }
+  </script>
+
+  <!-- GSAP CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+
+  <!-- Custom Stylesheet -->
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="min-h-screen bg-[#FAF9F5] text-stone-900 flex flex-col justify-between antialiased selection:bg-stone-200">
+
+  <!-- ============================================================ -->
+  <!-- 极简顶栏 Header -->
+  <!-- ============================================================ -->
+  <header class="border-b border-[#E5E4DC] bg-[#FAF9F5]/95 backdrop-blur sticky top-0 z-40 px-4 sm:px-6 py-2.5">
+    <div class="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-3">
+      <div class="flex items-center gap-3">
+        <a href="../index.html#net" class="w-7 h-7 rounded-lg bg-stone-900 text-white flex items-center justify-center font-mono font-bold text-xs hover:bg-stone-800 transition-colors shadow-sm" title="返回计算机网络展厅">
+          ←
+        </a>
+        <div>
+          <h1 class="text-base font-bold tracking-tight text-stone-900 flex items-center gap-2">
+            NAT 网络地址转换与 NAPT 端口多路复用
+            <span class="text-xs font-mono font-normal px-2 py-0.5 rounded bg-sky-50 text-sky-700 border border-sky-200">408 核心考点</span>
+          </h1>
+        </div>
+      </div>
+
+      <!-- 模式切换控制器 (普通 NAT vs 端口 NAPT) -->
+      <div class="flex items-center gap-2">
+        <div class="flex items-center p-1 bg-stone-200/70 rounded-xl text-xs font-mono">
+          <button id="tab-mode-basic" onclick="switchNatMode('basic')" class="px-3 py-1.5 rounded-lg font-bold bg-white text-stone-900 shadow-sm transition-all">
+            ① 普通 NAT (分配不同公网 IP)
+          </button>
+          <button id="tab-mode-napt" onclick="switchNatMode('napt')" class="px-3 py-1.5 rounded-lg font-medium text-stone-600 hover:text-stone-900 transition-all">
+            ② NAPT / 端口 NAT (单公网 IP + 端口复用)
+          </button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- ============================================================ -->
+  <!-- 主舞台 -->
+  <!-- ============================================================ -->
+  <main class="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 py-4 space-y-4">
+
+    <!-- ========================================================== -->
+    <!-- 控制器卡片 (流程选择 + 播放控制) -->
+    <!-- ========================================================== -->
+    <section class="bg-white border border-[#E5E4DC] rounded-2xl p-4 shadow-sm space-y-3">
+      
+      <!-- 普通 NAT 流程选择按钮 -->
+      <div id="flow-btns-basic" class="grid grid-cols-1 md:grid-cols-3 gap-2.5">
+        <button id="basic-flow-1" onclick="selectFlow('basic', 1)" class="flow-step-tab active text-left p-3 rounded-xl border border-stone-900 bg-stone-900 text-white transition-all shadow-sm">
+          <div class="flex items-center justify-between text-xs font-mono opacity-85 mb-1">
+            <span>流程 1 · 主机 A 发送与响应</span>
+            <span class="px-1.5 py-0.5 rounded bg-amber-400/20 text-amber-300 text-[10px]">Host A ➔ Server</span>
+          </div>
+          <div class="text-xs font-bold truncate">主机 A 转换为公网 IP 1</div>
+          <div class="text-[11px] opacity-75 truncate mt-0.5">私变公(SNAT) ➔ 经云朵 ➔ 回包公变私(DNAT)</div>
+        </button>
+
+        <button id="basic-flow-2" onclick="selectFlow('basic', 2)" class="flow-step-tab text-left p-3 rounded-xl border border-[#E5E4DC] bg-stone-50 text-stone-800 hover:border-stone-400 transition-all">
+          <div class="flex items-center justify-between text-xs font-mono text-stone-500 mb-1">
+            <span>流程 2 · 主机 B 独立公网 IP</span>
+            <span class="px-1.5 py-0.5 rounded bg-sky-50 text-sky-700 text-[10px] border border-sky-200">Host B ➔ Server</span>
+          </div>
+          <div class="text-xs font-bold truncate">主机 B 转换为公网 IP 2</div>
+          <div class="text-[11px] text-stone-500 truncate mt-0.5">从 IP 池分配不同公网 IP，双映射独立运行</div>
+        </button>
+
+        <button id="basic-flow-3" onclick="selectFlow('basic', 3)" class="flow-step-tab text-left p-3 rounded-xl border border-[#E5E4DC] bg-stone-50 text-stone-800 hover:border-stone-400 transition-all">
+          <div class="flex items-center justify-between text-xs font-mono text-stone-500 mb-1">
+            <span>流程 3 · 双机并发与池耗尽</span>
+            <span class="px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 text-[10px] border border-emerald-200">双机并发</span>
+          </div>
+          <div class="text-xs font-bold truncate">双机同时在线 · 考点对比</div>
+          <div class="text-[11px] text-stone-500 truncate mt-0.5">普通 NAT 需 1:1 消耗公网 IP，凸显 NAPT 必要性</div>
+        </button>
+      </div>
+
+      <!-- NAPT 流程选择按钮 -->
+      <div id="flow-btns-napt" class="hidden grid grid-cols-1 md:grid-cols-3 gap-2.5">
+        <button id="napt-flow-1" onclick="selectFlow('napt', 1)" class="flow-step-tab active text-left p-3 rounded-xl border border-stone-900 bg-stone-900 text-white transition-all shadow-sm">
+          <div class="flex items-center justify-between text-xs font-mono opacity-85 mb-1">
+            <span>流程 1 · 单公网 IP + 端口映射</span>
+            <span class="px-1.5 py-0.5 rounded bg-amber-400/20 text-amber-300 text-[10px]">Host A ➔ Server</span>
+          </div>
+          <div class="text-xs font-bold truncate">主机 A 端口转换 (50001 ➔ 30001)</div>
+          <div class="text-[11px] opacity-75 truncate mt-0.5">IP 与端口同时渐变，私变公(SNAT) 与回包(DNAT)</div>
+        </button>
+
+        <button id="napt-flow-2" onclick="selectFlow('napt', 2)" class="flow-step-tab text-left p-3 rounded-xl border border-[#E5E4DC] bg-stone-50 text-stone-800 hover:border-stone-400 transition-all">
+          <div class="flex items-center justify-between text-xs font-mono text-stone-500 mb-1">
+            <span>流程 2 · 同端口号冲突解决</span>
+            <span class="px-1.5 py-0.5 rounded bg-sky-50 text-sky-700 text-[10px] border border-sky-200">同为 50001 端口</span>
+          </div>
+          <div class="text-xs font-bold truncate">主机 B 同端口 50001 (➔ 30002)</div>
+          <div class="text-[11px] text-stone-500 truncate mt-0.5">408 经典：同内网端口通过不同外网端口多路复用</div>
+        </button>
+
+        <button id="napt-flow-3" onclick="selectFlow('napt', 3)" class="flow-step-tab text-left p-3 rounded-xl border border-[#E5E4DC] bg-stone-50 text-stone-800 hover:border-stone-400 transition-all">
+          <div class="flex items-center justify-between text-xs font-mono text-stone-500 mb-1">
+            <span>流程 3 · 双回包根据端口精准分流</span>
+            <span class="px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 text-[10px] border border-emerald-200">回包解复用</span>
+          </div>
+          <div class="text-xs font-bold truncate">服务器回包 · 端口精准寻址</div>
+          <div class="text-[11px] text-stone-500 truncate mt-0.5">目的端口 30001 ➔ A，30002 ➔ B，公变私各得其所</div>
+        </button>
+      </div>
+
+      <!-- 播放控制行 -->
+      <div class="flex flex-wrap items-center justify-between gap-3 pt-2.5 border-t border-stone-100">
+        <div class="flex flex-wrap items-center gap-2">
+          <button id="btn-play" onclick="togglePlay()" class="ctrl-btn px-4 py-1.5 rounded-lg bg-stone-900 hover:bg-stone-800 text-white font-mono text-xs font-semibold flex items-center gap-1.5 shadow-sm transition-all">
+            <span id="play-icon">▶</span>
+            <span id="play-text">自动连续演示</span>
+          </button>
+
+          <button id="btn-prev" onclick="prevStep()" class="ctrl-btn px-3 py-1.5 rounded-lg border border-[#E5E4DC] hover:border-stone-400 bg-white text-stone-700 text-xs font-mono transition-all">
+            ⏮ 上一步
+          </button>
+
+          <button id="btn-next" onclick="nextStep()" class="ctrl-btn px-3 py-1.5 rounded-lg border border-[#E5E4DC] hover:border-stone-400 bg-white text-stone-700 text-xs font-mono transition-all">
+            下一步 ⏭
+          </button>
+
+          <button id="btn-reset" onclick="resetCurrentScenario()" class="ctrl-btn px-3 py-1.5 rounded-lg border border-[#E5E4DC] hover:border-stone-400 bg-white text-stone-600 text-xs font-mono transition-all">
+            ↺ 重置拓扑与表
+          </button>
+
+          <!-- 动画状态胶囊 -->
+          <div class="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-stone-100 border border-stone-200 text-xs font-mono text-stone-600">
+            <span id="state-dot" class="w-2 h-2 rounded-full bg-emerald-500"></span>
+            <span id="state-text">就绪</span>
+          </div>
+        </div>
+
+        <!-- 播放速度选择 -->
+        <div class="flex items-center gap-3 text-xs font-mono text-stone-500">
+          <div class="flex items-center gap-1">
+            <span>速率:</span>
+            <button onclick="setSpeed(0.6)" class="speed-pill px-2 py-0.8 rounded border border-[#E5E4DC] text-stone-600 hover:border-stone-400">0.6x</button>
+            <button onclick="setSpeed(1.0)" class="speed-pill active px-2 py-0.8 rounded border border-stone-900 bg-stone-900 text-white font-bold">1.0x</button>
+            <button onclick="setSpeed(1.8)" class="speed-pill px-2 py-0.8 rounded border border-[#E5E4DC] text-stone-600 hover:border-stone-400">1.8x</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========================================================== -->
+    <!-- 实时报文透视与转换监测器 (Live NAT Inspector) -->
+    <!-- ========================================================== -->
+    <section class="bg-white border border-[#E5E4DC] rounded-2xl p-3.5 shadow-sm space-y-2">
+      <div class="flex flex-wrap items-center justify-between gap-2 border-b border-stone-100 pb-2">
+        <div class="flex items-center gap-2">
+          <span class="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span>
+          <span class="text-xs font-bold text-stone-900 font-mono">NAT 地址转换与报文透视监测器</span>
+          <span id="nat-direction-badge" class="px-2 py-0.5 rounded text-[11px] font-mono bg-stone-100 text-stone-600 border border-stone-200">
+            等待报文生成
+          </span>
+        </div>
+        <div class="text-xs font-mono text-stone-500 flex items-center gap-1.5">
+          <span>转换性质:</span>
+          <span id="nat-type-badge" class="font-semibold text-stone-800">--</span>
+        </div>
+      </div>
+
+      <!-- 字段卡片网格 -->
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs font-mono">
+        <div class="p-2.5 rounded-xl bg-stone-50 border border-stone-200">
+          <div class="text-[10px] text-stone-400 uppercase">源 IP (Source IP)</div>
+          <div id="insp-sip" class="font-bold text-stone-800 text-sm truncate mt-0.5">--</div>
+          <div id="insp-sip-note" class="text-[10px] text-stone-500 truncate">--</div>
+        </div>
+        <div class="p-2.5 rounded-xl bg-stone-50 border border-stone-200">
+          <div class="text-[10px] text-stone-400 uppercase">目的 IP (Destination IP)</div>
+          <div id="insp-dip" class="font-bold text-stone-800 text-sm truncate mt-0.5">--</div>
+          <div id="insp-dip-note" class="text-[10px] text-stone-500 truncate">--</div>
+        </div>
+        <div class="p-2.5 rounded-xl bg-stone-50 border border-stone-200">
+          <div class="text-[10px] text-stone-400 uppercase">源端口 (Src Port)</div>
+          <div id="insp-sport" class="font-bold text-stone-800 text-sm truncate mt-0.5">--</div>
+          <div id="insp-sport-note" class="text-[10px] text-stone-500 truncate">--</div>
+        </div>
+        <div class="p-2.5 rounded-xl bg-stone-50 border border-stone-200">
+          <div class="text-[10px] text-stone-400 uppercase">目的端口 (Dst Port)</div>
+          <div id="insp-dport" class="font-bold text-stone-800 text-sm truncate mt-0.5">--</div>
+          <div id="insp-dport-note" class="text-[10px] text-stone-500 truncate">--</div>
+        </div>
+      </div>
+
+      <!-- 实时动作解说条 -->
+      <div id="inspector-desc" class="p-2 rounded-xl bg-amber-50/70 border border-amber-200/80 text-xs text-amber-900 flex items-center justify-between">
+        <span id="desc-text" class="leading-relaxed">准备就绪。点击上方流程或“自动连续演示”观察 NAT 地址与端口渐变转换过程。</span>
+        <span id="desc-step" class="text-[11px] font-mono text-amber-700 flex-shrink-0 ml-2 font-bold">步骤 0 / 6</span>
+      </div>
+    </section>
+
+    <!-- ========================================================== -->
+    <!-- 舞台视图：内网双主机 ➔ NAT 路由器 ➔ 互联网云朵 ➔ 目的服务器 -->
+    <!-- ========================================================== -->
+    <div id="stage-nat-container" class="relative bg-white border border-[#E5E4DC] rounded-2xl p-4 min-h-[620px] shadow-sm overflow-hidden flex flex-col justify-between">
+      
+      <!-- SVG 动态拓扑连线层 -->
+      <svg id="svg-nat-links" class="absolute inset-0 w-full h-full pointer-events-none z-0">
+        <!-- 由 JS 计算绘制 -->
+      </svg>
+
+      <!-- 飞行报文容器层 -->
+      <div id="packets-layer-nat" class="absolute inset-0 pointer-events-none z-30">
+        <!-- 飞行中的报文胶囊与其上方跟随浮窗 -->
+      </div>
+
+      <!-- 核心水平网格：内网 (左) ➔ NAT 路由器 (中左) ➔ 互联网云朵 (中右) ➔ 目的服务器 (右) -->
+      <div class="grid grid-cols-1 lg:grid-cols-12 gap-4 relative z-10 my-auto items-stretch">
+        
+        <!-- 1. 左侧：局域网 (LAN 192.168.1.0/24) 与双主机 -->
+        <div class="lg:col-span-3 bg-stone-50/70 border border-dashed border-stone-300 rounded-2xl p-3 flex flex-col justify-between gap-3">
+          <div class="flex items-center justify-between border-b border-stone-200 pb-1.5">
+            <span class="text-xs font-mono font-bold text-sky-800 flex items-center gap-1.5">
+              🏠 私网 / 局域网 (LAN)
+            </span>
+            <span class="text-[10px] font-mono text-stone-500 bg-sky-50 px-1.5 py-0.5 rounded border border-sky-200">192.168.1.0/24</span>
+          </div>
+
+          <!-- 主机 A (Host A) -->
+          <div id="nat-host-a" class="host-node-card bg-white border-2 border-[#E5E4DC] rounded-xl p-3 shadow-sm transition-all duration-300">
+            <div class="flex items-center justify-between border-b border-stone-100 pb-1 mb-1">
+              <div class="flex items-center gap-1.5">
+                <div class="w-2.5 h-2.5 rounded-full bg-sky-500"></div>
+                <span class="font-mono font-bold text-xs text-stone-900">主机 A (Host A)</span>
+                <span id="ha-badge" class="px-1 py-0.2 rounded text-[9px] font-mono bg-stone-100 text-stone-600">就绪</span>
+              </div>
+              <span class="font-mono text-[11px] font-bold text-stone-800">192.168.1.2</span>
+            </div>
+            <div class="text-[10px] font-mono text-stone-500 flex justify-between mb-1.5">
+              <span>端口: <b id="ha-port-display" class="text-stone-700">50001</b></span>
+              <span>网关: 192.168.1.1</span>
+            </div>
+            <!-- 主机 A 报文槽 -->
+            <div id="ha-slot" class="encap-slot min-h-[46px] rounded-lg border border-dashed border-stone-300 bg-stone-50/50 p-1 flex items-center justify-center text-[10px] font-mono text-stone-400">
+              <span class="encap-label">待发缓冲区空闲</span>
+            </div>
+          </div>
+
+          <!-- 局域网交换机小节点 -->
+          <div id="lan-switch-node" class="bg-stone-800 text-white py-1 px-3 rounded-lg text-center font-mono text-[10px] shadow-sm flex items-center justify-between">
+            <span>LAN 交换机</span>
+            <span class="text-stone-400 text-[9px]">网关: 192.168.1.1</span>
+          </div>
+
+          <!-- 主机 B (Host B) -->
+          <div id="nat-host-b" class="host-node-card bg-white border-2 border-[#E5E4DC] rounded-xl p-3 shadow-sm transition-all duration-300">
+            <div class="flex items-center justify-between border-b border-stone-100 pb-1 mb-1">
+              <div class="flex items-center gap-1.5">
+                <div class="w-2.5 h-2.5 rounded-full bg-indigo-500"></div>
+                <span class="font-mono font-bold text-xs text-stone-900">主机 B (Host B)</span>
+                <span id="hb-badge" class="px-1 py-0.2 rounded text-[9px] font-mono bg-stone-100 text-stone-600">就绪</span>
+              </div>
+              <span class="font-mono text-[11px] font-bold text-stone-800">192.168.1.3</span>
+            </div>
+            <div class="text-[10px] font-mono text-stone-500 flex justify-between mb-1.5">
+              <span>端口: <b id="hb-port-display" class="text-stone-700">50001</b></span>
+              <span>网关: 192.168.1.1</span>
+            </div>
+            <!-- 主机 B 报文槽 -->
+            <div id="hb-slot" class="encap-slot min-h-[46px] rounded-lg border border-dashed border-stone-300 bg-stone-50/50 p-1 flex items-center justify-center text-[10px] font-mono text-stone-400">
+              <span class="encap-label">待发缓冲区空闲</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 2. 中左：NAT 路由器 (带双接口、转换表与渐变转换透视区) -->
+        <div id="nat-router-card" class="lg:col-span-4 bg-white border-2 border-stone-900 rounded-2xl p-3 shadow-md flex flex-col justify-between gap-3">
+          <div class="flex items-center justify-between border-b border-stone-200 pb-2">
+            <div class="flex items-center gap-2">
+              <span class="text-base">🔀</span>
+              <span class="font-mono font-bold text-xs text-stone-900">NAT 路由器 (NAT Router)</span>
+            </div>
+            <span id="router-status-badge" class="px-2 py-0.5 rounded text-[10px] font-mono bg-stone-100 text-stone-700 border border-stone-300">
+              待转换
+            </span>
+          </div>
+
+          <!-- 双接口信息 -->
+          <div class="grid grid-cols-2 gap-2 text-[10px] font-mono">
+            <div id="router-lan-card" class="p-2 rounded-lg bg-sky-50/70 border border-sky-200">
+              <div class="font-bold text-sky-800">内网接口 (LAN)</div>
+              <div>IP: <b>192.168.1.1</b></div>
+              <div class="text-stone-500 text-[9px]">连接私有网络</div>
+            </div>
+            <div id="router-wan-card" class="p-2 rounded-lg bg-amber-50/70 border border-amber-200">
+              <div class="font-bold text-amber-800 flex items-center justify-between">
+                <span>外网接口 (WAN)</span>
+                <span id="wan-mode-tag" class="text-[9px] text-amber-600 font-bold">IP 池</span>
+              </div>
+              <div id="wan-ip-display">IP: <b>210.38.10.1</b></div>
+              <div id="wan-pool-desc" class="text-stone-500 text-[9px]">公网 IP 池: 210.38.10.1~2</div>
+            </div>
+          </div>
+
+          <!-- 核心：地址渐变转换透视区 (Address Morphing Engine) -->
+          <div class="border border-stone-200 rounded-xl p-2.5 bg-[#FAF9F5] space-y-1.5">
+            <div class="flex items-center justify-between">
+              <span class="text-[11px] font-bold text-stone-800 flex items-center gap-1">
+                ⚡ 地址与端口渐变转换透视
+              </span>
+              <span id="morph-direction-tag" class="px-2 py-0.2 rounded text-[10px] font-mono font-bold bg-stone-200 text-stone-600">
+                静止中
+              </span>
+            </div>
+
+            <!-- 渐变展示条 -->
+            <div id="morph-stage-box" class="min-h-[68px] p-2 rounded-lg border border-dashed border-stone-300 bg-white flex items-center justify-center text-[10px] font-mono text-stone-400 overflow-x-auto">
+              <span class="text-stone-400">等待报文穿过 NAT 边界...</span>
+            </div>
+          </div>
+
+          <!-- 核心：NAT 转换表 (NAT Translation Table) -->
+          <div class="border border-stone-200 rounded-xl p-2 bg-white">
+            <div class="flex items-center justify-between mb-1">
+              <span class="text-[11px] font-bold text-stone-800 flex items-center gap-1">
+                📋 NAT 转换表 (NAT Table)
+              </span>
+              <span id="nat-table-count" class="text-[9px] font-mono text-stone-400">0 条目</span>
+            </div>
+
+            <div class="overflow-x-auto">
+              <table class="w-full text-left font-mono text-[9px] border-collapse">
+                <thead>
+                  <tr class="text-stone-400 border-b border-stone-200">
+                    <th id="th-col-1" class="pb-1">私网 IP</th>
+                    <th id="th-col-2" class="pb-1">公网 IP</th>
+                    <th id="th-col-3" class="pb-1">状态</th>
+                  </tr>
+                </thead>
+                <tbody id="nat-table-body">
+                  <tr class="empty-row text-stone-400 text-center">
+                    <td colspan="3" class="py-2">暂无转换表项 (冷启动)</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- 3. 中右：互联网 (动态 SVG 云朵 代替) -->
+        <div class="lg:col-span-3 flex flex-col items-center justify-center p-2">
+          <div id="internet-cloud-box" class="relative group flex flex-col items-center justify-center w-full max-w-[240px] py-4 transition-transform duration-300 hover:scale-105">
+            <!-- 动态手绘质感 SVG 云朵 -->
+            <svg class="w-44 h-28 drop-shadow-md text-sky-100 hover:text-sky-200 transition-colors" viewBox="0 0 120 80" fill="currentColor">
+              <path d="M 25,60 
+                       A 18,18 0 0,1 25,24 
+                       A 24,24 0 0,1 65,15 
+                       A 22,22 0 0,1 98,30 
+                       A 16,16 0 0,1 98,60 
+                       Z" stroke="#38BDF8" stroke-width="2" stroke-linejoin="round"/>
+            </svg>
+            
+            <!-- 云朵中心标识 -->
+            <div class="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+              <span class="text-xs font-bold text-sky-900 font-mono tracking-wide flex items-center gap-1">
+                ☁️ 互联网
+              </span>
+              <span class="text-[9px] font-mono text-sky-600 bg-white/80 px-1.5 py-0.2 rounded mt-0.5 border border-sky-200 shadow-xs">
+                Internet WAN
+              </span>
+              <span class="text-[8px] font-mono text-stone-400 mt-0.5">公网 IP 路由传输</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 4. 右侧：公网目的主机 / Web 服务器 -->
+        <div class="lg:col-span-2 bg-stone-50/70 border border-dashed border-stone-300 rounded-2xl p-3 flex flex-col justify-between gap-3">
+          <div class="flex items-center justify-between border-b border-stone-200 pb-1.5">
+            <span class="text-xs font-mono font-bold text-emerald-800 flex items-center gap-1.5">
+              🌐 目的主机
+            </span>
+            <span class="text-[9px] font-mono text-stone-500 bg-emerald-50 px-1 py-0.2 rounded border border-emerald-200">公网服务器</span>
+          </div>
+
+          <div id="dest-server-card" class="host-node-card bg-white border-2 border-[#E5E4DC] rounded-xl p-3 shadow-sm transition-all duration-300">
+            <div class="flex items-center justify-between border-b border-stone-100 pb-1 mb-1">
+              <div class="flex items-center gap-1.5">
+                <div class="w-2.5 h-2.5 rounded-full bg-emerald-500"></div>
+                <span class="font-mono font-bold text-xs text-stone-900">Web 服务器</span>
+              </div>
+              <span id="server-badge" class="px-1 py-0.2 rounded text-[9px] font-mono bg-stone-100 text-stone-600">服务正常</span>
+            </div>
+            <div class="text-[10px] font-mono text-stone-500 flex flex-col gap-0.5 mb-1.5">
+              <div>公网 IP: <b class="text-stone-800">203.0.113.88</b></div>
+              <div>服务端口: <b class="text-stone-800">80 (HTTP)</b></div>
+            </div>
+
+            <!-- 服务器报文槽位 -->
+            <div id="server-slot" class="encap-slot min-h-[46px] rounded-lg border border-dashed border-stone-300 bg-stone-50/50 p-1 flex items-center justify-center text-[10px] font-mono text-stone-400">
+              <span class="encap-label">等待客户请求</span>
+            </div>
+          </div>
+
+          <div class="p-2 rounded-xl bg-emerald-50/60 border border-emerald-200/80 text-[10px] font-mono text-emerald-900 leading-relaxed">
+            💡 目的服务器只认识公网 IP，根本不知道内网 192.168.1.x 的存在！
+          </div>
+        </div>
+
+      </div>
+
+    </div>
+
+    <!-- ========================================================== -->
+    <!-- 408 核心考点与原理剖析卡片 (Taste-Skill Obsidian Callouts) -->
+    <!-- ========================================================== -->
+    <section class="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div class="p-4 rounded-2xl bg-white border border-[#E5E4DC] shadow-sm space-y-2">
+        <div class="flex items-center gap-2 text-amber-800 font-bold text-xs">
+          <span class="w-2 h-2 rounded-full bg-amber-500"></span>
+          <span>考点 1：私变公 (SNAT) 与 公变私 (DNAT) 的本质</span>
+        </div>
+        <p class="text-xs text-stone-600 leading-relaxed">
+          <b>出局方向（私变公 / SNAT）</b>：内网主机发出数据时，NAT 路由器将 IP 报头中的<b>源 IP 地址（及源端口号）</b>替换为公网 IP，并在 NAT 表中记录映射；<br>
+          <b>入局方向（公变私 / DNAT）</b>：外网服务器回包到达时，NAT 路由器根据报头的<b>目的 IP 地址（及目的端口号）</b>查表，将目的地址替换回内网主机的私有 IP。
+        </p>
+      </div>
+
+      <div class="p-4 rounded-2xl bg-white border border-[#E5E4DC] shadow-sm space-y-2">
+        <div class="flex items-center gap-2 text-sky-800 font-bold text-xs">
+          <span class="w-2 h-2 rounded-full bg-sky-500"></span>
+          <span>考点 2：普通 NAT 与 NAPT 的核心区别</span>
+        </div>
+        <p class="text-xs text-stone-600 leading-relaxed">
+          <b>普通 NAT（Dynamic NAT）</b>：仅转换 IP 地址，不转换端口号。内网主机与公网 IP 是一对一映射，受限于公网 IP 数量，无法解决 IPv4 地址枯竭问题；<br>
+          <b>NAPT（Network Address Port Translation）</b>：同时转换 IP 和传输层端口号。成百上千台主机可<b>共享同一个公网 IP</b>，即使内网主机使用了相同的源端口，也能通过分配不同的外网端口完美解冲突！
+        </p>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- 页脚 -->
+  <footer class="border-t border-[#E5E4DC] py-4 px-6 text-center text-xs font-mono text-stone-400">
+    NAT & NAPT Workflow Interactive Demonstration · 408 计算机网络
+  </footer>
+
+  <!-- 引入主逻辑脚本 -->
+  <script src="app.js"></script>
+</body>
+</html>

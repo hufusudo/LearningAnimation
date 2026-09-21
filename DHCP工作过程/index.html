@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="DHCP DORA 四步交互动画，实时展示报文类型、IP 地址、MAC 地址与 UDP 端口。">
+  <title>DHCP 工作过程 · DORA 动画演示</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <a class="back-button" href="../index.html#net" aria-label="返回计算机网络展厅">←</a>
+      <div>
+        <h1>DHCP 工作过程</h1>
+        <p>Dynamic Host Configuration Protocol</p>
+      </div>
+      <span class="course-badge">408 · 计算机网络</span>
+    </div>
+  </header>
+
+  <main class="page-shell">
+    <section class="intro" aria-labelledby="page-title">
+      <div>
+        <p class="section-index">DORA 握手</p>
+        <h2 id="page-title">从“我是谁？”到“地址可用”</h2>
+      </div>
+      <p class="intro-copy">主机通过四次报文交换获得 IP 地址。观察报文方向，并留意客户端尚未配置 IP 时为何必须广播。</p>
+    </section>
+
+    <section class="simulator" aria-label="DHCP 动画演示器">
+      <div id="step-track" class="step-track" role="group" aria-label="DORA 四个阶段">
+        <button class="step-button is-active" data-step="0" type="button" aria-pressed="true">
+          <span class="step-number">1</span><span><b>DHCP DISCOVER</b><small>客户端寻找服务器</small></span>
+        </button>
+        <button class="step-button" data-step="1" type="button" aria-pressed="false">
+          <span class="step-number">2</span><span><b>DHCP OFFER</b><small>服务器提供地址</small></span>
+        </button>
+        <button class="step-button" data-step="2" type="button" aria-pressed="false">
+          <span class="step-number">3</span><span><b>DHCP REQUEST</b><small>客户端选择租约</small></span>
+        </button>
+        <button class="step-button" data-step="3" type="button" aria-pressed="false">
+          <span class="step-number">4</span><span><b>DHCP ACK</b><small>服务器确认租约</small></span>
+        </button>
+      </div>
+
+      <div id="network-stage" class="network-stage">
+        <div class="stage-grid" aria-hidden="true"></div>
+
+        <article id="dhcp-server" class="endpoint endpoint-server">
+          <div class="endpoint-status"><span></span>服务正常</div>
+          <div class="device-illustration server-illustration">
+            <div class="server-slot"></div><div class="server-slot"></div><div class="server-slot"></div>
+          </div>
+          <h3>DHCP 服务器</h3>
+          <dl>
+            <div><dt>IP</dt><dd>192.168.1.1</dd></div>
+            <div><dt>MAC</dt><dd>52:54:00:12:34:56</dd></div>
+          </dl>
+        </article>
+
+        <div class="link-zone" aria-label="以太网链路">
+          <div class="link-label"><span>LAN</span><span>UDP</span></div>
+          <div class="cable"><span class="cable-flow"></span></div>
+          <div id="packet-capsule" class="packet-capsule" aria-live="polite">
+            <div class="packet-heading">
+              <span class="packet-pulse"></span>
+              <strong>DHCP DISCOVER</strong>
+              <small>广播</small>
+            </div>
+            <div class="packet-fields" aria-label="当前报文四个地址字段">
+              <div><span>源 IP</span><b id="packet-source-ip">0.0.0.0</b></div>
+              <div><span>目的 IP</span><b id="packet-destination-ip">255.255.255.255</b></div>
+              <div><span>源 MAC</span><b id="packet-source-mac">08:00:27:6A:9C:21</b></div>
+              <div><span>目的 MAC</span><b id="packet-destination-mac">FF:FF:FF:FF:FF:FF</b></div>
+            </div>
+          </div>
+          <div class="direction-caption">
+            <span id="direction-icon">←</span>
+            <span id="direction-text">客户端 → 服务器</span>
+          </div>
+        </div>
+
+        <article id="dhcp-client" class="endpoint endpoint-client">
+          <div id="client-status" class="endpoint-status is-waiting"><span></span>等待地址</div>
+          <div class="device-illustration client-illustration">
+            <div class="screen-content"><span></span><span></span><span></span></div>
+          </div>
+          <h3>客户端主机</h3>
+          <dl>
+            <div><dt>IP</dt><dd id="client-ip">0.0.0.0</dd></div>
+            <div><dt>MAC</dt><dd>08:00:27:6A:9C:21</dd></div>
+          </dl>
+        </article>
+      </div>
+
+      <div class="current-message">
+        <div class="message-heading">
+          <div>
+            <span id="step-kicker">第 1 步 · 发现</span>
+            <h3 id="message-type">DHCP DISCOVER</h3>
+          </div>
+          <span id="broadcast-badge" class="broadcast-badge">◎ 二层 + 三层广播</span>
+        </div>
+
+        <p id="message-explanation" class="message-explanation">客户端刚接入网络，既没有 IP，也不知道 DHCP 服务器在哪里，因此发出全网广播。
+        </p>
+
+        <div class="field-grid">
+          <div class="field-card source-field">
+            <span class="field-label">源 IP</span>
+            <strong id="source-ip">0.0.0.0</strong>
+            <small id="source-ip-note">尚未分配</small>
+          </div>
+          <div class="field-card destination-field">
+            <span class="field-label">目的 IP</span>
+            <strong id="destination-ip">255.255.255.255</strong>
+            <small id="destination-ip-note">本网广播</small>
+          </div>
+          <div class="field-card source-field">
+            <span class="field-label">源 MAC</span>
+            <strong id="source-mac">08:00:27:6A:9C:21</strong>
+            <small id="source-mac-note">客户端网卡</small>
+          </div>
+          <div class="field-card destination-field">
+            <span class="field-label">目的 MAC</span>
+            <strong id="destination-mac">FF:FF:FF:FF:FF:FF</strong>
+            <small id="destination-mac-note">以太网广播</small>
+          </div>
+        </div>
+
+        <div class="message-meta">
+          <div><span>UDP 端口</span><strong id="port-flow">68 → 67</strong></div>
+          <div><span>交易 ID</span><strong>0x4A3F21C8</strong></div>
+          <div><span id="option-label">客户端请求</span><strong id="option-value">获取可用配置</strong></div>
+        </div>
+      </div>
+
+      <div class="controls" aria-label="播放控制">
+        <div class="control-group">
+          <button id="previous-button" class="icon-button" type="button" aria-label="上一步">←</button>
+          <button id="play-button" class="play-button" type="button"><span id="play-icon">▶</span><span id="play-label">自动演示</span></button>
+          <button id="next-button" class="icon-button" type="button" aria-label="下一步">→</button>
+          <button id="reset-button" class="text-button" type="button">重置</button>
+        </div>
+        <label class="speed-picker" for="speed-control">
+          <span>速度</span>
+          <input id="speed-control" type="range" min="0.6" max="1.8" step="0.2" value="1">
+          <output id="speed-output">1.0×</output>
+        </label>
+      </div>
+    </section>
+
+    <aside class="takeaway">
+      <span class="takeaway-mark">!</span>
+      <div><strong>为什么四步看起来都是广播？</strong><p>本演示设定客户端的 broadcast 标志为 1。在客户端正式安装协议栈地址前，服务器会以广播方式返回 OFFER 与 ACK，确保客户端能收到。</p></div>
+    </aside>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>

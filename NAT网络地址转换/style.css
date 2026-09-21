@@ -1,0 +1,362 @@
+/* ==========================================================================
+   Taste-Skill Light Editorial Aesthetic & Micro-Animation Stylesheet
+   NAT 网络地址转换与 NAPT 端口多路复用 (style.css)
+   ========================================================================== */
+
+/* 基础平滑渲染 */
+html {
+  scroll-behavior: smooth;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  background-color: #FAF9F5;
+  color: #1C1917;
+  font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+}
+
+/* 控制区与流程切换按钮 */
+.flow-step-tab {
+  cursor: pointer;
+  transition: all 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.flow-step-tab:hover:not(.active) {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px -2px rgba(0, 0, 0, 0.05);
+}
+
+.flow-step-tab.active {
+  box-shadow: 0 4px 14px -1px rgba(28, 25, 23, 0.2);
+}
+
+.ctrl-btn {
+  cursor: pointer;
+  transition: all 0.18s ease;
+}
+
+.ctrl-btn:hover {
+  transform: translateY(-1px);
+}
+
+.ctrl-btn:active {
+  transform: translateY(0);
+}
+
+.speed-pill {
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.speed-pill.active {
+  pointer-events: none;
+}
+
+/* 主机与设备节点卡片 */
+.host-node-card {
+  transition: border-color 0.3s ease, box-shadow 0.3s ease, transform 0.3s ease;
+}
+
+.host-node-card.is-active-src {
+  border-color: #0284C7 !important;
+  box-shadow: 0 0 0 3px rgba(2, 132, 199, 0.15), 0 8px 20px -4px rgba(2, 132, 199, 0.12);
+}
+
+.host-node-card.is-active-dst {
+  border-color: #059669 !important;
+  box-shadow: 0 0 0 3px rgba(5, 150, 105, 0.15), 0 8px 20px -4px rgba(5, 150, 105, 0.12);
+}
+
+/* 报文槽位 */
+.encap-slot {
+  position: relative;
+  overflow: hidden;
+  transition: all 0.25s ease;
+}
+
+/* ==========================================================================
+   地址渐变转换动画系统 (Address Morphing Engine)
+   ========================================================================== */
+.morph-wrapper {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+}
+
+.morph-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10.5px;
+  white-space: nowrap;
+  width: 100%;
+  padding: 1px 2px;
+}
+
+.morph-old-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: #F5F5F4;
+  border: 1px solid #E7E5E4;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.morph-old-text {
+  color: #44403C;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  display: inline-block;
+  transition: color 0.3s ease, opacity 0.3s ease;
+}
+
+.morph-strike-line {
+  position: absolute;
+  top: 50%;
+  left: 2px;
+  right: 2px;
+  height: 2px;
+  background: #DC2626; /* 醒目红色划线 */
+  border-radius: 1px;
+  transform: translateY(-50%) scaleX(0);
+  pointer-events: none;
+  box-shadow: 0 1px 2px rgba(220, 38, 38, 0.25);
+}
+
+.morph-arrow {
+  color: #D97706;
+  font-weight: bold;
+  font-size: 13px;
+  line-height: 1;
+  opacity: 0;
+  transform: scale(0.6);
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+}
+
+.morph-new {
+  color: #047857;
+  font-weight: bold;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10.5px;
+  background: #D1FAE5;
+  border: 1px solid #6EE7B7;
+  padding: 2px 6px;
+  border-radius: 4px;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  box-shadow: 0 0 10px rgba(16, 185, 129, 0.25);
+  flex-shrink: 0;
+}
+
+@keyframes glowPulse {
+  0% { box-shadow: 0 0 4px rgba(16, 185, 129, 0.2); }
+  100% { box-shadow: 0 0 12px rgba(16, 185, 129, 0.45); }
+}
+
+/* ==========================================================================
+   传输层端口号动效专用标签与横幅 (Port Chip & Banner)
+   ========================================================================== */
+.port-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  padding: 1px 4px;
+  margin: 0 1px;
+  border-radius: 4px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  font-weight: 700;
+  vertical-align: middle;
+  transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.port-chip-old {
+  background: #F3E8FF;
+  color: #7E22CE;
+  border: 1px solid #D8B4FE;
+}
+
+.port-chip-new {
+  background: #EDE9FE;
+  color: #6D28D9;
+  border: 1px solid #C4B5FD;
+  box-shadow: 0 0 8px rgba(124, 58, 237, 0.35);
+  animation: portGlowPulse 1.4s infinite alternate;
+}
+
+@keyframes portGlowPulse {
+  0% { box-shadow: 0 0 3px rgba(124, 58, 237, 0.2); }
+  100% { box-shadow: 0 0 10px rgba(124, 58, 237, 0.5); }
+}
+
+.port-colon {
+  opacity: 0.6;
+  font-weight: normal;
+  margin-right: 0.5px;
+}
+
+.port-num {
+  font-family: 'JetBrains Mono', monospace;
+  letter-spacing: 0.5px;
+  display: inline-block;
+}
+
+.port-change-banner {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  background: #FAF5FF;
+  border: 1px dashed #C084FC;
+  color: #6B21A8;
+  border-radius: 6px;
+  font-size: 9.5px;
+  font-family: 'JetBrains Mono', monospace;
+  box-shadow: 0 1px 3px rgba(147, 51, 234, 0.08);
+  white-space: nowrap;
+}
+
+/* 转换性质徽章 */
+.badge-snat {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  background: #FEF3C7;
+  border: 1px solid #F59E0B;
+  color: #B45309;
+  border-radius: 9999px;
+  font-size: 10px;
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: bold;
+  box-shadow: 0 2px 6px rgba(245, 158, 11, 0.15);
+}
+
+.badge-dnat {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  background: #E0F2FE;
+  border: 1px solid #0EA5E9;
+  color: #0369A1;
+  border-radius: 9999px;
+  font-size: 10px;
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: bold;
+  box-shadow: 0 2px 6px rgba(14, 165, 233, 0.15);
+}
+
+/* ==========================================================================
+   丝滑 NAT 转换表 (Silky Smooth NAT Table)
+   ========================================================================== */
+.nat-row-anim {
+  overflow: hidden;
+  transition: background-color 1.2s ease;
+}
+
+.nat-row-anim td {
+  padding-top: 3px;
+  padding-bottom: 3px;
+}
+
+.nat-row-new {
+  background-color: rgba(16, 185, 129, 0.22);
+}
+
+.nat-row-hit {
+  background-color: rgba(14, 165, 233, 0.2);
+}
+
+/* ==========================================================================
+   飞行报文胶囊与实时跟随浮窗 (Flying Packet & Tooltip)
+   ========================================================================== */
+.flying-packet-wrapper {
+  position: absolute;
+  pointer-events: none;
+  z-index: 50;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.packet-field-tooltip {
+  white-space: nowrap;
+  padding: 4px 9px;
+  background: rgba(28, 25, 23, 0.92);
+  color: #FFFFFF;
+  border-radius: 8px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  margin-bottom: 6px;
+  backdrop-filter: blur(4px);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  text-align: center;
+  transition: opacity 0.2s ease;
+}
+
+.packet-field-tooltip .tooltip-title {
+  color: #FBBF24;
+  font-weight: bold;
+  font-size: 10px;
+}
+
+.packet-field-tooltip .tooltip-detail {
+  font-size: 9px;
+  color: #E7E5E4;
+}
+
+.packet-capsule-core {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: 9999px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  font-weight: bold;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.15);
+  border: 1.5px solid transparent;
+}
+
+/* 私网数据包：湖水蓝 */
+.packet-lan-data {
+  background: #F0F9FF;
+  border-color: #0EA5E9;
+  color: #0369A1;
+}
+
+/* 公网数据包：金黄色 */
+.packet-wan-data {
+  background: #FFFBEB;
+  border-color: #F59E0B;
+  color: #B45309;
+}
+
+/* 互联网云朵动效 */
+#internet-cloud-box svg {
+  animation: cloudFloat 4s ease-in-out infinite alternate;
+}
+
+@keyframes cloudFloat {
+  0% { transform: translateY(0px); }
+  100% { transform: translateY(-6px); }
+}
