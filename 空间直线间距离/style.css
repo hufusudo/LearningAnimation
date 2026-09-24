@@ -160,3 +160,24 @@ input[type="range"]::-webkit-slider-thumb:hover { transform: scale(1.15); }
 .pulse-indicator { animation: subtle-pulse 2s infinite ease-in-out; }
 
 .hidden { display: none !important; }
+
+.story-guide { border-color: #D6D3CD; }
+.story-head, .story-actions, .story-buttons { display: flex; align-items: center; gap: 0.65rem; }
+.story-head { justify-content: space-between; margin-bottom: 0.55rem; }
+.story-head strong { font-size: 0.82rem; color: #1C1917; }
+.story-head p { font-size: 0.7rem; color: #57534E; line-height: 1.35; margin-top: 0.1rem; }
+.story-count { font: 600 0.68rem "JetBrains Mono", monospace; color: #78716C; white-space: nowrap; }
+.story-actions { justify-content: space-between; }
+.story-steps { display: flex; flex: 1; gap: 0.25rem; min-width: 0; }
+.story-steps button { flex: 1; min-width: 0; border: 1px solid #E5E4DC; background: #FAF9F5; color: #57534E; border-radius: 7px; padding: 0.3rem 0.15rem; font-size: 0.65rem; white-space: nowrap; }
+.story-steps button.active { color: white; background: #292524; border-color: #292524; }
+.story-steps button:focus-visible, .story-buttons button:focus-visible { outline: 2px solid #2563EB; outline-offset: 2px; }
+.story-buttons { flex-shrink: 0; gap: 0.3rem; }
+.story-buttons button { padding: 0.32rem 0.5rem; font-size: 0.66rem; border: 1px solid #D6D3CD; border-radius: 7px; white-space: nowrap; }
+.story-buttons .story-play { background: #1C1917; color: white; border-color: #1C1917; }
+.story-buttons button:disabled { opacity: 0.4; cursor: not-allowed; }
+@media (max-width: 650px) {
+  .story-actions { display: block; }
+  .story-buttons { justify-content: flex-end; margin-top: 0.45rem; }
+  .story-head p { max-width: 21rem; }
+}

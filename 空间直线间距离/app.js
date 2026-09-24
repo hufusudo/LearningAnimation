@@ -22,6 +22,7 @@ const clampBox = (v, r = 5.4) => {
 };
 const fmt = (x, n = 2) => (Math.abs(x) < 5e-3 ? 0 : x).toFixed(n);
 const vecStr = (v, n = 2) => `(${fmt(v.x, n)}, ${fmt(v.y, n)}, ${fmt(v.z, n)})`;
+const coords = v => [v.x, v.y, v.z];
 
 const HANDLE_R = 1.55;   // 方向手柄球到锚点的距离
 const LINE_HALF = 5.0;   // 直线绘制半长
@@ -31,9 +32,10 @@ const DIST_EPS = 0.012;  // 距离判为 0 的阈值
 const state = {
   module: 'A',
   caseA: 'skew',
-  modeA: 'common',
+  modeA: 'vector',
   caseB: 'oblique',
   ta: 0, ub: 0, tb: 0,
+  stageProgressA: 0, stageProgressB: 0,
   alpha: 0,           // 平面倾角（度）
   layers: {
     aCommon: true, aBox: true, aPlane: true, aPoints: true,
@@ -89,6 +91,13 @@ window.addEventListener('DOMContentLoaded', () => {
   animate();
   renderPanel();
   initKaTeX();
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    state.stageProgressA = 4;
+    refresh();
+    updateStoryUI();
+  } else {
+    window.setTimeout(playStory, 650);
+  }
 });
 
 function initKaTeX() {
@@ -236,6 +245,20 @@ function setRod(mesh, a, b, radius) {
   mesh.scale.set(r, len, r);
 }
 
+function makeVectorArrow(color) {
+  return new THREE.ArrowHelper(v3(1, 0, 0), v3(), 1, color, 0.22, 0.12);
+}
+
+function setVectorArrow(arrow, origin, vector, progress = 1, fixedLength = null) {
+  const magnitude = vector.length();
+  const length = (fixedLength === null ? magnitude : fixedLength) * progress;
+  arrow.visible = magnitude > 1e-6 && length > 1e-4;
+  if (!arrow.visible) return;
+  arrow.position.copy(origin);
+  arrow.setDirection(vector.clone().normalize());
+  arrow.setLength(length, Math.min(0.25, length * 0.28), Math.min(0.13, length * 0.16));
+}
+
 // 虚线
 function makeDash(material) {
   const g = new THREE.BufferGeometry();
@@ -368,6 +391,14 @@ function buildModuleA() {
   A.rodAB = makeRod(new THREE.MeshStandardMaterial({ color: 0x7C3AED, roughness: 0.3 }), 0.022);
   groupA.add(A.rodAB);
 
+  A.arrowS1 = makeVectorArrow(0x2563EB);
+  A.arrowS2 = makeVectorArrow(0xE11D48);
+  A.arrowN1 = makeVectorArrow(0xD97706);
+  A.arrowN2 = makeVectorArrow(0x7C3AED);
+  A.arrowProjection = makeVectorArrow(0xDC2626);
+  A.dashProjection = makeDash(materials.dash);
+  groupA.add(A.arrowS1, A.arrowS2, A.arrowN1, A.arrowN2, A.arrowProjection, A.dashProjection);
+
   A.rodCommon = makeRod(materials.dist, 0.028); groupA.add(A.rodCommon);
   A.frCommon1 = makeRightAngle(new THREE.LineBasicMaterial({ color: 0xDC2626 }));
   A.frCommon2 = makeRightAngle(new THREE.LineBasicMaterial({ color: 0xDC2626 }));
@@ -392,7 +423,9 @@ function buildModuleA() {
   A.lbPlane = makeLabel('π : 过 L₁ 且 ∥ L₂', '#0D9488', true);
   A.lbBox = makeLabel('V = |混合积|', '#4338CA', true);
   A.lbAB = makeLabel('|AB|', '#6D28D9', true);
-  groupA.add(A.lbP1, A.lbP2, A.lbD1, A.lbD2, A.lbA, A.lbB, A.lbD, A.lbPlane, A.lbBox, A.lbAB);
+  A.lbN1 = makeLabel('n₁ = s₁ × s₂', '#B45309', true);
+  A.lbN2 = makeLabel('n₂ = AB', '#6D28D9', true);
+  groupA.add(A.lbP1, A.lbP2, A.lbD1, A.lbD2, A.lbA, A.lbB, A.lbD, A.lbPlane, A.lbBox, A.lbAB, A.lbN1, A.lbN2);
 }
 
 /* ============================ 5. 模块 B 场景构件 ============================ */
@@ -436,6 +469,11 @@ function buildModuleB() {
   B.ppFace = new THREE.Mesh(new THREE.BufferGeometry(), materials.ppLat); groupB.add(B.ppFace);
   B.ppOutline = makeQuadOutline(materials.outlineA); groupB.add(B.ppOutline);
 
+  B.arrowN = makeVectorArrow(0x0D9488);
+  B.arrowV = makeVectorArrow(0x2563EB);
+  B.arrowAux = makeVectorArrow(0xD97706);
+  groupB.add(B.arrowN, B.arrowV, B.arrowAux);
+
   B.pierce = new THREE.Mesh(new THREE.SphereGeometry(0.1, 20, 20), materials.pierce); groupB.add(B.pierce);
 
   B.lbC = makeLabel('P', '#1D4ED8'); B.lbD = makeLabel('v', '#B45309');
@@ -444,7 +482,9 @@ function buildModuleB() {
   B.lbLp = makeLabel('L′ = π ∩ π′', '#059669', true);
   B.lbPi = makeLabel('π', '#0D9488');
   B.lbPip = makeLabel('π′ (⊥ π)', '#B45309', true);
-  groupB.add(B.lbC, B.lbD, B.lbM, B.lbMp, B.lbL, B.lbLp, B.lbPi, B.lbPip);
+  B.lbN = makeLabel('n', '#0D9488', true);
+  B.lbAux = makeLabel('n′ = n × v', '#B45309', true);
+  groupB.add(B.lbC, B.lbD, B.lbM, B.lbMp, B.lbL, B.lbLp, B.lbPi, B.lbPip, B.lbN, B.lbAux);
 }
 
 /* ============================ 6. 数学核心 ============================ */
@@ -540,12 +580,33 @@ function updateA() {
   setLabel(A.lbAB, `|AB|=${fmt(pA.distanceTo(pB))}`, '#6D28D9');
   A.lbAB.position.copy(pA).add(pB).multiplyScalar(0.5).add(v3(0, 0, 0.34));
 
+  // 按用户的构造顺序：方向 → 叉积 n₁ → 任意连线 n₂ → 正交投影。
+  const construction = GeometryConstruction.lineDistanceConstruction(coords(pA), coords(d1), coords(pB), coords(d2), PAR_EPS);
+  const vectorMode = state.modeA === 'vector';
+  const stage = state.stageProgressA;
+  setVectorArrow(A.arrowS1, P1, d1, vectorMode ? reveal(stage, 1) : 0, 1.65);
+  setVectorArrow(A.arrowS2, P2, d2, vectorMode ? reveal(stage, 1) : 0, 1.65);
+  const n1 = construction.normal ? v3(...construction.normal) : v3();
+  setVectorArrow(A.arrowN1, P1, n1, vectorMode ? reveal(stage, 2) : 0, 1.55);
+  setVectorArrow(A.arrowN2, pA, pB.clone().sub(pA), vectorMode ? reveal(stage, 3) : 0);
+  const foot = construction.foot ? v3(...construction.foot) : pA;
+  setVectorArrow(A.arrowProjection, pA, foot.clone().sub(pA), vectorMode ? reveal(stage, 4) : 0);
+  setDash(A.dashProjection, pB, foot);
+  A.dashProjection.visible = vectorMode && !!construction.foot && reveal(stage, 4) > 0.01 && pB.distanceTo(foot) > 0.01;
+  A.lbN1.position.copy(P1).addScaledVector(construction.unitNormal ? v3(...construction.unitNormal) : v3(), 1.65).add(v3(0, 0, 0.24));
+  A.lbN2.position.copy(pA).lerp(pB, 0.58).add(v3(0, 0, 0.32));
+  A.lbN1.visible = vectorMode && !!construction.normal && reveal(stage, 2) > 0.85;
+  A.lbN2.visible = vectorMode && reveal(stage, 3) > 0.85;
+
   // 公垂线段
   const { Q1, Q2 } = cpA;
   setRod(A.rodCommon, Q1, Q2, 0.03);
   const lenC = Q1.distanceTo(Q2);
   setLabel(A.lbD, `d = ${fmt(relA.d)}`, '#DC2626');
   A.lbD.position.copy(Q1).add(Q2).multiplyScalar(0.5).add(v3(0.15, 0.15, 0.32));
+  if (vectorMode && construction.foot) {
+    A.lbD.position.copy(pA).lerp(foot, 0.5).add(v3(0.18, 0.12, 0.32));
+  }
   if (lenC > 1e-3) {
     const u12 = new THREE.Vector3().subVectors(Q2, Q1).normalize();
     // 直角标记应画在「公垂线方向 × 直线方向」张成的平面内
@@ -590,15 +651,17 @@ function updateA() {
 
   // 图层 / 模式可见性
   const L = state.layers;
-  A.rodAB.visible = A.mA.visible = A.mB.visible = A.lbA.visible = A.lbB.visible = A.lbAB.visible = L.aPoints && state.modeA === 'common';
+  A.rodAB.visible = A.lbAB.visible = L.aPoints && state.modeA === 'common';
+  A.mA.visible = A.mB.visible = A.lbA.visible = A.lbB.visible = L.aPoints && (state.modeA === 'common' || (vectorMode && reveal(stage, 3) > 0));
+  A.lbD1.visible = A.lbD2.visible = !vectorMode || reveal(stage, 1) > 0.85;
   const showBox = L.aBox && state.modeA === 'box';
   A.boxEdges.visible = A.boxFaces.visible = A.boxBase.visible = A.lbBox.visible = showBox;
   const showPlane = L.aPlane && state.modeA === 'plane' && hasN;
   A.planeA.visible = A.planeAOutline.visible = A.dashPlane.visible = A.frPlane.visible = A.lbPlane.visible = showPlane;
-  const showCommon = L.aCommon;
+  const showCommon = L.aCommon && (!vectorMode || (!construction.normal && reveal(stage, 4) > 0));
   A.rodCommon.visible = showCommon && lenC > 1e-3;
   A.frCommon1.visible = A.frCommon2.visible = showCommon && lenC > 1e-3;
-  A.lbD.visible = showCommon;
+  A.lbD.visible = vectorMode ? reveal(stage, 4) > 0.85 : showCommon;
 }
 
 function updateBox(edges, faces, base, o, u, v, w) {
@@ -636,6 +699,9 @@ function updateB() {
   const n = planeNormal();
   const a = state.alpha * Math.PI / 180;
   const C = LB.P, d = LB.d;
+  const construction = GeometryConstruction.projectionPlaneConstruction(coords(n), coords(d), coords(C), 1e-3);
+  const auxNormal = construction.auxNormal ? v3(...construction.auxNormal) : v3();
+  const stage = state.stageProgressB;
 
   // 平面姿态
   B.planeMesh.rotation.set(a, 0, 0);
@@ -653,9 +719,9 @@ function updateB() {
   setLabel(B.lbL, 'L', '#2563EB'); B.lbL.position.copy(C).addScaledVector(d, 3.15).add(v3(0, 0, 0.32));
 
   // 投影方向（把 d 投影到平面上）
-  const dPerp = d.clone().addScaledVector(n, -d.dot(n));
+  const dPerp = v3(...construction.projectedDirection);
   const dLen = dPerp.length();
-  const isPend = dLen < 1e-3;      // L ⊥ π
+  const isPend = dLen <= 1e-3;     // L ⊥ π
   const isPar = Math.abs(d.dot(n)) < 1e-3; // L ∥ π（或含于 π）
 
   // 端点与其投影
@@ -666,7 +732,10 @@ function updateB() {
   B.dashE1.visible = B.dashE2.visible = !isPend;
   setDash(B.dashE1, E1, E1p);
   setDash(B.dashE2, E2, E2p);
-  setRod(B.rodProj, E1p, E2p, 0.032);
+  const projectedCenter = v3(...construction.projectedPoint);
+  const grow = reveal(stage, 4);
+  setRod(B.rodProj, projectedCenter.clone().addScaledVector(dPerp, -LINE_HALF * grow),
+    projectedCenter.clone().addScaledVector(dPerp, LINE_HALF * grow), 0.032);
   B.rodProj.visible = !isPend;
   B.lbLp.visible = !isPend;
   if (!isPend) {
@@ -689,6 +758,16 @@ function updateB() {
   setDash(B.dashMMp, M, Mp);
   setLabel(B.lbM, 'M', '#6D28D9'); B.lbM.position.copy(M).add(v3(0.06, 0.06, 0.32));
   setLabel(B.lbMp, 'M′', '#B45309'); B.lbMp.position.copy(Mp).add(v3(0.06, 0.06, 0.26));
+
+  // 法向量与直线方向 → n′=n×v → 辅助平面 → 两平面的交线。
+  setVectorArrow(B.arrowN, v3(-1.4, -1.6 * Math.cos(a), -1.6 * Math.sin(a)), n, reveal(stage, 1), 1.55);
+  setVectorArrow(B.arrowV, C, d, reveal(stage, 1), 1.65);
+  setVectorArrow(B.arrowAux, C, auxNormal, reveal(stage, 2), 1.55);
+  B.lbN.position.copy(B.arrowN.position).addScaledVector(n, 1.78);
+  B.lbAux.position.copy(C).addScaledVector(construction.unitAuxNormal ? v3(...construction.unitAuxNormal) : v3(), 1.78);
+  B.lbN.visible = reveal(stage, 1) > 0.85;
+  B.lbAux.visible = !!construction.auxNormal && reveal(stage, 2) > 0.85;
+  B.lbD.visible = reveal(stage, 1) > 0.85;
 
   // 投影平面 π′ = span(d, n) 过 C；沿 n 方向跨越到目标平面以保证交线可见
   const e1 = (dPerp.length() > 1e-3 ? dPerp.clone().normalize()
@@ -717,22 +796,115 @@ function updateB() {
     B.pierce.position.copy(piercePt);
   }
 
-  infoB = { n, d, C, M, Mp, piercePt, isPend, isPar, dPerp, dLen, E1, E2, E1p, E2p };
+  infoB = { n, d, C, M, Mp, piercePt, isPend, isPar, dPerp, dLen, E1, E2, E1p, E2p, auxNormal };
 
   // 图层
   const L = state.layers;
-  B.ppFace.visible = B.ppOutline.visible = B.lbPip.visible = L.bProjPlane;
-  B.dashE1.visible = B.dashE1.visible && L.bDrops;
-  B.dashE2.visible = B.dashE2.visible && L.bDrops;
-  B.dashMMp.visible = L.bDrops;
-  B.fr1.visible = B.fr1.visible && L.bDrops;
-  B.fr2.visible = B.fr2.visible && L.bDrops;
-  B.rodProj.visible = B.rodProj.visible && L.bProjLine;
-  B.lbLp.visible = B.lbLp.visible && L.bProjLine;
+  B.ppFace.visible = B.ppOutline.visible = L.bProjPlane && !isPend && reveal(stage, 3) > 0;
+  B.lbPip.visible = L.bProjPlane && !isPend && reveal(stage, 3) > 0.85;
+  B.ppFace.material.opacity = 0.12 * reveal(stage, 3);
+  B.ppOutline.material.opacity = 0.55 * reveal(stage, 3);
+  B.dashE1.visible = B.dashE1.visible && L.bDrops && grow > 0.1;
+  B.dashE2.visible = B.dashE2.visible && L.bDrops && grow > 0.1;
+  B.dashMMp.visible = L.bDrops && grow > 0.1;
+  B.fr1.visible = B.fr1.visible && L.bDrops && grow > 0.85;
+  B.fr2.visible = B.fr2.visible && L.bDrops && grow > 0.85;
+  B.rodProj.visible = B.rodProj.visible && L.bProjLine && grow > 0;
+  B.lbLp.visible = B.lbLp.visible && L.bProjLine && grow > 0.85;
+  B.M.visible = B.Mp.visible = B.lbM.visible = B.lbMp.visible = grow > 0.1;
+  B.pierce.visible = B.pierce.visible && grow > 0.85;
   B.planeMesh.visible = B.planeGrid.visible = B.planeOutline.visible = L.bPlane;
 }
 
 /* ============================ 9. 统一刷新 ============================ */
+
+const STORY = {
+  A: [
+    ['观察直线', '先看 L₁、L₂，以及各自的方向。', '直线'],
+    ['找方向向量', '标出两条直线的方向向量 s₁、s₂。', 's₁、s₂'],
+    ['叉乘得到 n₁', 'n₁ = s₁ × s₂，同时垂直于两条直线。', 'n₁'],
+    ['连接任意两点', '在 L₁ 上取 A、L₂ 上取 B，令 n₂ = AB。', 'n₂'],
+    ['投影得到距离', '把 n₂ 投到 n₁ 的方向上；投影长度就是 d。', '距离']
+  ],
+  B: [
+    ['观察直线和平面', '先看原平面 π、它的法向量 n 和空间直线 L。', 'L、π'],
+    ['找两个方向', '标出平面法向量 n 与直线方向向量 v。', 'n、v'],
+    ['叉乘求新法向量', 'n′ = n × v，作为过 L 的辅助平面 π′ 的法向量。', 'n′'],
+    ['作辅助平面', '过 L 作法向量为 n′ 的平面 π′，它垂直于 π。', 'π′'],
+    ['取两平面交线', 'π′ 与原平面 π 的交线，就是 L 的正交投影 L′。', 'L′']
+  ]
+};
+let storyTimeline = null;
+const reveal = (progress, stage) => Math.max(0, Math.min(1, progress - stage + 1));
+const storyKey = () => state.module === 'A' ? 'stageProgressA' : 'stageProgressB';
+
+function updateStoryUI() {
+  const vectorMode = state.module === 'B' || state.modeA === 'vector';
+  document.getElementById('story-guide').classList.toggle('hidden', !vectorMode);
+  document.getElementById('layers-A').style.display = state.module === 'A' && state.modeA !== 'vector' ? 'flex' : 'none';
+  document.getElementById('layers-B').style.display = state.module === 'B' ? 'flex' : 'none';
+  if (!vectorMode) return;
+  const step = Math.min(4, Math.ceil(state[storyKey()] - 1e-4));
+  const entry = STORY[state.module][step];
+  document.getElementById('story-title').textContent = entry[0];
+  let detail = entry[1];
+  if (state.module === 'A' && relA && relA.crLen < PAR_EPS && step >= 2) {
+    detail = step === 4 ? '方向平行时 n₁ = 0，改用点到直线的垂直距离。' : '此时 s₁ × s₂ = 0，叉积法向量不存在。';
+  }
+  if (state.module === 'B' && infoB && infoB.isPend && step >= 2) {
+    detail = step === 4 ? 'L 垂直于 π，整条直线投影为一个点。' : '此时 n × v = 0，辅助平面不唯一。';
+  }
+  document.getElementById('story-detail').textContent = detail;
+  document.getElementById('story-count').textContent = `${step} / 4`;
+  document.querySelectorAll('#story-steps button').forEach((button, index) => {
+    button.classList.toggle('active', index === step);
+    button.setAttribute('aria-current', index === step ? 'step' : 'false');
+  });
+  document.getElementById('story-prev').disabled = step === 0;
+  document.getElementById('story-next').disabled = step === 4;
+}
+
+function renderStorySteps() {
+  const host = document.getElementById('story-steps');
+  host.replaceChildren();
+  STORY[state.module].forEach((entry, index) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = entry[2];
+    button.title = entry[0];
+    button.addEventListener('click', () => setStoryStep(index));
+    host.appendChild(button);
+  });
+  updateStoryUI();
+}
+
+function setStoryStep(step) {
+  if (storyTimeline) storyTimeline.kill();
+  const key = storyKey();
+  gsap.to(state, {
+    [key]: Math.max(0, Math.min(4, step)), duration: 0.55, ease: 'power2.inOut', overwrite: true,
+    onUpdate: () => { refresh(); updateStoryUI(); },
+    onComplete: () => { refresh(); updateStoryUI(); }
+  });
+}
+
+function playStory() {
+  if (state.module === 'A' && state.modeA !== 'vector') return;
+  if (storyTimeline) storyTimeline.kill();
+  const key = storyKey();
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    state[key] = 4;
+    refresh();
+    return;
+  }
+  state[key] = 0;
+  refresh(); updateStoryUI();
+  storyTimeline = gsap.timeline({ onUpdate: () => { refresh(); updateStoryUI(); }, onComplete: updateStoryUI });
+  for (let step = 1; step <= 4; step++) {
+    storyTimeline.to(state, { [key]: step, duration: 0.82, ease: 'power2.inOut' });
+    if (step < 4) storyTimeline.to({}, { duration: 0.45 });
+  }
+}
 
 function refresh() {
   groupA.visible = state.module === 'A';
@@ -741,6 +913,7 @@ function refresh() {
   if (state.module === 'A') updateA(); else updateB();
   updateHUD();
   fillDynValues();
+  updateStoryUI();
 }
 
 /* ============================ 10. HUD ============================ */
@@ -773,19 +946,27 @@ function updateHUD() {
     const pA = L1.P.clone().addScaledVector(L1.d, state.ta);
     const pB = L2.P.clone().addScaledVector(L2.d, state.ub);
     const ab = pA.distanceTo(pB);
-
-    body.innerHTML =
-      kv('|s₁ × s₂|', `${fmt(crLen, 3)} ${crLen < PAR_EPS ? '(≈0 ⇒ 平行)' : ''}`) +
-      kv('混合积 (P₁P₂,s₁,s₂)', fmt(mixed, 3)) +
-      kv('d(L₁, L₂)', `<span style="color:#DC2626">${fmt(relA.d, 3)}</span>`) +
-      kv('|AB| ≥ d', `${fmt(ab, 3)}`);
+    if (state.modeA === 'vector') {
+      const c = GeometryConstruction.lineDistanceConstruction(coords(pA), coords(L1.d), coords(pB), coords(L2.d), PAR_EPS);
+      const stage = state.stageProgressA;
+      body.innerHTML =
+        (stage < 1 ? kv('当前步骤', '先观察 L₁ 与 L₂') : kv('方向向量 s₁、s₂', `${vecStr(L1.d)} · ${vecStr(L2.d)}`)) +
+        (stage >= 2 ? kv('n₁ = s₁ × s₂', c.normal ? vecStr(v3(...c.normal)) : '零向量') : '') +
+        (stage >= 3 ? kv('n₂ = AB', vecStr(v3(...c.connector))) : '') +
+        (stage >= 4 ? kv(c.normal ? '|n₂ 在 n₁ 上的投影|' : '平行时的点线距离', fmt(relA.d, 3)) +
+          kv('d(L₁, L₂)', `<span style="color:#DC2626">${fmt(relA.d, 3)}</span>`) : '');
+    } else {
+      body.innerHTML =
+        kv('|s₁ × s₂|', `${fmt(crLen, 3)} ${crLen < PAR_EPS ? '(≈0 ⇒ 平行)' : ''}`) +
+        kv('混合积 (P₁P₂,s₁,s₂)', fmt(mixed, 3)) +
+        kv('d(L₁, L₂)', `<span style="color:#DC2626">${fmt(relA.d, 3)}</span>`) +
+        kv('|AB| ≥ d', `${fmt(ab, 3)}`);
+    }
 
     const btn = document.getElementById('btn-min-text');
-    if (btn) btn.textContent = '捕捉距离最小值（|AB| → d）';
+    if (btn) btn.textContent = state.modeA === 'vector' ? '移动 A、B 到最近点' : '捕捉距离最小值（|AB| → d）';
   } else {
-    const { n, d, C, isPend, isPar, Mp } = infoB;
-    const vn = Math.abs(d.dot(n));            // |cos φ|
-    const phi = Math.asin(Math.min(1, vn)) * 180 / Math.PI;
+    const { n, d, C, isPend, isPar, Mp, auxNormal } = infoB;
     const inPlane = Math.abs(C.dot(n)) < 1e-3;
     let text = 'L 与 π 斜交', cls = 'bg-blue-50 text-blue-700 border-blue-200', sub = 'L′ 是一般直线';
     if (isPend) { text = 'L ⊥ π'; cls = 'bg-rose-50 text-rose-700 border-rose-200'; sub = '投影退化为一点'; }
@@ -796,13 +977,13 @@ function updateHUD() {
     b.textContent = text;
     s.textContent = sub;
 
-    const dPerpN = infoB.dPerp.clone().normalize();
+    const stage = state.stageProgressB;
     body.innerHTML =
-      kv('L 方向 v', vecStr(d)) +
-      kv('平面法向量 n', vecStr(n)) +
-      kv('L 与 π 夹角 φ', `${fmt(phi, 1)}°`) +
-      kv('投影方向 v′', isPend ? '退化' : vecStr(dPerpN)) +
-      kv('M′ = M − (M·n)n', vecStr(Mp));
+      (stage < 1 ? kv('当前步骤', '先观察 L 与 π') : kv('平面法向量 n', vecStr(n)) + kv('直线方向 v', vecStr(d))) +
+      (stage >= 2 ? kv('π′ 法向量 n×v', isPend ? '零向量' : vecStr(auxNormal)) : '') +
+      (stage >= 3 ? kv('辅助平面 π′', isPend ? '不唯一' : '过 L，法向量为 n×v') : '') +
+      (stage >= 4 ? kv('π ∩ π′', isPend ? '退化为一点' : '投影直线 L′') +
+        kv('M′ = M − (M·n)n', vecStr(Mp)) : '');
 
     const btn = document.getElementById('btn-min-text');
     if (btn) btn.textContent = '让 M 扫过 L（M′ 描出 L′）';
@@ -884,15 +1065,19 @@ function setSlider(id, vid, value, dec) {
 /* ============================ 12. UI 事件 ============================ */
 
 function bindUI() {
+  renderStorySteps();
+  document.getElementById('story-prev').addEventListener('click', () => setStoryStep(Math.ceil(state[storyKey()] - 1e-4) - 1));
+  document.getElementById('story-next').addEventListener('click', () => setStoryStep(Math.ceil(state[storyKey()] - 1e-4) + 1));
+  document.getElementById('story-play').addEventListener('click', playStory);
   document.getElementById('tab-module-A').addEventListener('click', () => switchModule('A'));
   document.getElementById('tab-module-B').addEventListener('click', () => switchModule('B'));
 
   document.querySelectorAll('[data-case-a]').forEach(btn =>
-    btn.addEventListener('click', () => { setActiveChip('[data-case-a]', btn); applyPresetA(btn.dataset.caseA); renderPanel(); }));
+    btn.addEventListener('click', () => { setActiveChip('[data-case-a]', btn); applyPresetA(btn.dataset.caseA); renderPanel(); if (state.modeA === 'vector') playStory(); }));
   document.querySelectorAll('[data-mode-a]').forEach(btn =>
-    btn.addEventListener('click', () => { setActiveChip('[data-mode-a]', btn); state.modeA = btn.dataset.modeA; refresh(); renderPanel(); }));
+    btn.addEventListener('click', () => { setActiveChip('[data-mode-a]', btn); state.modeA = btn.dataset.modeA; if (storyTimeline) storyTimeline.kill(); refresh(); renderPanel(); if (state.modeA === 'vector') playStory(); }));
   document.querySelectorAll('[data-case-b]').forEach(btn =>
-    btn.addEventListener('click', () => { setActiveChip('[data-case-b]', btn); applyPresetB(btn.dataset.caseB); renderPanel(); }));
+    btn.addEventListener('click', () => { setActiveChip('[data-case-b]', btn); applyPresetB(btn.dataset.caseB); renderPanel(); playStory(); }));
 
   document.getElementById('slider-ta').addEventListener('input', e => { state.ta = +e.target.value; document.getElementById('val-ta').textContent = state.ta.toFixed(2); updateA(); updateHUD(); });
   document.getElementById('slider-ub').addEventListener('input', e => { state.ub = +e.target.value; document.getElementById('val-ub').textContent = state.ub.toFixed(2); updateA(); updateHUD(); });
@@ -924,17 +1109,19 @@ function setActiveChip(sel, active) {
 }
 
 function switchModule(m) {
+  if (storyTimeline) storyTimeline.kill();
   state.module = m;
+  state[storyKey()] = 0;
   document.getElementById('tab-module-A').classList.toggle('active', m === 'A');
   document.getElementById('tab-module-B').classList.toggle('active', m === 'B');
   document.getElementById('controls-A').style.display = m === 'A' ? 'flex' : 'none';
   document.getElementById('controls-B').style.display = m === 'B' ? 'flex' : 'none';
-  document.getElementById('layers-A').style.display = m === 'A' ? 'flex' : 'none';
-  document.getElementById('layers-B').style.display = m === 'B' ? 'flex' : 'none';
   if (m === 'B') { updateB(); } else { updateA(); }
   resetCamera();
+  renderStorySteps();
   refresh();
   renderPanel();
+  playStory();
 }
 
 function resetCamera() {
@@ -1076,9 +1263,16 @@ function renderPanel() {
 }
 
 function panelA() {
-  const highlight = { common: '理解一', box: '理解二', plane: '理解三' }[state.modeA];
+  const highlight = { vector: '向量投影', common: '理解一', box: '理解二', plane: '理解三' }[state.modeA];
   const hlCls = k => k === highlight ? 'background:#FEF9C3;border-radius:6px;padding:1px 4px;' : '';
   return String.raw`
+    <div class="callout-box callout-tip">
+      <b>按动画顺序构造：</b>先取两条直线的方向向量 $\vec s_1,\vec s_2$，叉乘得到 $\vec n_1=\vec s_1\times\vec s_2$；再在两直线上任取 $A,B$，连接成 $\vec n_2=\overrightarrow{AB}$；最后将 $\vec n_2$ 投到 $\vec n_1$ 的方向上。
+      <div class="formula-box">$$d=\left|\operatorname{proj}_{\vec n_1}\vec n_2\right|=\frac{|\vec n_2\cdot\vec n_1|}{|\vec n_1|}\qquad(\vec n_1\ne\vec0)$$</div>
+      <p>移动 $A,B$ 会改变 $\vec n_2$，但它沿 $\vec n_1$ 的投影长度不变。</p>
+    </div>
+
+    <div class="text-[11px] font-mono uppercase tracking-wider text-stone-400 mt-3">补充：位置关系与其他求法</div>
     <div class="callout-box callout-note">
       <b>判别总纲：</b>先用方向向量的叉积看是否平行，再看两直线是否共面。四类关系对应的距离公式各不相同，但都统一于「<b>公垂线段长度</b>」这一个几何量。
     </div>
@@ -1102,7 +1296,7 @@ function panelA() {
     </div>
 
     <div class="flex items-start gap-2"><span class="step-num">3</span>
-      <div><b>距离公式（统一形式）</b>
+      <div><b>方向不平行时的距离公式</b>
         <div class="formula-box">$$d(L_1,L_2)=\frac{\big|(P_2-P_1)\cdot(\vec s_1\times\vec s_2)\big|}{\big|\vec s_1\times\vec s_2\big|}$$</div>
         三种情形的退化：
         <ul class="list-disc pl-4 mt-1 space-y-0.5">
@@ -1114,11 +1308,11 @@ function panelA() {
     </div>
 
     <div class="pt-1 mt-1 border-t border-[#EFEFE9]">
-      <div class="text-[11px] font-mono uppercase tracking-wider text-stone-400 mb-2">同一距离的三层理解（当前高亮：${highlight}）</div>
+      <div class="text-[11px] font-mono uppercase tracking-wider text-stone-400 mb-2">${state.modeA === 'vector' ? '同一距离的其他三种理解' : `同一距离的三层理解（当前高亮：${highlight}）`}</div>
 
       <div style="${hlCls('理解一')}" class="mb-2">
         <b>理解一 · 公垂线段（最小值定义）</b>
-        <p class="mt-1">在 $L_1,L_2$ 上各取动点 $A(t),B(u)$，则 $|AB|$ 的下确界就是 $d$，且取到最小值的 $A,B$ 连线<b>同时垂直于两会直线</b>，即公垂线段。</p>
+        <p class="mt-1">在 $L_1,L_2$ 上各取动点 $A(t),B(u)$，则 $|AB|$ 的下确界就是 $d$，且取到最小值的 $A,B$ 连线<b>同时垂直于两条直线</b>，即公垂线段。</p>
         <div class="formula-box">$$\min_{t,u}|A(t)B(u)|=d,\qquad \overrightarrow{AB}\perp\vec s_1,\ \overrightarrow{AB}\perp\vec s_2$$</div>
         <p class="text-stone-500">拖动 $t,u$ 滑块可实时看到 $|AB|\ge d$。</p>
       </div>
@@ -1148,28 +1342,32 @@ function panelA() {
 function panelB() {
   return String.raw`
     <div class="callout-box callout-note">
-      <b>投影的几何定义：</b>把 $L$ 上每一点沿<b>平面的法线方向</b>平移到 $\pi$ 上，所有像点组成的集合就是 $L$ 在 $\pi$ 上的投影 $L'$。这条「平移光线」的方向就是 $\pi$ 的法向量 $\vec n$。
+      <b>按动画顺序构造：</b>先看目标平面 $\pi$ 的法向量 $\vec n$ 和直线 $L$ 的方向向量 $\vec v$；叉乘得到辅助平面的法向量；作出过 $L$ 的辅助平面 $\pi'$；最后取 $\pi$ 与 $\pi'$ 的交线。
     </div>
 
     <div class="flex items-start gap-2"><span class="step-num">1</span>
-      <div><b>点的投影（核心公式）</b>：设平面 $\pi:\ \vec n\cdot \vec x=p$，则
-        <div class="formula-box">$$X'=X-\frac{\vec n\cdot X-p}{|\vec n|^2}\,\vec n$$</div>
-        当平面过原点时即 $X'=X-(\vec n\cdot X)\,\vec n$。
+      <div><b>叉乘求辅助平面的法向量</b>：
+        <div class="formula-box">$$\vec n'=\vec n\times\vec v$$</div>
+        $\vec n'$ 同时垂直于 $\vec n$ 和 $\vec v$。
       </div>
     </div>
 
     <div class="flex items-start gap-2"><span class="step-num">2</span>
-      <div><b>直线的投影 = 两平面交线</b>：
-        <p class="mt-1">过 $L$ 且<b>垂直于 $\pi$</b> 的平面称为<b>投影平面</b> $\pi'$，其法向量为 $\vec v\times\vec n$。于是</p>
-        <div class="formula-box">$$L'=\pi\cap\pi'$$</div>
-        即：直线的投影是「投影平面」与「目标平面」的交线。这也解释了为什么投影后仍是一条直线。
+      <div><b>作过直线的辅助平面</b>：取直线上的点 $P$，令
+        <div class="formula-box">$$\pi':\ \vec n'\cdot(X-P)=0$$</div>
+        因为 $\vec n'\perp\vec v$，它包含整条 $L$；因为 $\vec n'\perp\vec n$，它也包含沿 $\vec n$ 方向的投影线。
       </div>
     </div>
 
     <div class="flex items-start gap-2"><span class="step-num">3</span>
-      <div><b>方向向量怎么变</b>：$\vec v$ 去掉法向分量即得投影直线的方向
-        <div class="formula-box">$$\vec v'=\vec v-\frac{\vec v\cdot\vec n}{|\vec n|^2}\,\vec n,\qquad \vec v'\perp \vec n$$</div>
+      <div><b>取两平面的交线</b>：$\pi'$ 与原平面 $\pi$ 的交线就是投影直线
+        <div class="formula-box">$$L'=\pi\cap\pi'$$</div>
+        直线 $L$ 上的每一点都沿 $\vec n$ 方向落到这条交线上。
       </div>
+    </div>
+
+    <div class="callout-box callout-tip">
+      <b>计算核对：</b>若 $\pi:\ \vec n\cdot X=p$，点 $X$ 的投影为 $X'=X-\dfrac{\vec n\cdot X-p}{|\vec n|^2}\vec n$；投影直线的方向为 $\vec v'=\vec v-\dfrac{\vec v\cdot\vec n}{|\vec n|^2}\vec n$。
     </div>
 
     <div class="pt-1 mt-1 border-t border-[#EFEFE9]">
@@ -1178,7 +1376,7 @@ function panelB() {
         <li><b>斜交</b>（$\vec v\cdot\vec n\ne0$）：$L'$ 是一条过交点的一般直线，$L$ 与其投影线的夹角 $\varphi$ 满足 $\sin\varphi=\dfrac{|\vec v\cdot\vec n|}{|\vec v|\,|\vec n|}$。</li>
         <li><b>平行于 $\pi$</b>（$\vec v\cdot\vec n=0$ 且 $P\notin\pi$）：投影线 $L'\parallel L$，距离保持不变。</li>
         <li><b>含于 $\pi$</b>（$\vec v\cdot\vec n=0$ 且 $P\in\pi$）：$L'=L$，投影即自身。</li>
-        <li><b>垂直于 $\pi$</b>（$\vec v\times\vec n=\vec 0$）：整条直线压成<b>一个点</b>，$L'$ 退化为点。</li>
+        <li><b>垂直于 $\pi$</b>（$\vec n\times\vec v=\vec 0$）：辅助平面不唯一，整条直线投影为<b>一个点</b>。</li>
       </ul>
     </div>
 

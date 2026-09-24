@@ -139,6 +139,20 @@
 
       <!-- Bottom control bar -->
       <div class="absolute bottom-4 left-1/2 -translate-x-1/2 z-10 w-[95%] max-w-3xl">
+        <div id="story-guide" class="story-guide editorial-card px-3 py-2.5 mb-2 bg-white/95 backdrop-blur shadow-md" aria-live="polite">
+          <div class="story-head">
+            <div><strong id="story-title">观察两条直线</strong><p id="story-detail">先看两条直线及各自的方向。</p></div>
+            <span id="story-count" class="story-count">0 / 4</span>
+          </div>
+          <div class="story-actions">
+            <div id="story-steps" class="story-steps" aria-label="推导步骤"></div>
+            <div class="story-buttons">
+              <button id="story-prev" type="button" aria-label="上一步">上一步</button>
+              <button id="story-next" type="button" aria-label="下一步">下一步</button>
+              <button id="story-play" type="button" class="story-play">重播动画</button>
+            </div>
+          </div>
+        </div>
         <div class="editorial-card px-4 py-3 bg-white/95 backdrop-blur shadow-md flex flex-col gap-2.5">
 
           <!-- ===== Module A controls ===== -->
@@ -153,7 +167,8 @@
               </div>
               <div class="flex items-center gap-1.5">
                 <span class="text-[11px] font-mono text-stone-400 mr-1">理解方式:</span>
-                <button data-mode-a="common" class="chip-btn active px-2.5 py-1 rounded-lg border border-stone-200 bg-white text-xs font-medium">公垂线 d</button>
+                <button data-mode-a="vector" class="chip-btn active px-2.5 py-1 rounded-lg border border-stone-200 bg-white text-xs font-medium">向量投影</button>
+                <button data-mode-a="common" class="chip-btn px-2.5 py-1 rounded-lg border border-stone-200 bg-white text-xs font-medium">公垂线 d</button>
                 <button data-mode-a="box"    class="chip-btn px-2.5 py-1 rounded-lg border border-stone-200 bg-white text-xs font-medium">六面体 V/S</button>
                 <button data-mode-a="plane"  class="chip-btn px-2.5 py-1 rounded-lg border border-stone-200 bg-white text-xs font-medium">平面法</button>
               </div>
@@ -233,6 +248,7 @@
     </aside>
   </main>
 
+  <script src="construction.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
