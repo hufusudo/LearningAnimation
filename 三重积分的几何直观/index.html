@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="从一根线、一张截面到整个积分体，交互理解投影法、截面法、柱坐标与球坐标三重积分。">
+  <title>三重积分的几何直观 · 可视化实验室</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+  <script defer src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+  <script defer src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+  <script defer src="model.js"></script>
+  <script defer src="app.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="back-link" href="../index.html#math">← 高等数学</a>
+    <span class="header-divider"></span>
+    <h1>三重积分的几何直观</h1>
+    <span class="header-note">同一个物体，四种累加方式</span>
+  </header>
+  <main>
+    <nav class="method-tabs" aria-label="积分方法">
+      <button class="method active" data-method="projection" aria-pressed="true">
+        <svg viewBox="0 0 36 32" aria-hidden="true"><path d="M5 25 18 30 31 25 18 20Z"/><path d="M10 24V6m8 20V3m8 21V8"/></svg>
+        <span><strong>投影法</strong><small>先穿线，再铺面</small></span>
+      </button>
+      <button class="method" data-method="section" aria-pressed="false">
+        <svg viewBox="0 0 36 32" aria-hidden="true"><path d="M18 2v28M4 12l14-5 14 5-14 5Zm0 8 14-5 14 5-14 5Z"/></svg>
+        <span><strong>截面法</strong><small>先切面，再叠体</small></span>
+      </button>
+      <button class="method" data-method="cylindrical" aria-pressed="false">
+        <svg viewBox="0 0 36 32" aria-hidden="true"><ellipse cx="18" cy="19" rx="14" ry="7"/><path d="M18 2v28m0-11 12-3m-4-4 5 3-3 4"/></svg>
+        <span><strong>极坐标法</strong><small>旋转半径，叠加截面</small></span>
+      </button>
+      <button class="method" data-method="spherical" aria-pressed="false">
+        <svg viewBox="0 0 36 32" aria-hidden="true"><circle cx="18" cy="16" r="13"/><ellipse cx="18" cy="16" rx="6" ry="13"/><path d="M18 2v14l11-7M18 16l11 4"/></svg>
+        <span><strong>球面法</strong><small>旋转射线，张开极角</small></span>
+      </button>
+    </nav>
+
+    <div class="workspace">
+      <section class="visual-panel" aria-label="三维积分演示">
+        <div class="scene-topline"><span id="scene-caption">单位球体 Ω</span><span class="mouse-hint">拖动旋转 · 滚轮缩放</span></div>
+        <div id="scene" tabindex="0" aria-label="可旋转的三维球体，颜色表示体密度；按方向键旋转视角">
+          <div id="scene-error" class="scene-error" role="alert" hidden></div>
+          <div id="labels" aria-hidden="true"></div>
+          <div id="completion" class="completion" hidden><span>整个积分体已填满</span><strong>M = 8π/5 ≈ 5.0265 kg</strong></div>
+        </div>
+        <div class="scene-bottomline">
+          <div class="legend"><span>体密度 ρ <small>kg/m³</small></span><div class="color-scale"></div><div class="legend-ticks"><span>0.5</span><span>1.0</span><span>1.625</span></div></div>
+          <div class="outside-key"><i></i>体外 / 辅助部分</div>
+          <button id="reset-camera" class="quiet-button" title="恢复默认三维视角">复位视角</button>
+        </div>
+        <div class="transport">
+          <div class="transport-row">
+            <button id="restart" class="icon-button" title="从头开始" aria-label="从头开始">↺</button>
+            <button id="prev" class="icon-button" title="上一步" aria-label="上一步">‹</button>
+            <button id="play" class="play-button" aria-label="播放演示">▶ 播放</button>
+            <button id="next" class="icon-button" title="下一步" aria-label="下一步">›</button>
+            <output id="time" class="time">00:00 / 00:32</output>
+            <label class="speed-label" for="speed">速度</label>
+            <select id="speed" aria-label="播放速度"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="1.5">1.5×</option><option value="2">2×</option></select>
+          </div>
+          <input id="timeline" type="range" min="0" max="1000" value="0" aria-label="演示进度">
+          <div id="timeline-labels" class="timeline-labels" aria-hidden="true"></div>
+        </div>
+      </section>
+
+      <aside class="notebook">
+        <section class="given">
+          <div class="section-title"><h2>积分体与体密度</h2><span class="common-badge">四种方法共用</span></div>
+          <div id="body-formula" class="formula">Ω: x² + y² + z² ≤ 1</div>
+          <div id="density-formula" class="formula">ρ(x,y,z) = 1 + z/2 + (x²+y²)/2</div>
+          <p class="muted">长度单位 m；颜色越偏金色，单位体积越重。</p>
+        </section>
+        <section class="walkthrough">
+          <div class="section-title"><h2 id="method-title">先穿一根线</h2><span id="step-counter">1 / 4</span></div>
+          <div id="steps" class="steps" aria-label="动画步骤"></div>
+          <p id="explanation" class="explanation" aria-live="polite"></p>
+        </section>
+        <section class="projection-inset">
+          <div class="section-title"><h2 id="inset-title">俯视：xOy 投影面</h2><output id="parameter">(x₀, y₀) = (0.45, 0.18)</output></div>
+          <canvas id="inset" width="600" height="270" role="img" aria-label="当前累加位置在投影面或参数范围内的示意"></canvas>
+        </section>
+        <section class="integral-note">
+          <div class="section-title"><h2>把几何写成积分</h2><span id="volume-element">dV = dz dx dy</span></div>
+          <div id="integral-formula" class="formula integral-formula"></div>
+          <p id="element-note" class="muted"></p>
+        </section>
+        <section class="mass-section">
+          <div class="section-title"><h2>已累加质量</h2><span id="mass-status">准备观察</span></div>
+          <div class="mass-number"><output id="mass">0.0000</output><span> / 5.0265 kg</span></div>
+          <div class="mass-track"><div id="mass-fill"></div></div>
+          <p id="mass-note" class="muted">单根线是微元示意；铺开后才累计整个体的质量。</p>
+        </section>
+      </aside>
+    </div>
+    <footer class="page-note"><span>颜色表示密度，不表示高度。线与面在动画中有可见宽度；积分取微元趋于零的极限。</span><a href="https://openstax.org/books/calculus-volume-3/pages/5-5-triple-integrals-in-cylindrical-and-spherical-coordinates" target="_blank" rel="noopener noreferrer">坐标与体积元参考 ↗</a></footer>
+  </main>
+</body>
+</html>
