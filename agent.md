@@ -83,6 +83,13 @@
   - 数学公式：统一采用 KaTeX CDN 动态渲染。
 - **笔记式引用排版 (Obsidian-Style Callouts)**：
   - `[!tip]` 翡翠绿 / `[!note]` 湖水蓝 / `[!important]` 熏衣紫 / `[!warning]` 琥珀黄。
+- **交互微组件与微动效规范 (Taste-Skill UI & Micro-Interactions)**：
+  - **色彩脱敏与纸质收敛**：借鉴外部开源组件（如 Galaxy / Uiverse）时，严禁使用深色暗黑背景、霓虹光晕与高饱和度流光渐变。必须脱敏清洗为暖白纸面（`#FAF9F5`）、纯白卡片（`#FFFFFF`）与 1px 细线边框（`#E5E4DC`）；功能色严格限定在琥珀金（`#D97706`）、翡翠绿（`#059669`）、钴蓝（`#2563EB`）与石板灰（`#57534E`）。
+  - **物理触感微按键 (Tactile Micro-Buttons)**：播放、单步、复位等核心操作键必须具备机械物理键程感（`border border-[#E5E4DC] bg-white shadow-[0_1.5px_0_#D6D3CD] active:shadow-none active:translate-y-[1.5px] transition-all duration-150`），杜绝粗糙扁平或生硬突变。
+  - **状态呼吸脉冲指示灯 (Pulse Indicators)**：硬件总线占用、内存读写、网络碰撞或 TLB 命中等动态状态，统一采用纯 CSS 细微呼吸脉冲指示灯（如 `.pulse-led-emerald`, `.pulse-led-amber`, `.pulse-led-rose`），禁止突兀的闪烁。
+  - **定制纸质滑块与开关 (Paper Sliders & Toggles)**：严禁直接使用浏览器默认的粗糙灰色 Range Slider 与原生复选框，必须统一使用 2px 细线轨道与白底黑边圆点手柄（`.taste-slider`），滑动时具备微触觉阻尼感。
+  - **轻量悬浮提示气泡 (Taste Tooltips)**：复杂控制信号与寄存器名称采用纯 CSS 悬浮信息气泡（`.taste-tooltip`），鼠标悬停时平滑浮现微操作语义定义，保持界面整洁同时降低学习门槛。
+  - **零外部构建依赖**：所有微组件必须为纯 Tailwind CSS 类名或直接内嵌于模块的 `style.css`，严禁引入 npm 构建或外部 UI 框架。
 
 ---
 
