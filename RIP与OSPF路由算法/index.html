@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="用可交互动画理解 RIP、坏消息传得慢、OSPF 泛洪与 Dijkstra 最短路径算法。">
+  <title>RIP 与 OSPF 路由算法 · 可视化实验室</title>
+  <link rel="stylesheet" href="style.css">
+  <script defer src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+  <script defer src="model.js"></script>
+  <script defer src="app.js"></script>
+</head>
+<body>
+  <header class="topbar"><a class="back" href="../index.html#net" aria-label="返回计算机网络展厅">←</a><span>可视化实验室 <span class="crumb">/ 计算机网络</span></span><span class="header-note">路由算法交互实验</span></header>
+  <main>
+    <section class="intro">
+      <div><h1>一条消息，怎样找到路？</h1><p>RIP 问邻居还有几站；OSPF 先拼地图，再自己算路。</p></div>
+      <div class="intro-key"><span class="key-dot"></span> 路由器 = 路口的指路员</div>
+    </section>
+    <nav class="lessons" aria-label="选择演示场景">
+      <button data-scene="rip" aria-pressed="true"><span>01 <b>RIP · 学会路线</b></span><small>好消息一站一站传开</small></button>
+      <button data-scene="bad" aria-pressed="false"><span>02 <b>RIP · 坏消息传得慢</b></span><small>路断了，为什么还在绕圈？</small></button>
+      <button data-scene="ospf" aria-pressed="false"><span>03 <b>OSPF · 地图与最短路</b></span><small>泛洪 → 同一张地图 → 算路</small></button>
+      <button data-scene="repair" aria-pressed="false"><span>04 <b>OSPF · 断路后换条路</b></span><small>同步变化，重新计算</small></button>
+    </nav>
+    <section class="workspace">
+      <div class="visual-pane">
+        <div class="stage-heading"><div><span id="protocol" class="protocol">RIP</span><h2 id="scene-title">只向邻居打听路</h2></div><span id="phase" class="phase">准备</span></div>
+        <div class="stage-context"><span id="graph-caption"></span><label id="poison-control" hidden><input id="poison" type="checkbox"> 开启毒性逆转对照</label></div>
+        <div id="network" class="network"><svg id="graph" role="img" aria-labelledby="graph-title graph-desc"><title id="graph-title">路由网络拓扑</title><desc id="graph-desc">圆形表示路由器，连线表示链路，移动标记表示消息方向。</desc><defs><marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10Z" fill="#059669"/></marker></defs><g id="edges"></g><g id="route-arrows"></g><g id="nodes"></g><g id="packets"></g></svg></div>
+        <div class="legend"><span><i class="legend-line"></i>可用链路</span><span><i class="legend-dot blue"></i>路由消息</span><span><i class="legend-dot green"></i>数据包 / 已确认</span><span><i class="legend-line broken"></i>断开的链路</span></div>
+        <div id="insight" class="insight" aria-live="polite"><span id="step-kicker"></span><h3 id="step-title"></h3><p id="step-description"></p><div id="formula" class="formula"></div></div>
+        <div class="transport">
+          <div class="control-row"><div class="playback"><button id="reset" aria-label="从头开始">↺ 重置</button><button id="prev" aria-label="上一步">‹ 上一步</button><button id="play" class="primary">▶ 自动播放</button><button id="next">下一步 ›</button></div><label class="speed-label">速度 <select id="speed"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="1.5">1.5×</option><option value="2">2×</option></select></label></div>
+          <div class="timeline"><label for="seek" id="progress-label">演示进度</label><input id="seek" type="range" min="0" max="1" value="0" step="1"><output id="progress"></output></div>
+          <div id="milestones" class="milestones"></div>
+        </div>
+      </div>
+      <aside class="state-pane">
+        <div class="panel-heading"><h2 id="table-title">到目的网络 N 的路由表</h2><span id="table-hint">只关注一个目的地</span></div>
+        <div id="route-table"></div>
+        <div id="state-extra"></div>
+        <section class="plain-note"><h3 id="rule-title"></h3><p id="rule-text"></p></section>
+        <details class="glossary"><summary>第一次接触？看看这几个词</summary><dl><dt>路由表</dt><dd>指路小本子：去哪里、交给谁、代价是多少。</dd><dt>下一跳</dt><dd>下一位接手数据包的邻居，不是最终目的地。</dd><dt>收敛</dt><dd>变化传开后，各路由器的路线稳定下来。</dd><dt>泛洪 / LSA</dt><dd>LSA 是本地链路的通告；泛洪是让邻居接力转发它，直到整个区域获知。</dd><dt>Cost（开销）</dt><dd>OSPF 的链路权重。路径开销是沿途权重之和，不等于跳数。</dd></dl></details>
+      </aside>
+    </section>
+    <section class="comparison"><h2>记住这一个区别就够了</h2><div class="compare-grid"><div><span class="protocol">RIP</span><h3>“邻居说他能到，我就跟着走。”</h3><p>交换到目的地的距离；通常按跳数选路。只知道下一跳，不知道邻居完整的路线。</p></div><div><span class="protocol ospf">OSPF</span><h3>“大家共享地图，我来算哪条路最省。”</h3><p>同一区域内同步链路状态；每台路由器以自己为起点，用 Dijkstra 计算最小总开销。</p></div></div></section>
+    <footer>教学简化：RIP 每条链路代价为 1，直连目的网络度量为 1；OSPF 使用单区域、对称点到点链路。动画步骤不等于真实秒数。<br>协议依据：<a href="https://www.rfc-editor.org/rfc/rfc1058.html#section-2.2" target="_blank" rel="noreferrer">RFC 1058 §2.2（RIP 收敛与防环）</a> · <a href="https://www.rfc-editor.org/rfc/rfc2328.html" target="_blank" rel="noreferrer">RFC 2328 §13、§16（OSPF 泛洪与最短路）</a></footer>
+  </main>
+</body>
+</html>

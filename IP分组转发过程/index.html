@@ -1,0 +1,518 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>IP分组转发的过程与路由查表 - 408 核心可视化</title>
+
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['-apple-system', 'BlinkMacSystemFont', 'SF Pro Display', 'Segoe UI', 'Roboto', 'sans-serif'],
+            mono: ['JetBrains Mono', 'Fira Code', 'monospace']
+          }
+        }
+      }
+    }
+  </script>
+
+  <!-- GSAP CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+
+  <!-- Custom CSS -->
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="min-h-screen bg-[#FAF9F5] text-stone-900 flex flex-col justify-between antialiased selection:bg-stone-200">
+
+  <!-- ============================================================ -->
+  <!-- 顶栏 Header -->
+  <!-- ============================================================ -->
+  <header class="border-b border-[#E5E4DC] bg-[#FAF9F5]/90 backdrop-blur sticky top-0 z-30 px-6 py-2.5">
+    <div class="max-w-7xl mx-auto flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <a href="../index.html#net" class="w-7 h-7 rounded-lg bg-stone-900 text-white flex items-center justify-center font-mono font-bold text-xs hover:bg-stone-800 transition-colors shadow-sm" title="返回计算机网络展厅">
+          ←
+        </a>
+        <div>
+          <h1 class="text-base font-bold tracking-tight text-stone-900 flex items-center gap-2">
+            IP分组转发的过程
+            <span class="text-xs font-mono font-normal px-2 py-0.5 rounded bg-sky-50 text-sky-700 border border-sky-200">408 核心考点</span>
+          </h1>
+        </div>
+      </div>
+
+      <!-- 场景切换胶囊控制器 (3 次转发过程) -->
+      <div class="flex items-center p-1 bg-stone-200/70 rounded-xl text-xs font-mono">
+        <button id="scenario-btn-1" onclick="switchScenario(1)" class="px-3 py-1.5 rounded-lg font-bold transition-all bg-white text-stone-900 shadow-sm">
+          ① 非跨网 (H1 &rarr; H1b)
+        </button>
+        <button id="scenario-btn-2" onclick="switchScenario(2)" class="px-3 py-1.5 rounded-lg font-medium text-stone-600 hover:text-stone-900 transition-all">
+          ② 跨网 1 跳 (H1 &rarr; H2 对照原图)
+        </button>
+        <button id="scenario-btn-3" onclick="switchScenario(3)" class="px-3 py-1.5 rounded-lg font-medium text-stone-600 hover:text-stone-900 transition-all">
+          ③ 跨网 2 跳 (H1 &rarr; H3 双路由)
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- ============================================================ -->
+  <!-- 主界面 Main -->
+  <!-- ============================================================ -->
+  <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-4 space-y-4">
+
+    <!-- 播放与单步控制卡片 -->
+    <section class="bg-white border border-[#E5E4DC] rounded-2xl p-3 sm:p-4 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-3">
+      <div class="flex items-center gap-2">
+        <button id="btn-play-pause" onclick="togglePlay()" class="btn-tactile-primary px-3.5 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5">
+          <span id="play-icon">▶</span>
+          <span id="play-text">自动播放</span>
+        </button>
+        <button onclick="stepPrev()" class="btn-tactile px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1 text-stone-700">
+          <span>⏮</span> 上一步
+        </button>
+        <button onclick="stepNext()" class="btn-tactile px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1 text-stone-700">
+          下一步 <span>⏭</span>
+        </button>
+        <button onclick="resetCurrentScenario()" class="btn-tactile px-3 py-1.5 rounded-xl text-xs font-semibold text-stone-600 hover:text-stone-900">
+          ↺ 重置
+        </button>
+        <div class="h-4 w-[1px] bg-stone-200 mx-1"></div>
+        <!-- 速度调节 -->
+        <div class="flex items-center gap-1 text-[11px] font-mono text-stone-500">
+          <span>倍速:</span>
+          <button onclick="setSpeed(0.5)" id="speed-05" class="px-1.5 py-0.5 rounded border border-stone-200 hover:bg-stone-100">0.5x</button>
+          <button onclick="setSpeed(1.0)" id="speed-10" class="px-1.5 py-0.5 rounded border border-stone-900 bg-stone-900 text-white">1.0x</button>
+          <button onclick="setSpeed(1.5)" id="speed-15" class="px-1.5 py-0.5 rounded border border-stone-200 hover:bg-stone-100">1.5x</button>
+        </div>
+      </div>
+
+      <!-- 步骤流程指示条 -->
+      <div id="step-indicators" class="flex items-center gap-1.5 overflow-x-auto text-[11px] font-mono">
+        <!-- JS 动态渲染步骤标签 -->
+      </div>
+    </section>
+
+    <!-- 核心拓扑图容器 (完全参考原图布局) -->
+    <section class="bg-white border border-[#E5E4DC] rounded-2xl p-4 shadow-sm relative overflow-hidden">
+      <!-- 拓扑标题与当前状态浮层 -->
+      <div class="flex items-center justify-between mb-2">
+        <div class="flex items-center gap-2">
+          <span class="w-2.5 h-2.5 rounded-full bg-blue-600"></span>
+          <span class="text-xs font-bold text-stone-800" id="topology-title">网络拓扑布局</span>
+          <span class="text-[11px] font-mono text-stone-500" id="topology-desc">N1: 128.1.2.192/26 &emsp;|&emsp; N2: 128.1.2.128/26 &emsp;|&emsp; N3: 128.1.3.64/26</span>
+        </div>
+        <!-- 数据包信息标签 -->
+        <div id="packet-status-badge" class="px-2.5 py-1 rounded-lg text-xs font-mono bg-stone-100 border border-stone-200 text-stone-700 flex items-center gap-2">
+          <span class="pulse-led pulse-led-blue"></span>
+          <span id="packet-badge-text">准备就绪: 等待源主机判断</span>
+        </div>
+      </div>
+
+      <!-- SVG 拓扑画布 -->
+      <div class="w-full overflow-x-auto">
+        <svg id="network-svg" viewBox="0 0 1060 360" class="w-full min-w-[960px] h-[340px] select-none">
+          <defs>
+            <!-- 阴影滤镜 -->
+            <filter id="soft-shadow" x="-10%" y="-10%" width="120%" height="120%">
+              <feDropShadow dx="0" dy="2" stdDeviation="3" flood-opacity="0.08"/>
+            </filter>
+            <!-- 发光滤镜 -->
+            <filter id="glow-blue" x="-20%" y="-20%" width="140%" height="140%">
+              <feGaussianBlur stdDeviation="3" result="blur" />
+              <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+            </filter>
+            <!-- 箭头标记 -->
+            <marker id="arrowhead" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+              <polygon points="0 0, 8 3, 0 6" fill="#64748B"/>
+            </marker>
+          </defs>
+
+          <!-- ==================== 区域 1: 网络 N1 (128.1.2.192/26) ==================== -->
+          <g id="region-N1">
+            <rect x="20" y="20" width="220" height="310" class="network-boundary" id="rect-N1" />
+            <text x="35" y="48" font-size="14" font-weight="bold" fill="#334155">N<tspan font-size="10" dy="3">1</tspan><tspan font-size="14" dy="-3"> 128.1.2.192/26</tspan></text>
+
+            <!-- 主机 H1 (128.1.2.194) -->
+            <g id="node-H1" class="cursor-pointer" transform="translate(45, 75)">
+              <rect width="70" height="52" rx="8" fill="#FFFFFF" stroke="#E11D48" stroke-width="2" filter="url(#soft-shadow)"/>
+              <!-- 显示器图标 -->
+              <rect x="15" y="10" width="40" height="26" rx="3" fill="#FFE4E6" stroke="#E11D48" stroke-width="1.5"/>
+              <line x1="35" y1="36" x2="35" y2="44" stroke="#E11D48" stroke-width="2"/>
+              <line x1="25" y1="44" x2="45" y2="44" stroke="#E11D48" stroke-width="2"/>
+              <text x="35" y="27" font-size="11" font-weight="bold" fill="#E11D48" text-anchor="middle">H1</text>
+              <text x="35" y="-6" font-size="12" font-weight="bold" fill="#E11D48" text-anchor="middle">128.1.2.194</text>
+            </g>
+
+            <!-- 主机 H1b (128.1.2.195) -->
+            <g id="node-H1b" class="cursor-pointer group" onclick="switchScenario(1)" transform="translate(45, 205)">
+              <title>点击测试：向同网主机 H1b 发送 (非跨网直接交付)</title>
+              <rect width="70" height="52" rx="8" fill="#FFFFFF" stroke="#64748B" stroke-width="1.5" filter="url(#soft-shadow)"/>
+              <rect x="15" y="10" width="40" height="26" rx="3" fill="#F1F5F9" stroke="#64748B" stroke-width="1.5"/>
+              <line x1="35" y1="36" x2="35" y2="44" stroke="#64748B" stroke-width="2"/>
+              <line x1="25" y1="44" x2="45" y2="44" stroke="#64748B" stroke-width="2"/>
+              <text x="35" y="27" font-size="11" font-weight="bold" fill="#475569" text-anchor="middle">H1b</text>
+              <text x="35" y="68" font-size="11" font-family="monospace" fill="#475569" text-anchor="middle">128.1.2.195</text>
+            </g>
+
+            <!-- 交换机 SW1 -->
+            <g id="node-SW1" transform="translate(170, 140)">
+              <rect width="52" height="52" rx="10" fill="#FFFFFF" stroke="#0F172A" stroke-width="2.5" filter="url(#soft-shadow)"/>
+              <!-- 双向交叉箭头图标 -->
+              <path d="M14 20 L38 20 M34 16 L38 20 L34 24" stroke="#0F172A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M38 32 L14 32 M18 28 L14 32 L18 36" stroke="#0F172A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              <text x="26" y="68" font-size="11" font-weight="bold" fill="#334155" text-anchor="middle">SW1</text>
+            </g>
+
+            <!-- N1 内部连线 -->
+            <line x1="115" y1="101" x2="170" y2="155" stroke="#94A3B8" stroke-width="2" id="line-H1-SW1"/>
+            <line x1="115" y1="231" x2="170" y2="175" stroke="#94A3B8" stroke-width="2" id="line-H1b-SW1"/>
+          </g>
+
+          <!-- ==================== 路由器 R1 ==================== -->
+          <g id="node-R1" transform="translate(320, 136)">
+            <!-- 连线 SW1 -> R1 接口 0 -->
+            <line x1="-98" y1="30" x2="0" y2="30" stroke="#94A3B8" stroke-width="2.5" id="line-SW1-R1"/>
+
+            <!-- 路由器圆盘主体 -->
+            <circle cx="36" cy="30" r="28" fill="#FFFFFF" stroke="#0F172A" stroke-width="2.5" filter="url(#soft-shadow)"/>
+            <!-- 路由器内部四向交叉箭头 -->
+            <path d="M20 30 L52 30 M47 26 L52 30 L47 34 M25 26 L20 30 L25 34" stroke="#0F172A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M36 14 L36 46 M32 19 L36 14 L40 19 M32 41 L36 46 L40 41" stroke="#0F172A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+
+            <text x="36" y="80" font-size="13" font-weight="bold" fill="#0F172A" text-anchor="middle">R1</text>
+
+            <!-- 接口 0 标注 (左侧) -->
+            <text x="-4" y="24" font-size="10" font-family="monospace" font-weight="bold" fill="#2563EB" text-anchor="end">128.1.2.193</text>
+            <text x="-4" y="38" font-size="9" fill="#64748B" text-anchor="end">接口0</text>
+
+            <!-- 接口 1 标注 (右侧) -->
+            <text x="76" y="24" font-size="10" font-family="monospace" font-weight="bold" fill="#2563EB" text-anchor="start">128.1.2.129</text>
+            <text x="76" y="38" font-size="9" fill="#64748B" text-anchor="start">接口1</text>
+          </g>
+
+          <!-- ==================== 区域 2: 网络 N2 (128.1.2.128/26) ==================== -->
+          <g id="region-N2">
+            <rect x="440" y="20" width="230" height="310" class="network-boundary" id="rect-N2" />
+            <text x="455" y="48" font-size="14" font-weight="bold" fill="#334155">N<tspan font-size="10" dy="3">2</tspan><tspan font-size="14" dy="-3"> 128.1.2.128/26</tspan></text>
+
+            <!-- 连线 R1 接口 1 -> SW2 -->
+            <line x1="392" y1="166" x2="495" y2="166" stroke="#94A3B8" stroke-width="2.5" id="line-R1-SW2"/>
+
+            <!-- 交换机 SW2 -->
+            <g id="node-SW2" transform="translate(495, 140)">
+              <rect width="52" height="52" rx="10" fill="#FFFFFF" stroke="#0F172A" stroke-width="2.5" filter="url(#soft-shadow)"/>
+              <path d="M14 20 L38 20 M34 16 L38 20 L34 24" stroke="#0F172A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M38 32 L14 32 M18 28 L14 32 L18 36" stroke="#0F172A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              <text x="26" y="68" font-size="11" font-weight="bold" fill="#334155" text-anchor="middle">SW2</text>
+            </g>
+
+            <!-- 主机 H2 (128.1.2.132) -->
+            <g id="node-H2" class="cursor-pointer group" onclick="switchScenario(2)" transform="translate(540, 205)">
+              <title>点击测试：向 H2 发送 (跨网 1 跳转发，对照原图)</title>
+              <rect width="70" height="52" rx="8" fill="#FFFFFF" stroke="#0284C7" stroke-width="2" filter="url(#soft-shadow)"/>
+              <rect x="15" y="10" width="40" height="26" rx="3" fill="#E0F2FE" stroke="#0284C7" stroke-width="1.5"/>
+              <line x1="35" y1="36" x2="35" y2="44" stroke="#0284C7" stroke-width="2"/>
+              <line x1="25" y1="44" x2="45" y2="44" stroke="#0284C7" stroke-width="2"/>
+              <text x="35" y="27" font-size="11" font-weight="bold" fill="#0284C7" text-anchor="middle">H2</text>
+              <text x="35" y="68" font-size="11" font-weight="bold" fill="#0284C7" text-anchor="middle">128.1.2.132</text>
+            </g>
+
+            <!-- N2 内部连线 -->
+            <line x1="521" y1="192" x2="575" y2="205" stroke="#94A3B8" stroke-width="2" id="line-SW2-H2"/>
+          </g>
+
+          <!-- ==================== 路由器 R2 ==================== -->
+          <g id="node-R2" transform="translate(680, 136)">
+            <!-- 连线 SW2 -> R2 接口 0 -->
+            <line x1="-133" y1="30" x2="0" y2="30" stroke="#94A3B8" stroke-width="2.5" id="line-SW2-R2"/>
+
+            <circle cx="36" cy="30" r="28" fill="#FFFFFF" stroke="#0F172A" stroke-width="2.5" filter="url(#soft-shadow)"/>
+            <path d="M20 30 L52 30 M47 26 L52 30 L47 34 M25 26 L20 30 L25 34" stroke="#0F172A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M36 14 L36 46 M32 19 L36 14 L40 19 M32 41 L36 46 L40 41" stroke="#0F172A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+
+            <text x="36" y="80" font-size="13" font-weight="bold" fill="#0F172A" text-anchor="middle">R2</text>
+
+            <!-- 接口 0 标注 (左侧) -->
+            <text x="-4" y="24" font-size="10" font-family="monospace" font-weight="bold" fill="#2563EB" text-anchor="end">128.1.2.130</text>
+            <text x="-4" y="38" font-size="9" fill="#64748B" text-anchor="end">接口0</text>
+
+            <!-- 接口 1 标注 (右侧) -->
+            <text x="76" y="24" font-size="10" font-family="monospace" font-weight="bold" fill="#2563EB" text-anchor="start">128.1.3.65</text>
+            <text x="76" y="38" font-size="9" fill="#64748B" text-anchor="start">接口1</text>
+          </g>
+
+          <!-- ==================== 区域 3: 网络 N3 (128.1.3.64/26) ==================== -->
+          <g id="region-N3">
+            <rect x="800" y="20" width="240" height="310" class="network-boundary" id="rect-N3" />
+            <text x="815" y="48" font-size="14" font-weight="bold" fill="#334155">N<tspan font-size="10" dy="3">3</tspan><tspan font-size="14" dy="-3"> 128.1.3.64/26</tspan></text>
+
+            <!-- 连线 R2 接口 1 -> SW3 -->
+            <line x1="752" y1="166" x2="835" y2="166" stroke="#94A3B8" stroke-width="2.5" id="line-R2-SW3"/>
+
+            <!-- 交换机 SW3 -->
+            <g id="node-SW3" transform="translate(835, 140)">
+              <rect width="52" height="52" rx="10" fill="#FFFFFF" stroke="#0F172A" stroke-width="2.5" filter="url(#soft-shadow)"/>
+              <path d="M14 20 L38 20 M34 16 L38 20 L34 24" stroke="#0F172A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M38 32 L14 32 M18 28 L14 32 L18 36" stroke="#0F172A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              <text x="26" y="68" font-size="11" font-weight="bold" fill="#334155" text-anchor="middle">SW3</text>
+            </g>
+
+            <!-- 主机 H3 (128.1.3.66) -->
+            <g id="node-H3" class="cursor-pointer group" onclick="switchScenario(3)" transform="translate(930, 75)">
+              <title>点击测试：向 H3 发送 (跨网 2 跳多路由查表转发)</title>
+              <rect width="70" height="52" rx="8" fill="#FFFFFF" stroke="#059669" stroke-width="2" filter="url(#soft-shadow)"/>
+              <rect x="15" y="10" width="40" height="26" rx="3" fill="#D1FAE5" stroke="#059669" stroke-width="1.5"/>
+              <line x1="35" y1="36" x2="35" y2="44" stroke="#059669" stroke-width="2"/>
+              <line x1="25" y1="44" x2="45" y2="44" stroke="#059669" stroke-width="2"/>
+              <text x="35" y="27" font-size="11" font-weight="bold" fill="#059669" text-anchor="middle">H3</text>
+              <text x="35" y="-6" font-size="12" font-weight="bold" fill="#059669" text-anchor="middle">128.1.3.66</text>
+            </g>
+
+            <!-- 主机 H3b (128.1.3.67) -->
+            <g id="node-H3b" class="cursor-pointer" transform="translate(930, 205)">
+              <rect width="70" height="52" rx="8" fill="#FFFFFF" stroke="#64748B" stroke-width="1.5" filter="url(#soft-shadow)"/>
+              <rect x="15" y="10" width="40" height="26" rx="3" fill="#F1F5F9" stroke="#64748B" stroke-width="1.5"/>
+              <line x1="35" y1="36" x2="35" y2="44" stroke="#64748B" stroke-width="2"/>
+              <line x1="25" y1="44" x2="45" y2="44" stroke="#64748B" stroke-width="2"/>
+              <text x="35" y="27" font-size="11" font-weight="bold" fill="#475569" text-anchor="middle">H3b</text>
+              <text x="35" y="68" font-size="11" font-family="monospace" fill="#475569" text-anchor="middle">128.1.3.67</text>
+            </g>
+
+            <!-- N3 内部连线 -->
+            <line x1="887" y1="155" x2="930" y2="101" stroke="#94A3B8" stroke-width="2" id="line-SW3-H3"/>
+            <line x1="887" y1="175" x2="930" y2="231" stroke="#94A3B8" stroke-width="2" id="line-SW3-H3b"/>
+          </g>
+
+          <!-- ==================== 动效数据包图元 (Packet) ==================== -->
+          <g id="packet-group" class="packet-node" style="opacity: 0; pointer-events: none;" transform="translate(0, 0)">
+            <circle cx="0" cy="0" r="14" fill="#2563EB" filter="url(#glow-blue)"/>
+            <rect x="-8" y="-6" width="16" height="12" rx="2" fill="#FFFFFF"/>
+            <path d="M-8 -6 L0 0 L8 -6" fill="none" stroke="#2563EB" stroke-width="1.5"/>
+            <!-- 浮动信息框 -->
+            <g transform="translate(0, -32)">
+              <rect x="-65" y="-12" width="130" height="24" rx="6" fill="#1E293B" opacity="0.92"/>
+              <text id="packet-fly-label" x="0" y="4" font-size="10" font-family="monospace" fill="#F8FAFC" font-weight="bold" text-anchor="middle">IP: 128.1.2.194 &rarr;</text>
+            </g>
+          </g>
+        </svg>
+      </div>
+    </section>
+
+    <!-- ============================================================ -->
+    <!-- 核心演示区：两个动态动画推演面板 (左右并排或响应式堆叠) -->
+    <!-- ============================================================ -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+
+      <!-- 面板 1: 源主机网络号提取与二进制按位与 (AND) 运算动画 -->
+      <section class="bg-white border border-[#E5E4DC] rounded-2xl p-4 sm:p-5 shadow-sm space-y-4">
+        <div class="flex items-center justify-between border-b border-[#E5E4DC] pb-3">
+          <div class="flex items-center gap-2">
+            <span class="w-2 h-2 rounded-full bg-indigo-600"></span>
+            <h2 class="text-sm font-bold text-stone-900">① 源主机判断：二进制 AND 运算推演</h2>
+          </div>
+          <!-- 颜色图例 -->
+          <div class="flex items-center gap-2 text-[10px] font-mono">
+            <span class="px-2 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-200 font-bold">■ 前26位: 网络号</span>
+            <span class="px-2 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200 font-bold">■ 后6位: 主机号</span>
+            <span id="and-status-tag" class="px-2 py-0.5 rounded bg-stone-100 text-stone-600 border border-stone-200">
+              等待开始
+            </span>
+          </div>
+        </div>
+
+        <!-- 教学原理提示 (Obsidian Note) -->
+        <div class="bg-blue-50/70 border border-blue-200/80 rounded-xl p-3 text-xs text-blue-900 leading-relaxed">
+          <span class="font-bold">📘 判断机制：</span>源主机 H1 发送前，必须先将<strong>目的IP地址</strong>与<strong>源主机的子网掩码</strong>进行二进制<strong>按位与 (AND)</strong> 运算。若运算所得网络号与 H1 自身网络号一致，则为<strong>直接交付</strong>；否则交由<strong>默认网关 (路由器)</strong> 进行间接交付。
+        </div>
+
+        <!-- 二进制计算推演主容器 (支持初始空白状态与动态推演) -->
+        <div id="and-main-container" class="min-h-[290px] flex flex-col justify-center">
+
+          <!-- 初始空白等待状态 -->
+          <div id="and-placeholder" class="py-12 px-6 flex flex-col items-center justify-center text-center space-y-3 bg-stone-50/60 border border-dashed border-stone-300 rounded-xl">
+            <div class="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center text-lg shadow-sm border border-blue-100">
+              ⚙️
+            </div>
+            <div>
+              <h4 class="text-xs font-bold text-stone-800">计算面板就绪（初始空白）</h4>
+              <p class="text-[11px] text-stone-500 mt-1 max-w-sm">
+                点击顶部的【自动播放】或【下一步】，源主机 IP 将下移展开为二进制并与子网掩码、目的 IP 进行逐位相与推演。
+              </p>
+            </div>
+          </div>
+
+          <!-- 动态推演画布容器 (JS 动态驱动显示与动画) -->
+          <div id="and-canvas" class="hidden space-y-3">
+            <!-- 动态阶段指示 -->
+            <div id="and-stage-badge" class="px-3 py-1.5 rounded-lg bg-stone-100 text-stone-700 text-xs font-mono font-bold flex items-center justify-between border border-stone-200">
+              <span id="and-stage-text">阶段 1: 源主机 IP 移入并展开为二进制</span>
+              <span class="pulse-led pulse-led-blue"></span>
+            </div>
+
+            <!-- 动态推演展示区 -->
+            <div class="bg-stone-50 border border-stone-200 rounded-xl p-3 space-y-3 font-mono text-xs">
+
+              <!-- 目的 IP 行 -->
+              <div id="row-dest-ip" class="space-y-1 opacity-0 transition-opacity duration-300">
+                <div class="flex items-center justify-between text-stone-500 text-[11px]">
+                  <span class="font-bold text-blue-900 flex items-center gap-1.5">
+                    <span class="w-2 h-2 rounded-full bg-blue-500"></span> 目的主机 IP (Dest IP)
+                  </span>
+                  <span id="dest-ip-decimal" class="text-blue-700 font-bold text-sm bg-blue-50 px-2 py-0.5 rounded border border-blue-200">128.1.2.132</span>
+                </div>
+                <div id="dest-ip-bits" class="flex flex-wrap gap-[1px]">
+                  <!-- 动态填充 32 位二进制 -->
+                </div>
+              </div>
+
+              <!-- 子网掩码行 (支持源主机 IP 渐变为掩码) -->
+              <div id="row-mask-ip" class="space-y-1 opacity-0 transition-opacity duration-300">
+                <div class="flex items-center justify-between text-stone-500 text-[11px]">
+                  <span id="mask-row-label" class="font-bold text-stone-800 flex items-center gap-1.5">
+                    <span class="w-2 h-2 rounded-full bg-stone-500"></span> 源主机子网掩码 (Mask /26)
+                  </span>
+                  <span id="mask-ip-decimal" class="text-stone-700 font-bold text-sm bg-stone-100 px-2 py-0.5 rounded border border-stone-200">255.255.255.192 (/26)</span>
+                </div>
+                <div id="mask-ip-bits" class="flex flex-wrap gap-[1px]">
+                  <!-- 动态填充 32 位二进制 -->
+                </div>
+              </div>
+
+              <!-- 运算分隔线 -->
+              <div id="and-calc-divider" class="border-t border-dashed border-stone-300 relative my-1 opacity-0">
+                <span class="absolute right-0 -top-2.5 bg-stone-50 px-1 text-[10px] text-stone-500 font-bold">按位与 (AND) ↓</span>
+              </div>
+
+              <!-- 计算结果网络号行 -->
+              <div id="row-calc-net" class="space-y-1 opacity-0 transition-opacity duration-300">
+                <div class="flex items-center justify-between text-stone-500 text-[11px]">
+                  <span class="font-bold text-emerald-800 flex items-center gap-1.5">
+                    <span class="w-2 h-2 rounded-full bg-emerald-500"></span> 运算所得目的网络号
+                  </span>
+                  <span id="calc-net-decimal" class="text-emerald-700 font-bold text-sm bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">128.1.2.128/26</span>
+                </div>
+                <div id="calc-net-bits" class="flex flex-wrap gap-[1px]">
+                  <!-- 动态填充 32 位二进制结果 -->
+                </div>
+              </div>
+
+              <!-- 与源主机网络号比对 -->
+              <div id="row-compare" class="pt-2 border-t border-stone-200 flex items-center justify-between text-[11px] opacity-0 transition-opacity duration-300">
+                <div class="flex items-center gap-2">
+                  <span class="text-stone-500">源主机自身网络号:</span>
+                  <span id="src-net-decimal" class="font-bold text-stone-800 bg-white px-2 py-0.5 rounded border border-stone-200">128.1.2.192/26</span>
+                </div>
+                <div id="and-compare-result" class="font-bold px-2 py-0.5 rounded text-xs">
+                  <!-- 比对结果 -->
+                </div>
+              </div>
+            </div>
+
+            <!-- 当前结论框 -->
+            <div id="and-conclusion-box" class="p-3 rounded-xl border text-xs leading-relaxed transition-all">
+              <!-- 动态更新 -->
+            </div>
+          </div>
+
+        </div>
+      </section>
+
+      <!-- 面板 2: 路由器查表与最长前缀匹配动画 -->
+      <section class="bg-white border border-[#E5E4DC] rounded-2xl p-4 sm:p-5 shadow-sm space-y-4">
+        <div class="flex items-center justify-between border-b border-[#E5E4DC] pb-3">
+          <div class="flex items-center gap-2">
+            <span class="w-2 h-2 rounded-full bg-amber-600"></span>
+            <h2 class="text-sm font-bold text-stone-900" id="router-table-title">② 路由器 R1 查表动态匹配</h2>
+          </div>
+          <span id="lookup-status-tag" class="text-[11px] font-mono px-2 py-0.5 rounded bg-stone-100 text-stone-600 border border-stone-200">
+            等待查表
+          </span>
+        </div>
+
+        <!-- 教学原理提示 (Obsidian Note) -->
+        <div class="bg-amber-50/70 border border-amber-200/80 rounded-xl p-3 text-xs text-amber-900 leading-relaxed">
+          <span class="font-bold">🧭 查表原理：</span>路由器收到 IP 分组后，提取<strong>目的 IP</strong>，逐条与路由表项的<strong>子网掩码</strong>相与。若计算结果与该表项的<strong>目的网络前缀</strong>匹配，则根据该表项的<strong>下一跳 / 出接口</strong>进行转发。
+        </div>
+
+        <!-- 动态路由表 -->
+        <div class="overflow-x-auto border border-stone-200 rounded-xl">
+          <table class="w-full text-left text-xs font-mono">
+            <thead class="bg-stone-100/80 text-stone-600 border-b border-stone-200">
+              <tr>
+                <th class="py-2 px-2.5 font-bold">目的网络前缀</th>
+                <th class="py-2 px-2 font-bold">下一跳</th>
+                <th class="py-2 px-2 font-bold">出接口</th>
+                <th class="py-2 px-2 font-bold">AND 运算测试</th>
+                <th class="py-2 px-2 text-center font-bold">匹配结果</th>
+              </tr>
+            </thead>
+            <tbody id="routing-table-body" class="divide-y divide-stone-100">
+              <!-- JS 动态注入路由表项并做高亮扫描动画 -->
+            </tbody>
+          </table>
+        </div>
+
+        <!-- 查表决策结论与转发出向说明 -->
+        <div id="lookup-conclusion-box" class="p-3 rounded-xl border text-xs leading-relaxed transition-all">
+          <!-- 动态更新 -->
+        </div>
+      </section>
+
+    </div>
+
+    <!-- ============================================================ -->
+    <!-- 408 考点速查与概念辨析卡片 -->
+    <!-- ============================================================ -->
+    <section class="bg-white border border-[#E5E4DC] rounded-2xl p-4 sm:p-5 shadow-sm">
+      <h3 class="text-xs font-bold text-stone-800 uppercase tracking-wider mb-3 flex items-center gap-1.5">
+        <span class="w-1.5 h-1.5 rounded-full bg-emerald-600"></span>
+        408 计算机网络大纲核心考点解析 (IP 分组交付与转发表)
+      </h3>
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
+        <div class="p-3 rounded-xl bg-stone-50 border border-stone-200/80 space-y-1">
+          <div class="font-bold text-stone-900 flex items-center gap-1">
+            <span class="text-blue-600">●</span> 1. 直接交付 vs 间接交付
+          </div>
+          <p class="text-stone-600 leading-relaxed text-[11px]">
+            源主机与目的主机在<strong>同一网段</strong>（网络号相同），直接通过局域网交换机交付，称为<strong>直接交付</strong>；若不在同一网段，必须先交付给<strong>默认网关</strong>，称为<strong>间接交付</strong>。
+          </p>
+        </div>
+
+        <div class="p-3 rounded-xl bg-stone-50 border border-stone-200/80 space-y-1">
+          <div class="font-bold text-stone-900 flex items-center gap-1">
+            <span class="text-amber-600">●</span> 2. 路由转发与地址变换
+          </div>
+          <p class="text-stone-600 leading-relaxed text-[11px]">
+            IP 分组在跨网络转发的整个过程中：<strong>源 IP 与目的 IP 始终保持不变</strong>；而在数据链路层封装时，<strong>源 MAC 与目的 MAC 地址在每一跳都在发生改变</strong>。
+          </p>
+        </div>
+
+        <div class="p-3 rounded-xl bg-stone-50 border border-stone-200/80 space-y-1">
+          <div class="font-bold text-stone-900 flex items-center gap-1">
+            <span class="text-emerald-600">●</span> 3. 最长前缀匹配原则
+          </div>
+          <p class="text-stone-600 leading-relaxed text-[11px]">
+            当路由表中有多条表项都能与目的 IP 匹配时，路由器优先选择<strong>网络前缀最长</strong>（子网掩码 1 最多）的表项，因为前缀越长，其所指定的网络范围越明确、路由越精确。
+          </p>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ============================================================ -->
+  <!-- 极简页脚 Footer -->
+  <!-- ============================================================ -->
+  <footer class="border-t border-[#E5E4DC] py-4 text-center text-xs font-mono text-stone-400">
+    IP 分组转发过程与路由查表 · 408 计算机网络交互式教学系统
+  </footer>
+
+  <!-- App Logic -->
+  <script src="app.js"></script>
+</body>
+</html>
