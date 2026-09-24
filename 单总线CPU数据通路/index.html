@@ -49,12 +49,15 @@
         <span class="text-stone-500">B=</span>
         <input id="input-op-b" type="text" value="42" class="w-14 bg-transparent font-bold text-stone-900 focus:outline-none">
       </div>
-      <div class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-stone-200 bg-white font-mono text-stone-500">
-        <span>速度</span>
-        <input id="speed-slider" type="range" min="0.3" max="2.5" step="0.1" value="1.0" class="w-20 accent-amber-600 cursor-pointer">
-        <span id="speed-val" class="font-bold text-stone-800 w-8">1.0x</span>
+      <div class="flex items-center gap-2 px-3 py-1.5 rounded-xl border border-stone-200 bg-white font-mono text-stone-500 shadow-[0_1px_2px_rgba(0,0,0,0.02)]">
+        <span class="text-xs">速度</span>
+        <input id="speed-slider" type="range" min="0.3" max="2.5" step="0.1" value="1.0" class="w-20 taste-slider">
+        <span id="speed-val" class="font-bold text-stone-800 w-8 text-xs">1.0x</span>
       </div>
-      <button id="btn-reset" class="px-3 py-1.5 rounded-lg border border-stone-200 bg-white hover:bg-stone-100 font-mono text-stone-700 transition">复位</button>
+      <button id="btn-reset" class="btn-tactile px-3 py-1.5 text-xs text-stone-700">
+        <svg class="w-3.5 h-3.5 text-stone-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+        复位
+      </button>
     </div>
   </header>
 
@@ -69,7 +72,7 @@
         <!-- Overlay: current cycle & micro-op -->
         <div class="absolute top-3 left-3 z-10 flex flex-col gap-1 pointer-events-none">
           <div class="flex items-center gap-2 bg-white/95 px-2.5 py-1 rounded-lg border border-stone-200 text-xs shadow-sm">
-            <span class="w-2 h-2 rounded-full bg-amber-500"></span>
+            <span class="pulse-led pulse-led-amber" id="canvas-status-led"></span>
             <span class="font-mono font-semibold text-stone-800" id="canvas-status-step">时钟周期: T0</span>
           </div>
           <div class="text-[11px] font-mono text-stone-500 bg-white/90 px-2 py-0.5 rounded border border-stone-200 max-w-[460px]" id="canvas-status-rtl">
@@ -79,18 +82,23 @@
 
         <svg id="cpu-svg" viewBox="0 0 1240 940" class="w-full h-auto" xmlns="http://www.w3.org/2000/svg">
           <defs>
-            <marker id="arrow-gray" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
-              <path d="M1,1 L7,4 L1,7 Z" fill="#94A3B8" />
+            <!-- 统一采用 userSpaceOnUse 避免受总线粗细影响产生上百像素的巨型多边形 -->
+            <marker id="arrow-gray" markerUnits="userSpaceOnUse" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto">
+              <path d="M1,1.5 L7,4.5 L1,7.5 Z" fill="#94A3B8" />
             </marker>
-            <marker id="arrow-blue" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto">
-              <path d="M1,1 L8,4.5 L1,8 Z" fill="#2563EB" />
+            <marker id="arrow-blue" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+              <path d="M1,2 L8,5 L1,8 Z" fill="#2563EB" />
             </marker>
-            <marker id="arrow-green" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto-start-reverse">
-              <path d="M1,1 L8,4.5 L1,8 Z" fill="#059669" />
+            <marker id="arrow-green" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto-start-reverse">
+              <path d="M1,2 L8,5 L1,8 Z" fill="#059669" />
             </marker>
-            <marker id="arrow-purple" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto">
-              <path d="M1,1 L8,4.5 L1,8 Z" fill="#7C3AED" />
+            <marker id="arrow-purple" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+              <path d="M1,2 L8,5 L1,8 Z" fill="#7C3AED" />
             </marker>
+            <!-- 数据包发光滤镜 -->
+            <filter id="packet-glow" x="-20%" y="-20%" width="140%" height="140%">
+              <feDropShadow dx="0" dy="2" stdDeviation="4" flood-color="#D97706" flood-opacity="0.35"/>
+            </filter>
           </defs>
 
           <!-- ================= Zones ================= -->
@@ -106,14 +114,28 @@
           </g>
 
           <!-- ================= 外部系统总线主干 (ABUS / DBUS / CBUS) ================= -->
-          <text x="855" y="112" text-anchor="middle" class="bus-label" fill="#2563EB">地址总线 ABUS</text>
-          <line id="bus-abus-trunk" x1="800" y1="130" x2="910" y2="130" class="bus-trunk bus-trunk-abus" marker-end="url(#arrow-blue)"/>
+          <!-- 地址总线 ABUS -->
+          <g id="group-abus">
+            <rect x="806" y="98" width="98" height="18" rx="4" fill="#EFF6FF" stroke="#BFDBFE" stroke-width="1"/>
+            <text x="855" y="111" text-anchor="middle" class="bus-label" fill="#2563EB">地址总线 ABUS</text>
+            <line id="bus-abus-trunk" x1="800" y1="130" x2="908" y2="130" class="bus-trunk bus-trunk-abus" marker-end="url(#arrow-blue)"/>
+          </g>
 
-          <text x="855" y="352" text-anchor="middle" class="bus-label" fill="#059669">数据总线 DBUS</text>
-          <line id="bus-dbus-trunk" x1="800" y1="330" x2="910" y2="330" class="bus-trunk bus-trunk-dbus" marker-start="url(#arrow-green)" marker-end="url(#arrow-green)"/>
+          <!-- 数据总线 DBUS (双向) -->
+          <g id="group-dbus">
+            <rect x="806" y="298" width="98" height="18" rx="4" fill="#ECFDF5" stroke="#A7F3D0" stroke-width="1"/>
+            <text x="855" y="311" text-anchor="middle" class="bus-label" fill="#059669">数据总线 DBUS</text>
+            <line id="bus-dbus-trunk" x1="808" y1="330" x2="902" y2="330" class="bus-trunk bus-trunk-dbus" marker-start="url(#arrow-green)" marker-end="url(#arrow-green)"/>
+          </g>
 
-          <text x="855" y="457" text-anchor="middle" class="bus-label" fill="#7C3AED">控制总线 CBUS</text>
-          <line id="bus-cbus-trunk" x1="800" y1="475" x2="910" y2="475" class="bus-trunk bus-trunk-cbus" marker-end="url(#arrow-purple)"/>
+          <!-- 控制总线 CBUS -->
+          <g id="group-cbus">
+            <rect x="806" y="444" width="98" height="18" rx="4" fill="#F5F3FF" stroke="#DDD6FE" stroke-width="1"/>
+            <text x="855" y="457" text-anchor="middle" class="bus-label" fill="#7C3AED">控制总线 CBUS</text>
+            <line id="bus-cbus-trunk" x1="800" y1="475" x2="908" y2="475" class="bus-trunk bus-trunk-cbus" marker-end="url(#arrow-purple)"/>
+            <text id="sig-memread" x="855" y="504" text-anchor="middle" class="signal-badge inactive">MEM_Read</text>
+            <text id="sig-memwrite" x="855" y="526" text-anchor="middle" class="signal-badge inactive">MEM_Write</text>
+          </g>
 
           <!-- ================= PC 子系统 ================= -->
           <rect id="box-pc-adder" x="60" y="90" width="130" height="80" rx="8" class="component-box"/>
@@ -222,7 +244,7 @@
           <text x="632" y="120" class="comp-title">MAR 地址寄存器</text>
           <text id="val-mar" x="700" y="150" text-anchor="middle" class="comp-val">0x0800</text>
           <path id="wire-bus-to-mar" d="M 560,130 L 620,130" class="bus-internal-wire" marker-end="url(#arrow-gray)"/>
-          <text id="sig-marin" x="590" y="121" text-anchor="middle" class="pin-label">MAR_in</text>
+          <text id="sig-marin" x="590" y="112" text-anchor="middle" class="pin-label">MAR_in</text>
           <path id="wire-mar-to-abus" d="M 780,130 L 800,130" class="bus-abus-line"/>
 
           <!-- ================= MDR (CPU 侧数据接口, 双向中继) ================= -->
@@ -231,13 +253,13 @@
           <text id="val-mdr" x="700" y="322" text-anchor="middle" class="comp-val">0x00000000</text>
           <text x="700" y="360" text-anchor="middle" class="comp-sub">内总线 ↔ 外总线</text>
           <path id="wire-bus-to-mdr" d="M 560,310 L 620,310" class="bus-internal-wire" marker-end="url(#arrow-gray)"/>
-          <text id="sig-mdrin" x="590" y="301" text-anchor="middle" class="pin-label">MDR_in</text>
+          <text id="sig-mdrin" x="590" y="295" text-anchor="middle" class="pin-label">MDR_in</text>
           <path id="wire-mdr-to-bus" d="M 620,350 L 560,350" class="bus-internal-wire"/>
           <polygon id="gate-mdrout" points="600,342 600,358 580,350" class="tristate-gate"/>
           <text id="sig-mdrout" x="588" y="378" text-anchor="middle" class="signal-badge inactive">MDR_out</text>
           <path id="wire-mdr-to-dbus" d="M 780,330 L 800,330" class="bus-dbus-line"/>
-          <text id="sig-mdrine" x="790" y="300" text-anchor="middle" class="signal-badge inactive">MDR_inE</text>
-          <text id="sig-mdroute" x="788" y="364" text-anchor="middle" class="signal-badge inactive">MDR_outE</text>
+          <text id="sig-mdrine" x="755" y="300" text-anchor="middle" class="signal-badge inactive">MDR_inE</text>
+          <text id="sig-mdroute" x="755" y="364" text-anchor="middle" class="signal-badge inactive">MDR_outE</text>
 
           <!-- ================= 主存 ================= -->
           <g id="comp-main-memory">
@@ -324,12 +346,20 @@
       <div class="card-panel rounded-2xl p-3 flex flex-col gap-2">
         <div class="flex items-center justify-between gap-3">
           <div class="flex items-center gap-2">
-            <button id="btn-play-pause" class="px-4 py-2 rounded-xl bg-stone-900 hover:bg-stone-800 text-white font-mono text-xs font-semibold transition">
-              <span id="play-icon">▶</span>
+            <button id="btn-play-pause" class="btn-tactile btn-tactile-primary px-4 py-2 text-xs font-semibold">
+              <svg id="play-icon-svg" class="w-3.5 h-3.5 fill-current icon-play-shape" viewBox="0 0 24 24">
+                <polygon points="5,3 19,12 5,21" />
+              </svg>
               <span id="play-text">自动播放</span>
             </button>
-            <button id="btn-step-prev" class="px-3 py-2 rounded-xl bg-stone-100 hover:bg-stone-200 text-stone-800 font-mono text-xs transition">◀ 上一步</button>
-            <button id="btn-step-next" class="px-3 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-mono text-xs font-semibold transition">下一步 (T+1) ▶</button>
+            <button id="btn-step-prev" class="btn-tactile px-3.5 py-2 text-stone-800 text-xs">
+              <svg class="w-3.5 h-3.5 text-stone-500" fill="currentColor" viewBox="0 0 24 24"><polygon points="19,3 5,12 19,21"/></svg>
+              上一步
+            </button>
+            <button id="btn-step-next" class="btn-tactile btn-tactile-amber px-4 py-2 text-xs font-semibold">
+              下一步 (T+1)
+              <svg class="w-3.5 h-3.5 text-white" fill="currentColor" viewBox="0 0 24 24"><polygon points="5,3 19,12 5,21"/></svg>
+            </button>
           </div>
           <span class="text-[11px] font-mono text-stone-400">点击任意节拍跳转</span>
         </div>

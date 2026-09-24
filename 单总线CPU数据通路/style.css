@@ -144,8 +144,8 @@ body {
    ========================================================================== */
 
 .bus-trunk {
-  stroke-width: 11px;
-  stroke-linecap: butt;
+  stroke-width: 6px;
+  stroke-linecap: round;
   fill: none;
   transition: all 0.25s ease;
 }
@@ -153,30 +153,31 @@ body {
 .bus-trunk-abus { stroke: #BFDBFE; }
 .bus-trunk-abus.active {
   stroke: var(--bus-abus);
-  filter: drop-shadow(0 0 7px var(--bus-abus-glow));
+  filter: drop-shadow(0 0 5px var(--bus-abus-glow));
 }
 
 .bus-trunk-dbus { stroke: #A7F3D0; }
 .bus-trunk-dbus.active {
   stroke: var(--bus-dbus);
-  filter: drop-shadow(0 0 7px var(--bus-dbus-glow));
+  filter: drop-shadow(0 0 5px var(--bus-dbus-glow));
 }
 
 .bus-trunk-cbus {
   stroke: #DDD6FE;
-  stroke-width: 7px;
-  stroke-dasharray: 8 5;
+  stroke-width: 5px;
+  stroke-dasharray: 6 4;
 }
 .bus-trunk-cbus.active {
   stroke: var(--bus-cbus);
   stroke-dasharray: none;
-  filter: drop-shadow(0 0 7px var(--bus-cbus-glow));
+  filter: drop-shadow(0 0 5px var(--bus-cbus-glow));
 }
 
 .bus-label {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 700;
+  letter-spacing: 0.02em;
 }
 
 /* CPU ↔ 主存 之间的引线 (接入主干) */
@@ -347,11 +348,208 @@ body {
   border-color: #E5E4DC;
 }
 
+/* ==========================================================================
+   Taste-Skill 微组件规范 (Galaxy 筛选脱敏入库)
+   - 物理触感按键 (.btn-tactile)
+   - 呼吸脉冲指示灯 (.pulse-led)
+   - 定制纸质滑块 (.taste-slider)
+   - 纯 CSS 悬浮信息气泡 (.taste-tooltip)
+   ========================================================================== */
+
+/* 1. 物理触感微按键 */
+.btn-tactile {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.375rem;
+  padding: 0.5rem 0.875rem;
+  border: 1px solid #E5E4DC;
+  background-color: #FFFFFF;
+  color: #1C1917;
+  border-radius: 0.625rem;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.75rem;
+  font-weight: 600;
+  box-shadow: 0 1.5px 0 #D6D3CD, 0 2px 4px rgba(0, 0, 0, 0.02);
+  transition: all 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+  cursor: pointer;
+  user-select: none;
+}
+.btn-tactile:hover {
+  background-color: #FAF9F5;
+  border-color: #D6D3CD;
+  box-shadow: 0 2px 0 #C4C0B8, 0 4px 8px rgba(0, 0, 0, 0.04);
+  transform: translateY(-0.5px);
+}
+.btn-tactile:active {
+  transform: translateY(1.5px);
+  box-shadow: 0 0 0 #D6D3CD, 0 1px 2px rgba(0, 0, 0, 0.02);
+}
+
+/* 主操作按键 (深石板灰) */
+.btn-tactile-primary {
+  background-color: #1C1917;
+  color: #FFFFFF;
+  border-color: #0C0A09;
+  box-shadow: 0 2px 0 #0C0A09, 0 3px 6px rgba(28, 25, 23, 0.15);
+}
+.btn-tactile-primary:hover {
+  background-color: #292524;
+  border-color: #0C0A09;
+  box-shadow: 0 2.5px 0 #000000, 0 4px 8px rgba(28, 25, 23, 0.2);
+  transform: translateY(-0.5px);
+}
+.btn-tactile-primary:active {
+  transform: translateY(2px);
+  box-shadow: 0 0 0 #000000;
+}
+
+/* 强调操作按键 (琥珀高亮) */
+.btn-tactile-amber {
+  background-color: #D97706;
+  color: #FFFFFF;
+  border-color: #B45309;
+  box-shadow: 0 2px 0 #92400E, 0 3px 6px rgba(217, 119, 6, 0.2);
+}
+.btn-tactile-amber:hover {
+  background-color: #B45309;
+  border-color: #92400E;
+  box-shadow: 0 2.5px 0 #78350F, 0 4px 8px rgba(217, 119, 6, 0.25);
+  transform: translateY(-0.5px);
+}
+.btn-tactile-amber:active {
+  transform: translateY(2px);
+  box-shadow: 0 0 0 #78350F;
+}
+
+/* 2. 状态呼吸脉冲指示灯 */
+.pulse-led {
+  position: relative;
+  display: inline-flex;
+  width: 8px;
+  height: 8px;
+  border-radius: 9999px;
+  flex-shrink: 0;
+}
+.pulse-led::after {
+  content: '';
+  position: absolute;
+  inset: -2px;
+  border-radius: 9999px;
+  opacity: 0.75;
+  animation: pulseRing 2s cubic-bezier(0.16, 1, 0.3, 1) infinite;
+}
+@keyframes pulseRing {
+  0% { transform: scale(0.9); opacity: 0.8; }
+  70%, 100% { transform: scale(2.4); opacity: 0; }
+}
+
+.pulse-led-emerald { background-color: #059669; }
+.pulse-led-emerald::after { background-color: #10B981; }
+
+.pulse-led-amber { background-color: #D97706; }
+.pulse-led-amber::after { background-color: #F59E0B; }
+
+.pulse-led-rose { background-color: #E11D48; }
+.pulse-led-rose::after { background-color: #FB7185; }
+
+.pulse-led-idle { background-color: #A8A29E; }
+.pulse-led-idle::after { display: none; }
+
+/* 3. 定制纸质滑块 (Taste Slider) */
+.taste-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  background: #E5E4DC;
+  border-radius: 2px;
+  outline: none;
+  transition: all 0.2s ease;
+  cursor: pointer;
+}
+.taste-slider:hover {
+  background: #D6D3CD;
+}
+.taste-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #FFFFFF;
+  border: 2px solid #1C1917;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+.taste-slider::-webkit-slider-thumb:hover {
+  transform: scale(1.25);
+  box-shadow: 0 0 0 4px rgba(217, 119, 6, 0.18);
+}
+.taste-slider::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #FFFFFF;
+  border: 2px solid #1C1917;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+  transition: transform 0.15s ease;
+}
+
+/* 4. 纯 CSS 悬浮提示气泡 (Taste Tooltip) */
+.taste-tooltip-box {
+  position: relative;
+  display: inline-flex;
+}
+.taste-tooltip-box .taste-tooltip-content {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%) translateY(4px);
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  z-index: 60;
+  white-space: nowrap;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background-color: #1C1917;
+  color: #FAF9F5;
+  font-size: 11px;
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 500;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+.taste-tooltip-box .taste-tooltip-content::after {
+  content: '';
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border-width: 4px;
+  border-style: solid;
+  border-color: #1C1917 transparent transparent transparent;
+}
+.taste-tooltip-box:hover .taste-tooltip-content {
+  opacity: 1;
+  visibility: visible;
+  transform: translateX(-50%) translateY(0);
+}
+
+/* 5. 形变播放/暂停图标过渡 */
+.icon-play-shape {
+  transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.2s ease;
+}
+
 /* 动效降级 */
 @media (prefers-reduced-motion: reduce) {
   .flow-animating { animation: none; }
+  .pulse-led::after { animation: none; }
   .timeline-node, .component-box, .tristate-gate, .bus-internal-wire,
-  .bus-trunk, .bus-abus-line, .bus-dbus-line, .bus-cbus-line {
+  .bus-trunk, .bus-abus-line, .bus-dbus-line, .bus-cbus-line,
+  .btn-tactile, .taste-tooltip-content {
     transition: none !important;
   }
 }

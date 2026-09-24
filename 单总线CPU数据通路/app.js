@@ -488,11 +488,11 @@ function initSignalMatrix() {
   ALL_SIGNALS.forEach(sig => {
     const badge = document.createElement('div');
     badge.id = `badge-sig-${sig.id}`;
-    badge.className = 'signal-badge inactive flex items-center justify-between';
-    badge.title = sig.desc;
+    badge.className = 'signal-badge inactive flex items-center justify-between taste-tooltip-box';
     badge.innerHTML = `
       <span>${sig.label}</span>
       <span class="text-[9px] opacity-70 font-mono-num sig-val">0</span>
+      <span class="taste-tooltip-content">${sig.desc}</span>
     `;
     container.appendChild(badge);
   });
@@ -528,6 +528,8 @@ function updateTimelineView(currIdx) {
   });
 }
 
+let lastRenderedRegs = {};
+
 function updateRegisterTable() {
   const regs = [
     { name: 'PC', hex: toHex16(State.registers.PC), desc: '下一条指令地址' },
@@ -542,24 +544,29 @@ function updateRegisterTable() {
     { name: 'FLAGS', hex: `Z${State.registers.FLAGS.Z} C${State.registers.FLAGS.C} S${State.registers.FLAGS.S} V${State.registers.FLAGS.V}`, desc: '零/进位/符号/溢出' }
   ];
 
-  document.getElementById('register-table-body').innerHTML = regs.map(r => `
-    <tr>
-      <td class="py-1 font-bold text-stone-900">${r.name}</td>
-      <td class="py-1 font-mono-num text-amber-700 font-semibold">${r.hex}</td>
-      <td class="py-1 text-stone-500 text-[11px]">${r.desc}</td>
-    </tr>
-  `).join('');
+  document.getElementById('register-table-body').innerHTML = regs.map(r => {
+    const isChanged = lastRenderedRegs[r.name] !== undefined && lastRenderedRegs[r.name] !== r.hex;
+    return `
+      <tr class="${isChanged ? 'bg-amber-100/60 transition-colors duration-500' : ''}">
+        <td class="py-1 font-bold text-stone-900">${r.name}</td>
+        <td class="py-1 font-mono-num ${isChanged ? 'text-blue-600 font-bold' : 'text-amber-700 font-semibold'}">${r.hex}</td>
+        <td class="py-1 text-stone-500 text-[11px]">${r.desc}</td>
+      </tr>
+    `;
+  }).join('');
 
-  // 同步电路图内数值
-  document.getElementById('val-pc').textContent = toHex16(State.registers.PC);
-  document.getElementById('val-mar').textContent = toHex16(State.registers.MAR);
-  document.getElementById('val-mdr').textContent = toHex32(State.registers.MDR);
-  document.getElementById('val-ir').textContent = toHex32(State.registers.IR);
-  document.getElementById('val-y').textContent = toHex32(State.registers.Y);
-  document.getElementById('val-z').textContent = toHex32(State.registers.Z);
-  document.getElementById('val-acc').textContent = toHex32(State.registers.ACC);
-  document.getElementById('val-r0').textContent = toHex32(State.registers.R0);
-  document.getElementById('val-r1').textContent = toHex32(State.registers.R1);
+  // 触发 SVG 内寄存器数值跳变动效
+  regs.forEach(r => {
+    const svgVal = document.getElementById(`val-${r.name.toLowerCase()}`);
+    if (svgVal) {
+      svgVal.textContent = r.hex;
+      if (lastRenderedRegs[r.name] !== undefined && lastRenderedRegs[r.name] !== r.hex) {
+        gsap.fromTo(svgVal, { fill: '#2563EB', scale: 1.25 }, { fill: '#B45309', scale: 1.0, duration: 0.4, ease: 'back.out(2)' });
+      }
+    }
+    lastRenderedRegs[r.name] = r.hex;
+  });
+
   document.getElementById('flag-z').textContent = State.registers.FLAGS.Z;
   document.getElementById('flag-c').textContent = State.registers.FLAGS.C;
   document.getElementById('flag-s').textContent = State.registers.FLAGS.S;
@@ -676,7 +683,16 @@ function applyStep(step, animate = true) {
   else if (step.signals.includes('MEM_Write')) memLed.setAttribute('fill', '#EF4444');
   else memLed.setAttribute('fill', '#94A3B8');
 
-  // 8. GSAP 数据包流动 (颜色随所在总线变化)
+  // 更新时钟周期指示灯状态 (Taste-Skill 呼吸脉冲)
+  const canvasLed = document.getElementById('canvas-status-led');
+  if (canvasLed) {
+    canvasLed.className = 'pulse-led ' + (
+      step.phase.includes('取指') ? 'pulse-led-amber' :
+      step.phase.includes('间址') ? 'pulse-led-rose' : 'pulse-led-emerald'
+    );
+  }
+
+  // 8. GSAP 数据包流动 (颜色随所在总线变化，带微弹性触觉反馈)
   if (animate && step.flowPath && step.flowPath.length >= 2) {
     const packet = document.getElementById('data-packet');
     const packetBody = document.getElementById('packet-body');
@@ -687,27 +703,32 @@ function applyStep(step, animate = true) {
     const dur = 1.0 / State.playbackSpeed;
     const path = step.flowPath;
 
-    gsap.set(packet, { x: path[0].x, y: path[0].y, opacity: 0, scale: 0.6 });
+    gsap.set(packet, { x: path[0].x, y: path[0].y, opacity: 0, scale: 0.5 });
 
     const tl = gsap.timeline();
-    tl.to(packet, { opacity: 1, scale: 1, duration: 0.2 * dur, ease: 'back.out(1.5)' });
+    tl.to(packet, { opacity: 1, scale: 1, duration: 0.22 * dur, ease: 'back.out(1.8)' });
     for (let i = 1; i < path.length; i++) {
       tl.to(packet, {
         x: path[i].x,
         y: path[i].y,
         duration: (0.7 * dur) / (path.length - 1),
-        ease: 'power1.inOut'
+        ease: 'power2.inOut'
       });
     }
     tl.to(packet, {
       opacity: 0,
       scale: 0.5,
-      duration: 0.2 * dur,
+      duration: 0.18 * dur,
       ease: 'power2.in',
       onComplete: () => {
         if (step.targetComponent) {
           const tgt = document.getElementById(step.targetComponent);
-          if (tgt) gsap.fromTo(tgt, { scale: 1.03 }, { scale: 1.0, duration: 0.3, ease: 'power2.out' });
+          if (tgt) {
+            // GSAP 弹性回弹打入动效 (Tactile clock-in bounce)
+            gsap.timeline()
+              .to(tgt, { scale: 1.04, duration: 0.12, ease: 'back.out(2)' })
+              .to(tgt, { scale: 1.0, duration: 0.2, ease: 'power2.out' });
+          }
         }
       }
     });
@@ -752,7 +773,10 @@ function prevStep() {
 
 function startPlayback() {
   State.isPlaying = true;
-  document.getElementById('play-icon').textContent = '⏸';
+  const iconSvg = document.getElementById('play-icon-svg');
+  if (iconSvg) {
+    iconSvg.innerHTML = '<rect x="5" y="4" width="4" height="16" rx="1"></rect><rect x="15" y="4" width="4" height="16" rx="1"></rect>';
+  }
   document.getElementById('play-text').textContent = '暂停播放';
 
   function playLoop() {
@@ -778,7 +802,10 @@ function pausePlayback() {
   State.isPlaying = false;
   clearTimeout(State.playTimer);
   if (State.activeTween) State.activeTween.kill();
-  document.getElementById('play-icon').textContent = '▶';
+  const iconSvg = document.getElementById('play-icon-svg');
+  if (iconSvg) {
+    iconSvg.innerHTML = '<polygon points="5,3 19,12 5,21"></polygon>';
+  }
   document.getElementById('play-text').textContent = '自动播放';
 }
 
