@@ -1,0 +1,387 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="用四列交互动画看清 open() 到 read() 的全生命周期：进程打开文件表、系统打开文件表、活动 inode 表的三级映射与 offset 流转。">
+  <title>文件从 open() 到 read() 的全生命周期 · 可视化实验室</title>
+  <link rel="stylesheet" href="style.css">
+  <script defer src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+  <script defer src="app.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="back" href="../index.html#os" aria-label="返回操作系统展厅">←</a>
+    <span>可视化实验室 <span class="crumb">/ 计算机操作系统</span></span>
+    <span class="header-note">文件系统 · 三级表映射实验</span>
+  </header>
+
+  <main>
+    <section class="intro">
+      <div>
+        <p class="intro-kicker">fd → file → inode → 磁盘块</p>
+        <h1>一次 open() 加一次 read()，内核里到底发生了什么？</h1>
+        <p>四列分清用户空间与内核空间：描述符只是索引，读写位置挂在系统表上，路径解析只在 open 时做一次。</p>
+      </div>
+      <div class="intro-key"><span class="key-dot"></span> fd 是整数下标，不是指针</div>
+    </section>
+
+    <section class="workspace">
+      <div class="stage">
+        <div class="stage-heading">
+          <div>
+            <span class="protocol">open → read</span>
+            <h2 id="stage-title">初始状态：文件尚未打开</h2>
+          </div>
+          <span id="phase" class="phase">准备</span>
+        </div>
+
+        <div class="stage-context">
+          <span id="stage-hint">四列映射链：fd（进程表） → file（系统表） → inode（活动表） → 磁盘块。</span>
+          <span class="space-tags">
+            <i class="tag tag-user">用户空间</i>
+            <i class="tag tag-kernel">内核空间</i>
+          </span>
+        </div>
+
+        <div class="flow" id="flow">
+          <svg id="links" aria-hidden="true">
+            <defs>
+              <marker id="arrow-blue" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+                <path d="M0 0 L10 5 L0 10 Z" fill="#2563eb"></path>
+              </marker>
+              <marker id="arrow-green" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+                <path d="M0 0 L10 5 L0 10 Z" fill="#059669"></path>
+              </marker>
+              <marker id="arrow-amber" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+                <path d="M0 0 L10 5 L0 10 Z" fill="#d97706"></path>
+              </marker>
+            </defs>
+            <g id="layer-links"></g>
+            <g id="layer-fx"></g>
+          </svg>
+
+          <div class="band band-user">用户空间 <span>USER SPACE</span></div>
+          <div class="band band-kernel">内核空间 <span>KERNEL SPACE</span></div>
+
+          <!-- ══════════ 第 1 列：用户空间 ══════════ -->
+          <div class="col col-user">
+            <div class="col-head">
+              <span class="col-badge badge-blue">01</span>
+              <div>
+                <h4>用户空间</h4>
+                <p>应用程序可见的代码与内存</p>
+              </div>
+              <span class="pulse-led led-amber" id="led-user" title="用户态执行"></span>
+            </div>
+
+            <div class="card code-card" id="code-card">
+              <div class="card-title">代码执行 <span class="mini-tag">a.c</span></div>
+              <pre class="code"><code><span class="code-line" data-line="1" id="a-code1"><i>1</i>int fd = open("/a/b.txt", O_RDONLY);</span>
+<span class="code-line" data-line="2" id="a-code2"><i>2</i>int n  = read(fd, buf, 100);</span></code></pre>
+              <div class="ret-row">
+                <span class="var-chip" id="a-varfd">fd = <b id="var-fd">—</b></span>
+                <span class="var-chip" id="a-varn">n = <b id="var-n">0</b></span>
+              </div>
+            </div>
+
+            <div class="card mem-card">
+              <div class="card-title">用户内存区 <span class="mini-tag">buf[100]</span></div>
+              <div class="buf-grid" id="a-buf">
+                <span class="buf-cell"><b>--</b><i>+0</i></span>
+                <span class="buf-cell"><b>--</b><i>+10</i></span>
+                <span class="buf-cell"><b>--</b><i>+20</i></span>
+                <span class="buf-cell"><b>--</b><i>+30</i></span>
+                <span class="buf-cell"><b>--</b><i>+40</i></span>
+                <span class="buf-cell"><b>--</b><i>+50</i></span>
+                <span class="buf-cell"><b>--</b><i>+60</i></span>
+                <span class="buf-cell"><b>--</b><i>+70</i></span>
+                <span class="buf-cell"><b>--</b><i>+80</i></span>
+                <span class="buf-cell"><b>--</b><i>+90</i></span>
+              </div>
+              <div class="buf-foot">已接收 <span id="buf-bytes">0</span> / 100 字节</div>
+            </div>
+
+            <div class="card trap-card" id="trap-card">
+              <div class="card-title">陷入内核 <span class="mini-tag">trap</span></div>
+              <div class="trap-row">
+                <span class="trap-chip" id="trap-chip">系统调用入口：int 0x80 / syscall</span>
+                <span class="pulse-led led-rose" id="led-trap"></span>
+              </div>
+            </div>
+          </div>
+
+          <!-- ══════════ 第 2 列：进程打开文件表 ══════════ -->
+          <div class="col col-fd">
+            <div class="col-head">
+              <span class="col-badge badge-purple">02</span>
+              <div>
+                <h4>进程打开文件表</h4>
+                <p>PCB · files_struct · 进程私有</p>
+              </div>
+              <span class="kchip">内核</span>
+            </div>
+
+            <div class="card">
+              <div class="card-title">描述符数组 <span class="mini-tag">fds[]</span></div>
+              <table class="tbl fd-tbl">
+                <thead>
+                  <tr><th>fd (索引)</th><th>系统打开文件表指针 (file*)</th></tr>
+                </thead>
+                <tbody>
+                  <tr class="std" data-fd="0"><td><b>0</b> stdin</td><td class="mono">0x1f00</td></tr>
+                  <tr class="std" data-fd="1"><td><b>1</b> stdout</td><td class="mono">0x1f10</td></tr>
+                  <tr class="std" data-fd="2"><td><b>2</b> stderr</td><td class="mono">0x1f20</td></tr>
+                  <tr class="free" data-fd="3" id="a-fd3"><td><b>3</b> 空闲</td><td class="mono ptr">—</td></tr>
+                  <tr class="free" data-fd="4"><td><b>4</b> 空闲</td><td class="mono ptr">—</td></tr>
+                  <tr class="free" data-fd="5"><td><b>5</b> 空闲</td><td class="mono ptr">—</td></tr>
+                </tbody>
+              </table>
+              <div class="card-note">0/1/2 由 shell 预先打开，默认置灰；open 取最小空闲下标。</div>
+            </div>
+
+            <div class="card rule-card">
+              <div class="card-title">分配规则 <span class="mini-tag">get_unused_fd</span></div>
+              <p>fd 数组是“多对一”的枢纽：不同进程可以各自分配出不同的 fd，只要指针指向同一个系统表项，就共享同一份读写状态。</p>
+            </div>
+          </div>
+
+          <!-- ══════════ 第 3 列：系统打开文件表 ══════════ -->
+          <div class="col col-sys">
+            <div class="col-head">
+              <span class="col-badge badge-green">03</span>
+              <div>
+                <h4>系统打开文件表</h4>
+                <p>全系统共享 · file 对象</p>
+              </div>
+              <span class="kchip">内核</span>
+              <span class="share-badge" id="share-badge">全局共享</span>
+            </div>
+
+            <div class="card">
+              <div class="card-title">表项 <span class="mini-tag">struct file</span></div>
+              <div class="sys-empty" id="sys-empty">（本次运行尚无用户打开的表项）</div>
+              <table class="tbl sys-tbl" id="sys-tbl" hidden>
+                <thead>
+                  <tr>
+                    <th>表项编号</th>
+                    <th>读写位置<br><span>offset</span></th>
+                    <th>打开模式<br><span>flags</span></th>
+                    <th>引用计数<br><span>count</span></th>
+                    <th>inode 指针<br><span>inode*</span></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr class="sys-std"><td colspan="5">#0 – #2 标准流表项（已存在，共享计数）</td></tr>
+                  <tr id="a-sysrow">
+                    <td class="mono sid">#3</td>
+                    <td class="mono offset-cell" id="a-sysoffset"><span id="sys-offset">0</span></td>
+                    <td class="mono">O_RDONLY</td>
+                    <td class="mono count-cell" id="sys-count">1</td>
+                    <td class="mono inode-cell" id="a-sysinode">→ 42</td>
+                  </tr>
+                </tbody>
+              </table>
+              <div class="card-note" id="sys-note">同一 file 被 dup / fork 时只增加 count，不复制表项。</div>
+            </div>
+
+            <div class="card rule-card">
+              <div class="card-title">共享规则 <span class="mini-tag">count</span></div>
+              <p>表项由全系统共享：多个进程 open 同一文件各占一个表项，而 dup / fork 只复制 fd 指针并让 count++；count 归零才释放 offset 与 inode 指针。</p>
+            </div>
+          </div>
+
+          <!-- ══════════ 第 4 列：活动 inode 表 & 磁盘 ══════════ -->
+          <div class="col col-inode">
+            <div class="col-head">
+              <span class="col-badge badge-amber">04</span>
+              <div>
+                <h4>内存活动 inode 表 &amp; 磁盘</h4>
+                <p>高速缓存的 inode 与物理盘块</p>
+              </div>
+              <span class="kchip">内核</span>
+            </div>
+
+            <div class="card">
+              <div class="card-title">内存活动 inode 表 <span class="mini-tag">in-core</span></div>
+              <div class="sys-empty" id="mem-empty">b.txt 的 inode 42 尚未调入内存</div>
+              <table class="tbl mem-tbl" id="mem-tbl" hidden>
+                <thead>
+                  <tr>
+                    <th>inode 编号</th>
+                    <th>权限</th>
+                    <th>文件大小</th>
+                    <th>i_count</th>
+                    <th>磁盘块索引 <span>addrs[]</span></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr id="a-memino">
+                    <td class="mono ino">42</td>
+                    <td class="mono">-r--r--r--</td>
+                    <td class="mono">1240 B</td>
+                    <td class="mono" id="mem-icount">1</td>
+                    <td class="addrs">
+                      <span class="addr on" id="a-addr0">12</span>
+                      <span class="addr">13</span>
+                      <span class="addr dim">0</span>
+                      <span class="addr dim">0</span>
+                      <span class="addr dim">0</span>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+              <div class="card-note">命中内存活动表则免磁盘 I/O；i_count 归零才可回收。</div>
+            </div>
+
+            <div class="card disk-card">
+              <div class="card-title">磁盘 <span class="mini-tag">DISK</span></div>
+
+              <div class="disk-group">
+                <span class="disk-label">目录块</span>
+                <div class="blk dir" id="a-dir2">
+                  <span class="blk-name">Block 2 · 根目录 /</span>
+                  <span class="blk-body mono">a → inode 7</span>
+                </div>
+                <div class="blk dir" id="a-dir7">
+                  <span class="blk-name">Block 7 · 目录 /a</span>
+                  <span class="blk-body mono">b.txt → inode 42</span>
+                </div>
+              </div>
+
+              <div class="disk-group">
+                <span class="disk-label">磁盘 inode 区</span>
+                <div class="blk dinode" id="a-diskino">
+                  <span class="blk-name">磁盘 inode 42</span>
+                  <span class="blk-body mono">size 1240 · addrs[12, 13]</span>
+                </div>
+              </div>
+
+              <div class="disk-group">
+                <span class="disk-label">数据块</span>
+                <div class="blk data" id="a-blk12">
+                  <span class="blk-name">Block 12 <em>0 – 1023 B</em></span>
+                  <span class="blk-body mono">48 65 6c 6c 6f 2c 20 4f 53 21 …</span>
+                </div>
+                <div class="blk data idle" id="a-blk13">
+                  <span class="blk-name">Block 13 <em>1024 – 1239 B</em></span>
+                  <span class="blk-body mono">… 2e 0a （尚未读取）</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="legend">
+          <span><i class="legend-line blue"></i>open 建立映射（虚线流动 / 蓝）</span>
+          <span><i class="legend-line green"></i>read 寻址读取（实线流动 / 绿）</span>
+          <span><i class="legend-line amber"></i>状态更新（offset 滚动 / 琥珀）</span>
+          <span><i class="legend-dot"></i>fd 只是下标，指针在系统表里</span>
+        </div>
+      </div>
+
+      <div class="lower">
+        <div class="insight" aria-live="polite">
+          <span id="step-kicker" class="step-kicker">准备</span>
+          <h3 id="step-title">点击“下一步”开始演示</h3>
+          <p id="step-desc">阶段一让 open() 建立 fd → file → inode 的映射；阶段二让 read() 沿映射取回数据并推进 offset。</p>
+          <div id="formula" class="formula"></div>
+          <p id="step-note" class="step-note"></p>
+        </div>
+
+        <aside class="side">
+          <section class="snapshot">
+            <h3>状态快照 <span>STATE</span></h3>
+            <dl>
+              <div><dt>变量 fd</dt><dd id="sn-fd">—</dd></div>
+              <div><dt>file-&gt;offset</dt><dd id="sn-offset">—</dd></div>
+              <div><dt>file-&gt;count</dt><dd id="sn-count">—</dd></div>
+              <div><dt>inode 42 ∈ 内存</dt><dd id="sn-inode">否</dd></div>
+              <div><dt>buf 已收字节</dt><dd id="sn-buf">0 / 100 B</dd></div>
+              <div><dt>read 返回值</dt><dd id="sn-ret">—</dd></div>
+            </dl>
+          </section>
+
+          <div class="tip-pop" id="tip" hidden>
+            <span class="tip-mark">💡 小贴士</span>
+            <p>下一次 read 将直接从 <b>offset=100</b> 开始读取，<b>无需重新定位目录与 inode</b>。</p>
+          </div>
+
+          <details class="glossary">
+            <summary>第一次接触？先看这几个词</summary>
+            <dl>
+              <dt>系统调用陷入 (trap)</dt>
+              <dd>用户程序执行 open/read 时通过软中断把控制权交给内核，参数经寄存器传入。</dd>
+              <dt>进程打开文件表</dt>
+              <dd>每个进程 PCB 里的一张指针数组，下标就是 fd；0/1/2 通常已被标准流占用。</dd>
+              <dt>系统打开文件表</dt>
+              <dd>内核全局的 struct file 数组，保存 offset、打开模式与引用计数，是“共享”的关键。</dd>
+              <dt>内存活动 inode 表</dt>
+              <dd>磁盘 inode 的内存副本（in-core），带 i_count 引用计数，命中即免去磁盘寻道。</dd>
+              <dt>路径解析 (namei)</dt>
+              <dd>把 "/a/b.txt" 逐级翻译成 inode 号的过程，只在 open 时发生一次。</dd>
+            </dl>
+          </details>
+        </aside>
+      </div>
+
+      <div class="transport">
+        <div class="control-row">
+          <div class="playback">
+            <button id="btn-reset" type="button">↺ 重置</button>
+            <button id="btn-prev" type="button">‹ 上一步</button>
+            <button id="btn-play" type="button" class="primary">▶ 自动播放</button>
+            <button id="btn-pause" type="button" disabled>Ⅱ 暂停</button>
+            <button id="btn-next" type="button">下一步 ›</button>
+          </div>
+          <label class="speed-label">速度
+            <select id="speed">
+              <option value="0.5">0.5×</option>
+              <option value="1" selected>1×</option>
+              <option value="1.5">1.5×</option>
+              <option value="2">2×</option>
+            </select>
+          </label>
+        </div>
+        <div class="timeline">
+          <label for="seek" id="progress-label">演示进度</label>
+          <input id="seek" type="range" min="0" max="6" value="0" step="1">
+          <output id="progress" for="seek">0 / 6</output>
+        </div>
+        <div id="milestones" class="milestones"></div>
+      </div>
+    </section>
+
+    <section class="comparison">
+      <h2>四条结论，直接背</h2>
+      <div class="compare-grid">
+        <div>
+          <span class="protocol">fd</span>
+          <h3>fd 是整数下标，不是地址。</h3>
+          <p>进程表里存的是指向系统表项的指针；换进程后 fd 可以不同，只要指向同一个 file 就共享状态。</p>
+        </div>
+        <div>
+          <span class="protocol">offset</span>
+          <h3>读写位置挂在 file 上，不挂在进程或 inode 上。</h3>
+          <p>dup / fork 出的两个 fd 共享同一 file，因此共享 offset：一边读走 100 字节，另一边接着从 100 开始。</p>
+        </div>
+        <div>
+          <span class="protocol">inode</span>
+          <h3>inode 全系统只有一份内存副本。</h3>
+          <p>多个进程各自 open 会各占一个 file 表项（count=1），却共用同一个活动 inode（i_count 累加）。</p>
+        </div>
+        <div>
+          <span class="protocol">read</span>
+          <h3>read 不再查目录，三级表直达盘块。</h3>
+          <p>路径解析只在 open 时做一次；之后 read 顺着 fds → file → inode.addrs 直接定位 Block 12。</p>
+        </div>
+      </div>
+    </section>
+
+    <footer>
+      教学简化：单进程、只读顺序访问，忽略页缓存（buffer cache）、预读与目录项 dentry 缓存；盘块与文件大小为示意值（1240 B，块索引 12/13）。真实内核中 read 还可能直接命中页缓存而不产生磁盘 I/O。<br>
+      参考：汤子瀛《计算机操作系统》文件管理章节 · APUE 第 3 章（System Call Interface）· <a href="https://man7.org/linux/man-pages/man2/open.2.html" target="_blank" rel="noreferrer">man 2 open</a> · <a href="https://man7.org/linux/man-pages/man2/read.2.html" target="_blank" rel="noreferrer">man 2 read</a>
+    </footer>
+  </main>
+</body>
+</html>

@@ -1,0 +1,629 @@
+/* =========================================================================
+   快速排序填坑法与完整递归全过程 — 视觉设计系统
+   Taste-Skill Light Editorial (严格浅色纸质美学与高保真动效)
+   ========================================================================= */
+
+:root {
+  --bg-page: #FAF9F5;
+  --bg-card: #FFFFFF;
+  --bg-subtle: #F4F3EE;
+  --border-subtle: #E5E4DC;
+  --border-strong: #D6D3CD;
+  --text-primary: #1C1917;
+  --text-secondary: #57534E;
+  --text-muted: #78716C;
+
+  /* 核心规范色彩 */
+  --color-initial-gray: #D3D3D3;
+  --color-pivot-cyan: #00FFFF;
+  --color-pit-black: #000000;
+  --color-greater-red: #FF0000;
+  --color-smaller-green: #00FF00;
+  --color-sorted-gray: #A9A9A9;
+  --color-locked-gold: #F59E0B;
+
+  /* 辅助状态色 */
+  --ptr-i-blue: #2563EB;
+  --ptr-j-orange: #EA580C;
+}
+
+body {
+  background-color: var(--bg-page);
+  color: var(--text-primary);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, sans-serif;
+}
+
+.font-serif {
+  font-family: 'Newsreader', Georgia, serif;
+}
+
+.font-mono, .font-mono-num {
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 纸质卡片面板 */
+.card-panel {
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: 1rem;
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.02);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.card-panel:hover {
+  border-color: var(--border-strong);
+}
+
+/* 模式切换胶囊 */
+.mode-tab {
+  cursor: pointer;
+  user-select: none;
+}
+.mode-tab.active {
+  background: #1C1917;
+  color: #FFFFFF;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+}
+
+/* ---- 物理触感机械按键 (Tactile Micro-Buttons) --------------------------- */
+.ctl-btn {
+  padding: 0.35rem 0.75rem;
+  background: #FFFFFF;
+  border: 1px solid var(--border-strong);
+  border-radius: 0.5rem;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: #44403C;
+  box-shadow: 0 1.5px 0 #D6D3CD;
+  transition: all 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  user-select: none;
+  cursor: pointer;
+}
+.ctl-btn:hover:not(:disabled) {
+  background: #FBFBFA;
+  border-color: #78716C;
+  color: #1C1917;
+  transform: translateY(-1px);
+}
+.ctl-btn:active:not(:disabled) {
+  transform: translateY(1.5px);
+  box-shadow: none;
+}
+.ctl-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  box-shadow: none;
+  border-color: #E5E4DC;
+}
+
+.btn-primary {
+  padding: 0.35rem 0.85rem;
+  background: #1C1917;
+  border: 1px solid #1C1917;
+  border-radius: 0.5rem;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #FFFFFF;
+  box-shadow: 0 1.5px 0 #000000;
+  transition: all 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  user-select: none;
+  cursor: pointer;
+}
+.btn-primary:hover:not(:disabled) {
+  background: #292524;
+  border-color: #292524;
+  transform: translateY(-1px);
+}
+.btn-primary:active:not(:disabled) {
+  transform: translateY(1.5px);
+  box-shadow: none;
+}
+
+/* 速率切换胶囊 */
+.speed-btn {
+  padding: 0.15rem 0.5rem;
+  border-radius: 0.25rem;
+  color: #78716C;
+  font-size: 0.7rem;
+  font-weight: 600;
+  transition: all 0.15s;
+}
+.speed-btn:hover {
+  color: #1C1917;
+}
+.speed-btn.active {
+  background: #FFFFFF;
+  color: #1C1917;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+}
+
+/* 顶部图例 */
+.legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  background: #FAF9F5;
+  padding: 0.15rem 0.45rem;
+  border-radius: 0.375rem;
+  border: 1px solid var(--border-subtle);
+}
+
+/* ---- 数组展示与 2D 矩形块 (Array Cell Components) ---------------------- */
+.array-cell {
+  position: relative;
+  width: 68px;
+  height: 80px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.625rem;
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 700;
+  user-select: none;
+  transition: background-color 0.25s ease, border-color 0.25s ease, transform 0.25s ease, opacity 0.25s ease, box-shadow 0.25s ease;
+  box-sizing: border-box;
+}
+
+@media (min-width: 640px) {
+  .array-cell {
+    width: 76px;
+    height: 88px;
+  }
+}
+
+.cell-index-badge {
+  width: 68px;
+  display: flex;
+  justify-content: center;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #78716C;
+  margin-bottom: 2px;
+}
+@media (min-width: 640px) {
+  .cell-index-badge {
+    width: 76px;
+  }
+}
+
+/* 状态 1: 待排序元素 (初始中性灰色 #D3D3D3) */
+.cell-state-initial {
+  background-color: #D3D3D3;
+  border: 2px solid #A8A8A8;
+  color: #1A1A1A;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.04);
+}
+
+/* 状态 2: 基准元素 (pivot) - 霓虹蓝 #00FFFF */
+.cell-state-pivot {
+  background-color: #00FFFF;
+  border: 2px solid #00D5D5;
+  color: #052E2B;
+  box-shadow: 0 0 15px rgba(0, 255, 255, 0.7), inset 0 0 8px rgba(255, 255, 255, 0.8);
+  animation: pulse-neon-cyan 2s infinite ease-in-out;
+}
+
+@keyframes pulse-neon-cyan {
+  0%, 100% {
+    box-shadow: 0 0 12px rgba(0, 255, 255, 0.6), inset 0 0 8px rgba(255, 255, 255, 0.8);
+  }
+  50% {
+    box-shadow: 0 0 22px rgba(0, 255, 255, 0.9), inset 0 0 12px rgba(255, 255, 255, 1);
+  }
+}
+
+/* 状态 3: “坑” (当前被挖空的位置) - 黑色 #000000 或虚线框 */
+.cell-state-hole {
+  background-color: #000000;
+  border: 2.5px dashed #555555;
+  color: #FFFFFF;
+  box-shadow: inset 0 4px 10px rgba(0, 0, 0, 0.9), 0 0 8px rgba(0, 0, 0, 0.3);
+  position: relative;
+  overflow: hidden;
+}
+
+.cell-state-hole::before {
+  content: "🕳️ HOLE";
+  position: absolute;
+  top: 6px;
+  font-size: 8px;
+  letter-spacing: 0.05em;
+  color: #888888;
+  font-family: 'JetBrains Mono', monospace;
+  z-index: 2;
+}
+
+.cell-state-hole::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at center, rgba(40, 40, 40, 0.8) 0%, rgba(0, 0, 0, 1) 75%);
+  z-index: 1;
+}
+
+.cell-state-hole .cell-val {
+  position: relative;
+  z-index: 2;
+  opacity: 0.15;
+  font-size: 0.75rem;
+  color: #AAAAAA;
+}
+
+/* 状态 4: 大于 pivot 的元素 (i 找到) - 鲜红色 #FF0000 */
+.cell-state-greater {
+  background-color: #FF0000;
+  border: 2.5px solid #CC0000;
+  color: #FFFFFF;
+  box-shadow: 0 0 16px rgba(255, 0, 0, 0.65), 0 2px 4px rgba(0, 0, 0, 0.15);
+  animation: pulse-red 1.5s infinite alternate;
+}
+
+@keyframes pulse-red {
+  0% { transform: scale(1); box-shadow: 0 0 10px rgba(255, 0, 0, 0.5); }
+  100% { transform: scale(1.04); box-shadow: 0 0 20px rgba(255, 0, 0, 0.85); }
+}
+
+/* 状态 5: 小于 pivot 的元素 (j 找到) - 鲜绿色 #00FF00 */
+.cell-state-smaller {
+  background-color: #00FF00;
+  border: 2.5px solid #00CC00;
+  color: #003300;
+  box-shadow: 0 0 16px rgba(0, 255, 0, 0.65), 0 2px 4px rgba(0, 0, 0, 0.15);
+  animation: pulse-green 1.5s infinite alternate;
+}
+
+@keyframes pulse-green {
+  0% { transform: scale(1); box-shadow: 0 0 10px rgba(0, 255, 0, 0.5); }
+  100% { transform: scale(1.04); box-shadow: 0 0 20px rgba(255, 0, 0, 0.85); }
+}
+
+/* 状态 6: 单趟结束时中性归位 - 深灰色 #A9A9A9 */
+.cell-state-sorted {
+  background-color: #A9A9A9;
+  border: 2px solid #828282;
+  color: #FFFFFF;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.08);
+}
+
+/* 状态 7: 永久锁定最终归位 (Locked / Ordered) - 金黄/翠绿质感 */
+.cell-state-locked {
+  background: linear-gradient(135deg, #FEF3C7 0%, #FDE68A 100%);
+  border: 2.5px solid #D97706;
+  color: #78350F;
+  box-shadow: 0 0 12px rgba(217, 119, 6, 0.35);
+  position: relative;
+}
+
+.cell-lock-badge {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 15px;
+  height: 15px;
+  background: #D97706;
+  color: #FFFFFF;
+  border-radius: 9999px;
+  font-size: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 900;
+  line-height: 1;
+}
+
+/* 非当前递归子区间淡化效果 (Dimmed) */
+.cell-dimmed {
+  opacity: 0.32;
+  filter: grayscale(70%);
+  transform: scale(0.96);
+}
+
+/* 扫描中对比高亮 */
+.cell-scanning {
+  outline: 3px solid #F59E0B;
+  outline-offset: 2px;
+}
+
+/* 单元格数值排版 */
+.cell-val {
+  font-size: 1.45rem;
+  line-height: 1;
+  font-weight: 700;
+}
+
+/* ---- 双指针滑动体系 (Pointers System) ----------------------------------- */
+.pointer-cursor {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 68px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  pointer-events: none;
+  z-index: 25;
+}
+@media (min-width: 640px) {
+  .pointer-cursor {
+    width: 76px;
+  }
+}
+
+.arrow-up-blue {
+  color: var(--ptr-i-blue);
+  font-size: 1rem;
+  line-height: 1;
+  filter: drop-shadow(0 1px 2px rgba(37, 99, 235, 0.4));
+  animation: float-arrow 1.2s infinite ease-in-out;
+}
+
+.arrow-up-orange {
+  color: var(--ptr-j-orange);
+  font-size: 1rem;
+  line-height: 1;
+  filter: drop-shadow(0 1px 2px rgba(234, 88, 12, 0.4));
+  animation: float-arrow 1.2s infinite ease-in-out;
+}
+
+@keyframes float-arrow {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-3px); }
+}
+
+.ptr-badge-i {
+  background: var(--ptr-i-blue);
+  color: #FFFFFF;
+  border-radius: 0.375rem;
+  padding: 0.15rem 0.5rem;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.75rem;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 0.2rem;
+  box-shadow: 0 2px 4px rgba(37, 99, 235, 0.3);
+}
+
+.ptr-badge-j {
+  background: var(--ptr-j-orange);
+  color: #FFFFFF;
+  border-radius: 0.375rem;
+  padding: 0.15rem 0.5rem;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.75rem;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 0.2rem;
+  box-shadow: 0 2px 4px rgba(234, 88, 12, 0.3);
+}
+
+.ptr-meet-badge {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  background: #1C1917;
+  color: #00FFFF;
+  border: 1px solid #00FFFF;
+  border-radius: 0.5rem;
+  padding: 0.25rem 0.75rem;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.75rem;
+  font-weight: 700;
+  box-shadow: 0 0 12px rgba(0, 255, 255, 0.5);
+  animation: pop-bounce 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+@keyframes pop-bounce {
+  0% { transform: scale(0.6); opacity: 0; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+/* ---- 飞行抛物线元素 (Flying Clones) ------------------------------------- */
+.flying-ghost {
+  position: absolute;
+  width: 68px;
+  height: 80px;
+  border-radius: 0.625rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 1.45rem;
+  font-weight: 700;
+  z-index: 50;
+  pointer-events: none;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.25);
+}
+@media (min-width: 640px) {
+  .flying-ghost {
+    width: 76px;
+    height: 88px;
+  }
+}
+
+/* ---- 递归树视觉 (Hierarchical Binary Recursion Tree) --------------------- */
+#tree-stage {
+  min-height: 280px;
+  max-height: 520px;
+  overflow-y: auto;
+  overflow-x: auto;
+  display: block;
+}
+
+#tree-nodes-container {
+  position: relative;
+  min-width: 100%;
+  width: max-content;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+#tree-svg-links {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 1;
+}
+
+#tree-root-mount {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  justify-content: center;
+  width: 100%;
+}
+
+/* 递归子树组件 */
+.tree-sub-tree {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  position: relative;
+}
+
+.tree-card-wrapper {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  position: relative;
+  z-index: 3;
+}
+
+.tree-node-card {
+  position: relative;
+  min-width: 98px;
+  padding: 0.35rem 0.55rem;
+  border-radius: 0.5rem;
+  background: #FFFFFF;
+  border: 1.5px solid #E5E4DC;
+  font-family: 'JetBrains Mono', monospace;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+
+.tree-node-card:hover {
+  transform: translateY(-2px);
+  border-color: #78716C;
+}
+
+.tree-node-empty {
+  min-width: 65px;
+  padding: 0.25rem 0.4rem;
+  border: 1.5px dashed #CBD5E1;
+  background: #F8F7F4;
+  opacity: 0.75;
+}
+
+/* 左右孩子行 */
+.tree-children-row {
+  display: flex;
+  flex-direction: row;
+  justify-content: center;
+  align-items: flex-start;
+  gap: 0.85rem;
+  margin-top: 1.65rem;
+  position: relative;
+}
+
+.tree-branch-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+/* 节点状态样式 */
+.tree-node-running {
+  border-color: #F59E0B !important;
+  background: #FFFBEB !important;
+  box-shadow: 0 0 14px rgba(245, 158, 11, 0.45) !important;
+  transform: scale(1.05);
+}
+
+.tree-node-completed {
+  border-color: #10B981 !important;
+  background: #ECFDF5 !important;
+  color: #065F46;
+}
+
+.tree-node-base {
+  border-color: #D6D3CD;
+  background: #F4F3EE;
+  color: #78716C;
+}
+
+.tree-node-pending {
+  border: 1.5px dashed #CBD5E1;
+  color: #94A3B8;
+  background: #FAF9F5;
+  opacity: 0.6;
+}
+
+/* ---- 调用栈框架视觉 (Call Stack Frames) -------------------------------- */
+.stack-frame {
+  padding: 0.35rem 0.6rem;
+  border-radius: 0.375rem;
+  background: #FFFFFF;
+  border: 1px solid #E5E4DC;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  transition: all 0.2s;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.03);
+}
+
+.stack-frame.top-active {
+  background: #F5F3FF;
+  border-color: #8B5CF6;
+  color: #5B21B6;
+  font-weight: 700;
+  box-shadow: 0 0 8px rgba(139, 92, 246, 0.25);
+}
+
+/* ---- 伪代码逐行高亮 ---------------------------------------------------- */
+.code-line {
+  padding: 0.15rem 0.5rem;
+  border-radius: 0.25rem;
+  transition: background-color 0.2s, color 0.2s;
+}
+.code-line.active {
+  background-color: rgba(245, 158, 11, 0.25);
+  border-left: 3px solid #F59E0B;
+  color: #FFFFFF;
+}
+
+/* 阴影辅助 */
+.shadow-2xs {
+  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.03);
+}
+
+/* 单次弹出 */
+@keyframes bounce-once {
+  0% { transform: scale(0.95); opacity: 0; }
+  60% { transform: scale(1.02); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+.animate-bounce-once {
+  animation: bounce-once 0.45s ease-out forwards;
+}

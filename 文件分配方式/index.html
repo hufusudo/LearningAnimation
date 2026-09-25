@@ -1,0 +1,508 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>文件分配方式 · 交互动画演示系统</title>
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- GSAP CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+  <!-- Google Fonts -->
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Newsreader:ital,opsz,wght@0,6..72,500;0,6..72,600;1,6..72,400&display=swap">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="min-h-screen antialiased flex flex-col justify-between">
+
+  <!-- 动态连线与高亮图层 (全屏视口 SVG) -->
+  <svg id="connection-svg-layer">
+    <defs>
+      <!-- 橙色箭头标记 (隐式链接) -->
+      <marker id="arrow-orange" viewBox="0 0 14 14" refX="10" refY="7" markerUnits="userSpaceOnUse" markerWidth="14" markerHeight="14" orient="auto">
+        <path d="M 1 2 L 12 7 L 1 12 L 4 7 z" fill="#F97316" />
+      </marker>
+      <!-- 紫色箭头标记 (FAT 表跳转) -->
+      <marker id="arrow-purple" viewBox="0 0 14 14" refX="10" refY="7" markerUnits="userSpaceOnUse" markerWidth="14" markerHeight="14" orient="auto">
+        <path d="M 1 2 L 12 7 L 1 12 L 4 7 z" fill="#8B5CF6" />
+      </marker>
+      <!-- 蓝色箭头标记 (索引分配) -->
+      <marker id="arrow-blue" viewBox="0 0 14 14" refX="10" refY="7" markerUnits="userSpaceOnUse" markerWidth="14" markerHeight="14" orient="auto">
+        <path d="M 1 2 L 12 7 L 1 12 L 4 7 z" fill="#2563EB" />
+      </marker>
+      <!-- 绿色箭头标记 (二级索引) -->
+      <marker id="arrow-emerald" viewBox="0 0 14 14" refX="10" refY="7" markerUnits="userSpaceOnUse" markerWidth="14" markerHeight="14" orient="auto">
+        <path d="M 1 2 L 12 7 L 1 12 L 4 7 z" fill="#059669" />
+      </marker>
+      <!-- 红色高亮箭头标记 (激活路径) -->
+      <marker id="arrow-red" viewBox="0 0 14 14" refX="10" refY="7" markerUnits="userSpaceOnUse" markerWidth="14" markerHeight="14" orient="auto">
+        <path d="M 1 2 L 12 7 L 1 12 L 4 7 z" fill="#EF4444" />
+      </marker>
+      <!-- 琥珀色箭头标记 (光标指示) -->
+      <marker id="arrow-amber" viewBox="0 0 14 14" refX="10" refY="7" markerUnits="userSpaceOnUse" markerWidth="14" markerHeight="14" orient="auto">
+        <path d="M 1 2 L 12 7 L 1 12 L 4 7 z" fill="#D97706" />
+      </marker>
+    </defs>
+  </svg>
+
+  <!-- 全屏飞行游标与粒子动效图层 -->
+  <div id="flying-probe-container" class="fixed inset-0 pointer-events-none z-50 overflow-hidden"></div>
+
+  <!-- 顶部导航栏 -->
+  <header class="border-b border-[#E5E4DC] bg-[#FAF9F5]/90 backdrop-blur sticky top-0 z-40 px-6 py-3.5">
+    <div class="max-w-7xl mx-auto flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <span class="w-8 h-8 rounded-lg bg-stone-900 text-white flex items-center justify-center font-mono font-bold text-xs shadow-sm">
+          FS
+        </span>
+        <div>
+          <h1 class="text-base md:text-lg font-bold text-stone-900 leading-tight">
+            文件分配方式动态演示系统
+          </h1>
+          <p class="text-xs text-stone-500 font-mono mt-0.5">
+            408 核心考点 · 连续分配 / 隐式链接 / 显式链接 (FAT) / 索引分配 (单级与多级) / 四宫格对比
+          </p>
+        </div>
+      </div>
+      <a href="../index.html" class="text-xs font-mono text-stone-500 hover:text-stone-900 transition-colors flex items-center gap-1">
+        <span>&larr;</span> <span>返回展厅</span>
+      </a>
+    </div>
+  </header>
+
+  <!-- 主体工作区 -->
+  <main class="flex-1 max-w-7xl w-full mx-auto px-4 md:px-6 py-5 flex flex-col gap-4">
+
+    <!-- 顶部操作控制与模式切换 -->
+    <div class="card-panel rounded-2xl p-4 flex flex-col gap-3 shadow-sm bg-white">
+      <div class="flex items-center justify-between flex-wrap gap-3 pb-3 border-b border-[#ECEBE4]">
+        
+        <!-- 五大模式切换 (四大核心 + 对比模式) -->
+        <div class="flex items-center gap-1.5 bg-stone-100/80 p-1 rounded-xl border border-stone-200/80 flex-wrap">
+          <button id="tab-contiguous" class="tab-btn active" onclick="switchMode('contiguous')">
+            <span class="w-2 h-2 rounded-full bg-red-500"></span>
+            <span>1. 连续分配 (Contiguous)</span>
+          </button>
+          <button id="tab-implicit" class="tab-btn" onclick="switchMode('implicit')">
+            <span class="w-2 h-2 rounded-full bg-orange-500"></span>
+            <span>2. 隐式链接 (Implicit Linked)</span>
+          </button>
+          <button id="tab-fat" class="tab-btn" onclick="switchMode('fat')">
+            <span class="w-2 h-2 rounded-full bg-purple-600"></span>
+            <span>3. 显式链接 (FAT)</span>
+          </button>
+          <button id="tab-indexed" class="tab-btn" onclick="switchMode('indexed')">
+            <span class="w-2 h-2 rounded-full bg-blue-600"></span>
+            <span>4. 索引分配 (Indexed)</span>
+          </button>
+          <button id="tab-comparison" class="tab-btn" onclick="switchMode('comparison')">
+            <span class="w-2 h-2 rounded-full bg-stone-800"></span>
+            <span>⚖️ 对比模式 (Comparison)</span>
+          </button>
+        </div>
+
+        <!-- 动效播放控制 -->
+        <div class="flex items-center gap-2 flex-wrap">
+          <button id="btn-play" class="px-3.5 py-1.5 rounded-lg text-xs font-semibold bg-stone-900 text-white hover:bg-stone-800 transition-colors shadow-sm flex items-center gap-1.5">
+            <span id="play-icon">▶</span> <span id="play-text">自动播放</span>
+          </button>
+          <button id="btn-prev" class="ctl-btn">
+            ⏮ 上一步
+          </button>
+          <button id="btn-next" class="ctl-btn font-semibold">
+            下一步 ⏭
+          </button>
+          <button id="btn-reset" class="ctl-btn">
+            ↺ 重置系统
+          </button>
+
+          <div class="h-4 w-px bg-stone-200 mx-1"></div>
+
+          <!-- 速度切换 -->
+          <div class="flex items-center gap-1 font-mono text-xs">
+            <span class="text-stone-400 mr-1">速度:</span>
+            <button id="speed-05" class="px-2 py-0.5 rounded border border-stone-200 hover:border-stone-400 text-stone-600 text-xs">0.5x</button>
+            <button id="speed-10" class="px-2 py-0.5 rounded border border-stone-900 bg-stone-900 text-white font-bold text-xs">1.0x</button>
+            <button id="speed-20" class="px-2 py-0.5 rounded border border-stone-200 hover:border-stone-400 text-stone-600 text-xs">2.0x</button>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- 操作动作栏 (创建 / 删除 / 访问第 k 块 / 特色演示) -->
+      <div class="flex items-center justify-between flex-wrap gap-3">
+        
+        <!-- 左侧操作组 -->
+        <div class="flex items-center gap-2 flex-wrap">
+          <button id="btn-create-file" class="ctl-btn text-emerald-700 bg-emerald-50/70 border-emerald-200 hover:bg-emerald-100 font-semibold">
+            <span>➕</span> <span>创建文件</span>
+          </button>
+
+          <!-- 文件名与长度快速调节 -->
+          <div class="flex items-center gap-1 bg-stone-50 px-2 py-1 rounded-lg border border-stone-200 text-xs font-mono">
+            <span class="text-stone-400">文件:</span>
+            <select id="select-file-name" class="bg-white border border-stone-200 rounded px-1.5 py-0.5 text-stone-800 font-bold focus:outline-none">
+              <option value="A">文件 A</option>
+              <option value="B">文件 B</option>
+              <option value="C">文件 C</option>
+            </select>
+            <span class="text-stone-400 ml-1">长度:</span>
+            <input id="input-file-len" type="number" min="1" max="15" value="5" class="w-12 bg-white border border-stone-200 rounded px-1 text-center font-bold text-stone-800 focus:outline-none">
+            <span class="text-stone-400">块</span>
+          </div>
+
+          <button id="btn-delete-file" class="ctl-btn text-rose-700 bg-rose-50/60 border-rose-200 hover:bg-rose-100 font-semibold">
+            <span>🗑️</span> <span>删除文件</span>
+          </button>
+
+          <div class="h-4 w-px bg-stone-200 mx-1"></div>
+
+          <!-- 访问第 k 块 -->
+          <div class="flex items-center gap-1 bg-stone-50 px-2 py-1 rounded-lg border border-stone-200 text-xs font-mono">
+            <span class="text-stone-400">访问逻辑块:</span>
+            <input id="input-access-k" type="number" min="0" max="14" value="3" class="w-10 bg-white border border-stone-200 rounded px-1 text-center font-bold text-stone-800 focus:outline-none">
+            <button id="btn-access-k" class="ml-1 px-2.5 py-0.5 rounded bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs transition-colors shadow-xs">
+              ⚡ 访问第 k 块
+            </button>
+          </div>
+
+          <!-- 索引分配子切换 (仅在索引模式下显示) -->
+          <div id="index-level-container" class="hidden flex items-center gap-1 bg-blue-50/70 p-0.5 rounded-lg border border-blue-200">
+            <span class="text-[11px] font-mono text-blue-700 font-semibold px-1.5">索引层级:</span>
+            <button id="idx-single" class="sub-tab-btn active" onclick="switchIndexLevel('single')">单级索引</button>
+            <button id="idx-double" class="sub-tab-btn" onclick="switchIndexLevel('double')">二级索引</button>
+            <button id="idx-triple" class="sub-tab-btn" onclick="switchIndexLevel('triple')">三级索引</button>
+          </div>
+
+          <!-- 特色边界/故障演示按键 -->
+          <button id="btn-feature-demo" class="ctl-btn text-stone-700 bg-stone-50 border-stone-300 hover:bg-stone-100">
+            <span id="feature-demo-icon">⚠️</span> <span id="feature-demo-text">外部碎片演示</span>
+          </button>
+        </div>
+
+        <!-- 右侧颜色图例约定 -->
+        <div class="flex items-center gap-3 text-xs font-mono text-stone-500 flex-wrap">
+          <div class="flex items-center gap-1">
+            <span class="w-3 h-3 rounded bg-emerald-100 border border-emerald-400 inline-block"></span>
+            <span>空闲块</span>
+          </div>
+          <div class="flex items-center gap-1">
+            <span class="w-3 h-3 rounded bg-rose-100 border border-rose-400 inline-block"></span>
+            <span>已占用块</span>
+          </div>
+          <div class="flex items-center gap-1">
+            <span class="w-3 h-3 rounded bg-amber-100 border border-amber-400 inline-block"></span>
+            <span>当前扫描/高亮</span>
+          </div>
+          <div class="flex items-center gap-1">
+            <span class="w-3 h-3 rounded bg-blue-100 border border-blue-400 inline-block"></span>
+            <span>索引块</span>
+          </div>
+          <div class="flex items-center gap-1">
+            <span class="w-3 h-3 rounded bg-purple-100 border border-purple-400 inline-block"></span>
+            <span>FAT指针/链</span>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- 步骤时间轴导航 -->
+      <div class="flex items-center justify-between gap-3 overflow-x-auto pt-1 border-t border-stone-100">
+        <div id="step-timeline-container" class="flex items-center gap-2 overflow-x-auto py-1">
+          <!-- 动态渲染步骤丸子 -->
+        </div>
+        <div id="step-status-badge" class="text-xs font-mono text-stone-500 whitespace-nowrap bg-stone-100 px-2.5 py-0.5 rounded-full border border-stone-200">
+          空闲就绪
+        </div>
+      </div>
+
+    </div>
+
+    <!-- ============================================================ -->
+    <!-- 视图 1：单模式视图 (连续 / 隐式 / FAT / 索引) -->
+    <!-- ============================================================ -->
+    <div id="single-mode-view" class="grid grid-cols-1 lg:grid-cols-12 gap-4">
+
+      <!-- 左侧：外存磁盘块网格 (占 7 列) -->
+      <div class="lg:col-span-7 card-panel rounded-2xl p-4 flex flex-col gap-3 relative">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <div class="w-2.5 h-2.5 rounded-full bg-emerald-500"></div>
+            <h2 class="text-sm font-bold text-stone-800 font-mono tracking-tight">
+              外存磁盘块网格 (Disk Block Grid · 40 Blocks · 0~39)
+            </h2>
+          </div>
+          <div class="text-xs font-mono text-stone-400 flex items-center gap-2">
+            <span id="disk-stat-free" class="text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200 font-semibold">空闲: 40</span>
+            <span id="disk-stat-used" class="text-rose-700 bg-rose-50 px-1.5 py-0.5 rounded border border-rose-200 font-semibold">占用: 0</span>
+          </div>
+        </div>
+
+        <!-- 磁盘网格容器 (40个块) -->
+        <div class="p-3 bg-[#FAF9F6] rounded-xl border border-stone-200 relative overflow-hidden">
+          <!-- 连续分配大括号/横向跨度条图层 -->
+          <div id="contiguous-span-container" class="absolute top-0 left-0 w-full h-full pointer-events-none"></div>
+
+          <div id="disk-grid-element" class="disk-grid">
+            <!-- 由 JS 动态生成 40 个磁盘块 0~39 -->
+          </div>
+        </div>
+
+        <!-- 磁盘说明微提示卡片 -->
+        <div id="disk-hint-card" class="bg-stone-50/80 rounded-xl p-3 border border-stone-200/80 text-xs font-mono text-stone-600 flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <span class="text-base">💡</span>
+            <span id="disk-hint-text">
+              点击磁盘块可查看物理信息与当前占用状态；运行动画时将高亮分配与访问路径。
+            </span>
+          </div>
+          <span id="disk-io-counter" class="text-amber-800 bg-amber-100/80 px-2 py-0.5 rounded font-bold border border-amber-300">
+            磁盘 I/O: 0 次
+          </span>
+        </div>
+      </div>
+
+      <!-- 右侧：内存元数据区 (占 5 列) -->
+      <div class="lg:col-span-5 flex flex-col gap-4">
+
+        <!-- 目录表卡片 (FCB / Directory Entry) -->
+        <div class="card-panel rounded-2xl p-4 flex flex-col gap-3">
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-2">
+              <span class="w-2.5 h-2.5 rounded-full bg-blue-500"></span>
+              <h3 class="text-sm font-bold text-stone-800 font-mono">
+                内存文件目录 (Directory Table / FCB)
+              </h3>
+            </div>
+            <span class="text-[11px] font-mono text-stone-400 bg-stone-100 px-2 py-0.5 rounded">常驻内存</span>
+          </div>
+
+          <!-- 目录表格 -->
+          <div class="overflow-x-auto rounded-lg border border-stone-200">
+            <table class="w-full text-xs font-mono text-left">
+              <thead id="dir-table-head" class="bg-stone-100 text-stone-600 border-b border-stone-200">
+                <!-- 动态表头 -->
+              </thead>
+              <tbody id="dir-table-body" class="divide-y divide-stone-100 bg-white">
+                <!-- 动态目录行 -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- 专属元数据扩展面板 (FAT 表 或 索引块解析面板) -->
+        <div id="metadata-special-panel" class="card-panel rounded-2xl p-4 flex flex-col gap-3 flex-1">
+          <!-- 由 JS 根据当前模式动态装载：FAT 表 / 索引块详细解析 / 连续寻址公式计算器 -->
+        </div>
+
+      </div>
+
+    </div>
+
+    <!-- ============================================================ -->
+    <!-- 视图 2：对比模式视图 (四宫格同时展现与执行) -->
+    <!-- ============================================================ -->
+    <div id="comparison-mode-view" class="hidden flex flex-col gap-4">
+      
+      <!-- 对比顶部控制条 -->
+      <div class="card-subtle rounded-xl p-3 flex items-center justify-between flex-wrap gap-3">
+        <div class="flex items-center gap-3">
+          <span class="px-2.5 py-1 rounded-lg bg-stone-900 text-white font-mono font-bold text-xs">
+            四种分配方式联动对比
+          </span>
+          <span class="text-xs text-stone-600">
+            以相同的文件 A（长度 5 块）为例，实时对比磁盘块分布、元数据存储位置与随机访问开销。
+          </span>
+        </div>
+        <div class="flex items-center gap-2">
+          <button id="btn-comp-create" class="px-3 py-1 rounded-lg text-xs font-semibold bg-emerald-600 text-white hover:bg-emerald-700 shadow-sm transition-colors">
+            🚀 四种方式同时创建文件 A
+          </button>
+          <button id="btn-comp-access" class="px-3 py-1 rounded-lg text-xs font-semibold bg-amber-600 text-white hover:bg-amber-700 shadow-sm transition-colors">
+            ⚡ 四种方式同时访问第 3 块
+          </button>
+          <button id="btn-comp-reset" class="ctl-btn">
+            ↺ 复位对比
+          </button>
+        </div>
+      </div>
+
+      <!-- 四宫格容器 -->
+      <div class="comparison-grid">
+        
+        <!-- 卡片 1：连续分配 -->
+        <div class="card-panel rounded-xl p-3.5 flex flex-col gap-2.5">
+          <div class="flex items-center justify-between border-b border-stone-200 pb-2">
+            <div class="flex items-center gap-1.5 font-bold text-xs text-stone-900">
+              <span class="w-2.5 h-2.5 rounded-full bg-red-500"></span>
+              <span>1. 连续分配 (Contiguous)</span>
+            </div>
+            <span id="comp-io-cont" class="text-[11px] font-mono text-emerald-700 font-bold bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">
+              I/O: - 次
+            </span>
+          </div>
+          <div class="text-[11px] font-mono text-stone-500">
+            目录记录：<span class="text-stone-800 font-semibold" id="comp-dir-cont">文件 A | 起始: 8, 长度: 5</span>
+          </div>
+          <div id="comp-grid-cont" class="mini-disk-grid p-2 bg-stone-50 rounded-lg border border-stone-200"></div>
+          <div class="text-[11px] text-stone-600 bg-stone-50 p-2 rounded border border-stone-200 leading-relaxed font-mono">
+            <span class="font-bold text-stone-800">寻址路径：</span> <span id="comp-path-cont">等待指令...</span>
+          </div>
+        </div>
+
+        <!-- 卡片 2：隐式链接 -->
+        <div class="card-panel rounded-xl p-3.5 flex flex-col gap-2.5">
+          <div class="flex items-center justify-between border-b border-stone-200 pb-2">
+            <div class="flex items-center gap-1.5 font-bold text-xs text-stone-900">
+              <span class="w-2.5 h-2.5 rounded-full bg-orange-500"></span>
+              <span>2. 隐式链接 (Implicit Linked)</span>
+            </div>
+            <span id="comp-io-impl" class="text-[11px] font-mono text-rose-700 font-bold bg-rose-50 px-1.5 py-0.5 rounded border border-rose-200">
+              I/O: - 次
+            </span>
+          </div>
+          <div class="text-[11px] font-mono text-stone-500">
+            目录记录：<span class="text-stone-800 font-semibold" id="comp-dir-impl">文件 A | 起始: 8, 结束: 7</span>
+          </div>
+          <div id="comp-grid-impl" class="mini-disk-grid p-2 bg-stone-50 rounded-lg border border-stone-200"></div>
+          <div class="text-[11px] text-stone-600 bg-stone-50 p-2 rounded border border-stone-200 leading-relaxed font-mono">
+            <span class="font-bold text-stone-800">寻址路径：</span> <span id="comp-path-impl">等待指令...</span>
+          </div>
+        </div>
+
+        <!-- 卡片 3：显式链接 (FAT) -->
+        <div class="card-panel rounded-xl p-3.5 flex flex-col gap-2.5">
+          <div class="flex items-center justify-between border-b border-stone-200 pb-2">
+            <div class="flex items-center gap-1.5 font-bold text-xs text-stone-900">
+              <span class="w-2.5 h-2.5 rounded-full bg-purple-600"></span>
+              <span>3. 显式链接 (FAT)</span>
+            </div>
+            <span id="comp-io-fat" class="text-[11px] font-mono text-purple-700 font-bold bg-purple-50 px-1.5 py-0.5 rounded border border-purple-200">
+              I/O: - 次
+            </span>
+          </div>
+          <div class="text-[11px] font-mono text-stone-500">
+            目录记录：<span class="text-stone-800 font-semibold" id="comp-dir-fat">文件 A | 起始: 8 (指针在FAT)</span>
+          </div>
+          <div id="comp-grid-fat" class="mini-disk-grid p-2 bg-stone-50 rounded-lg border border-stone-200"></div>
+          <div class="text-[11px] text-stone-600 bg-stone-50 p-2 rounded border border-stone-200 leading-relaxed font-mono">
+            <span class="font-bold text-stone-800">寻址路径：</span> <span id="comp-path-fat">等待指令...</span>
+          </div>
+        </div>
+
+        <!-- 卡片 4：索引分配 -->
+        <div class="card-panel rounded-xl p-3.5 flex flex-col gap-2.5">
+          <div class="flex items-center justify-between border-b border-stone-200 pb-2">
+            <div class="flex items-center gap-1.5 font-bold text-xs text-stone-900">
+              <span class="w-2.5 h-2.5 rounded-full bg-blue-600"></span>
+              <span>4. 索引分配 (Indexed)</span>
+            </div>
+            <span id="comp-io-idx" class="text-[11px] font-mono text-blue-700 font-bold bg-blue-50 px-1.5 py-0.5 rounded border border-blue-200">
+              I/O: - 次
+            </span>
+          </div>
+          <div class="text-[11px] font-mono text-stone-500">
+            目录记录：<span class="text-stone-800 font-semibold" id="comp-dir-idx">文件 A | 索引块: 30</span>
+          </div>
+          <div id="comp-grid-idx" class="mini-disk-grid p-2 bg-stone-50 rounded-lg border border-stone-200"></div>
+          <div class="text-[11px] text-stone-600 bg-stone-50 p-2 rounded border border-stone-200 leading-relaxed font-mono">
+            <span class="font-bold text-stone-800">寻址路径：</span> <span id="comp-path-idx">等待指令...</span>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- 对比分析总结大表 (408 考点高频命题维度) -->
+      <div class="card-panel rounded-2xl p-4 overflow-x-auto">
+        <h3 class="text-sm font-bold text-stone-900 mb-3 flex items-center gap-2">
+          <span>📊</span> <span>四种文件分配方式核心特质深度横向对比 (408 核心考点)</span>
+        </h3>
+        <table class="w-full text-xs font-mono text-left border-collapse border border-stone-200">
+          <thead>
+            <tr class="bg-stone-100 text-stone-700 border-b border-stone-200">
+              <th class="p-2.5 border-r border-stone-200">分配方式</th>
+              <th class="p-2.5 border-r border-stone-200">直接/随机访问</th>
+              <th class="p-2.5 border-r border-stone-200">顺序访问</th>
+              <th class="p-2.5 border-r border-stone-200">外部碎片</th>
+              <th class="p-2.5 border-r border-stone-200">内部碎片</th>
+              <th class="p-2.5 border-r border-stone-200">访问第 k 块 I/O 次数</th>
+              <th class="p-2.5 border-r border-stone-200">可靠性</th>
+              <th class="p-2.5">典型现实应用</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-stone-200 bg-white">
+            <tr class="hover:bg-stone-50">
+              <td class="p-2.5 font-bold text-red-600 border-r border-stone-200">连续分配</td>
+              <td class="p-2.5 text-emerald-600 font-bold border-r border-stone-200">极优 (O(1)计算即达)</td>
+              <td class="p-2.5 text-emerald-600 font-bold border-r border-stone-200">极快 (磁头连续寻道)</td>
+              <td class="p-2.5 text-rose-600 font-bold border-r border-stone-200">严重 (需碎片整理/紧凑)</td>
+              <td class="p-2.5 border-r border-stone-200">仅末块有</td>
+              <td class="p-2.5 font-bold text-emerald-600 border-r border-stone-200">1 次</td>
+              <td class="p-2.5 text-stone-600 border-r border-stone-200">中等</td>
+              <td class="p-2.5 text-stone-500">光盘文件系统 (ISO9660)</td>
+            </tr>
+            <tr class="hover:bg-stone-50">
+              <td class="p-2.5 font-bold text-orange-600 border-r border-stone-200">隐式链接</td>
+              <td class="p-2.5 text-rose-600 font-bold border-r border-stone-200">不支持 (只能顺序逐跳)</td>
+              <td class="p-2.5 text-stone-700 border-r border-stone-200">良好 (链表依次读)</td>
+              <td class="p-2.5 text-emerald-600 font-bold border-r border-stone-200">无 (离散利用任意块)</td>
+              <td class="p-2.5 border-r border-stone-200">仅末块有</td>
+              <td class="p-2.5 font-bold text-rose-600 border-r border-stone-200">k + 1 次 (极慢)</td>
+              <td class="p-2.5 text-rose-600 font-bold border-r border-stone-200">极低 (任一指针断裂全丢)</td>
+              <td class="p-2.5 text-stone-500">磁带机 / 简单顺序文件</td>
+            </tr>
+            <tr class="hover:bg-stone-50">
+              <td class="p-2.5 font-bold text-purple-600 border-r border-stone-200">显式链接 (FAT)</td>
+              <td class="p-2.5 text-blue-600 font-bold border-r border-stone-200">支持 (内存FAT查表跳转)</td>
+              <td class="p-2.5 text-emerald-600 font-bold border-r border-stone-200">快 (指针集中在内存)</td>
+              <td class="p-2.5 text-emerald-600 font-bold border-r border-stone-200">无 (彻底离散分配)</td>
+              <td class="p-2.5 border-r border-stone-200">仅末块有</td>
+              <td class="p-2.5 font-bold text-emerald-600 border-r border-stone-200">1 次 (FAT在内存，0次额外I/O)</td>
+              <td class="p-2.5 text-emerald-600 font-bold border-r border-stone-200">高 (FAT表双备份)</td>
+              <td class="p-2.5 text-stone-500">MS-DOS / FAT16 / FAT32</td>
+            </tr>
+            <tr class="hover:bg-stone-50">
+              <td class="p-2.5 font-bold text-blue-600 border-r border-stone-200">索引分配</td>
+              <td class="p-2.5 text-emerald-600 font-bold border-r border-stone-200">支持 (直接查索引表项)</td>
+              <td class="p-2.5 text-emerald-600 font-bold border-r border-stone-200">快</td>
+              <td class="p-2.5 text-emerald-600 font-bold border-r border-stone-200">无</td>
+              <td class="p-2.5 border-r border-stone-200">仅末块有</td>
+              <td class="p-2.5 font-bold text-blue-600 border-r border-stone-200">N + 1 次 (N为索引级数)</td>
+              <td class="p-2.5 text-stone-700 border-r border-stone-200">中等 (索引块损坏影响大)</td>
+              <td class="p-2.5 text-stone-500">UNIX / Linux ext2/3/4 (inode)</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+    </div>
+
+    <!-- ============================================================ -->
+    <!-- 底部：操作日志与动画解说栏 -->
+    <!-- ============================================================ -->
+    <div class="card-panel rounded-2xl p-4 flex flex-col gap-2.5">
+      <div class="flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <span class="w-2.5 h-2.5 rounded-full bg-amber-500 animate-pulse"></span>
+          <h3 class="text-xs font-bold text-stone-800 font-mono">
+            系统实时操作日志与考点解说 (Action Log & OS Theory Explanations)
+          </h3>
+        </div>
+        <div class="flex items-center gap-2">
+          <button id="btn-clear-log" class="text-[11px] font-mono text-stone-400 hover:text-stone-700 transition-colors">
+            清空日志
+          </button>
+        </div>
+      </div>
+
+      <!-- 日志列表容器 -->
+      <div id="log-container" class="h-28 overflow-y-auto space-y-1.5 font-mono text-xs p-2.5 bg-stone-900 text-stone-200 rounded-xl border border-stone-800">
+        <!-- 动态日志项 -->
+      </div>
+    </div>
+
+  </main>
+
+  <!-- 引入应用核心逻辑脚本 -->
+  <script src="app.js"></script>
+</body>
+</html>

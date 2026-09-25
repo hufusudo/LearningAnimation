@@ -1,0 +1,486 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>快速排序填坑法（完整递归与单趟过程）· 交互教学系统</title>
+
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['-apple-system', 'BlinkMacSystemFont', 'SF Pro Display', 'Segoe UI', 'Roboto', 'sans-serif'],
+            mono: ['JetBrains Mono', 'Fira Code', 'SF Mono', 'monospace'],
+            serif: ['Newsreader', 'Georgia', 'serif']
+          },
+          colors: {
+            paper: '#FAF9F5',
+            card: '#FFFFFF',
+            borderSubtle: '#E5E4DC',
+            borderStrong: '#D6D3CD',
+            neonCyan: '#00FFFF',
+            vividRed: '#FF0000',
+            vividGreen: '#00FF00',
+            elemGray: '#D3D3D3',
+            sortedGray: '#A9A9A9',
+            pitBlack: '#000000'
+          }
+        }
+      }
+    }
+  </script>
+
+  <!-- GSAP CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+
+  <!-- KaTeX CDN -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/contrib/auto-render.min.js"></script>
+
+  <!-- Google Fonts -->
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Newsreader:ital,opsz,wght@0,6..72,500;0,6..72,600;1,6..72,400&display=swap">
+
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="min-h-screen bg-[#FAF9F5] text-stone-900 antialiased selection:bg-amber-100 selection:text-amber-900 flex flex-col justify-between overflow-x-hidden">
+
+  <!-- ========================================================================= -->
+  <!-- 极简顶栏 HEADER                                                          -->
+  <!-- ========================================================================= -->
+  <header class="border-b border-[#E5E4DC] bg-[#FAF9F5]/90 backdrop-blur sticky top-0 z-40 px-4 md:px-6 py-2.5">
+    <div class="max-w-7xl mx-auto flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <a href="../index.html#ds" class="w-7 h-7 rounded-lg bg-stone-900 text-white flex items-center justify-center font-mono font-bold text-xs hover:bg-stone-800 transition-colors shadow-sm" title="返回数据结构展厅">
+          ←
+        </a>
+        <div>
+          <h1 class="text-base font-bold tracking-tight text-stone-900 flex items-center gap-2">
+            快速排序全流程可视化
+            <span class="text-xs font-mono font-normal px-2 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200">
+              408 核心考点 · 填坑法与完整递归树
+            </span>
+          </h1>
+        </div>
+      </div>
+
+      <!-- 模式切换选择器 -->
+      <div class="flex items-center gap-2">
+        <div class="bg-stone-100 p-0.5 rounded-lg border border-stone-200 flex items-center text-xs font-mono">
+          <button id="mode-recursive" class="mode-tab active px-2.5 py-1 rounded-md font-semibold transition-all">
+            🌳 完整递归全排序
+          </button>
+          <button id="mode-single" class="mode-tab px-2.5 py-1 rounded-md font-semibold text-stone-500 hover:text-stone-900 transition-all">
+            🔍 单趟填坑微观演练
+          </button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- ========================================================================= -->
+  <!-- 主体工作区 MAIN                                                          -->
+  <!-- ========================================================================= -->
+  <main class="flex-1 max-w-7xl w-full mx-auto px-4 md:px-6 py-4 flex flex-col gap-4">
+
+    <!-- 控制面板与输入栏 -->
+    <div class="card-panel p-3.5 flex flex-wrap items-center justify-between gap-3">
+      <!-- 播放控制按键 -->
+      <div class="flex flex-wrap items-center gap-2">
+        <button id="btn-reset" class="ctl-btn" title="重置回初始状态">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+          重置
+        </button>
+        <button id="btn-prev" class="ctl-btn" title="上一步">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path></svg>
+          上一步
+        </button>
+        <button id="btn-play" class="btn-primary" title="自动播放/暂停">
+          <span id="play-icon">▶</span>
+          <span id="play-label">自动播放</span>
+        </button>
+        <button id="btn-next" class="ctl-btn font-semibold text-stone-900 border-stone-400" title="执行下一步">
+          单步执行
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
+        </button>
+      </div>
+
+      <!-- 速度与阶段指示 -->
+      <div class="flex items-center gap-3 text-xs font-mono">
+        <div class="flex items-center gap-1.5 bg-stone-100 p-1 rounded-lg border border-stone-200">
+          <span class="text-stone-500 pl-1">速率:</span>
+          <button class="speed-btn active" data-speed="1">1.0x</button>
+          <button class="speed-btn" data-speed="1.5">1.5x</button>
+          <button class="speed-btn" data-speed="2">2.0x</button>
+          <button class="speed-btn" data-speed="0.5">0.5x</button>
+        </div>
+
+        <!-- 阶段徽章 -->
+        <div class="hidden lg:flex items-center gap-1 bg-stone-50 px-2.5 py-1 rounded-md border border-stone-200 text-stone-600">
+          <span class="text-stone-400">状态:</span>
+          <span id="phase-badge" class="font-bold text-amber-700">准备执行</span>
+        </div>
+      </div>
+
+      <!-- 预设选择与自定义数据 -->
+      <div class="flex items-center gap-2">
+        <select id="preset-select" class="text-xs font-mono bg-white border border-[#D6D3CD] rounded-md px-2 py-1 text-stone-700 outline-none focus:border-stone-500 cursor-pointer">
+          <option value="classic">408教材经典: [49, 38, 65, 97, 76, 13, 27]</option>
+          <option value="sorted">🚨【408核心考点】已完全有序(升序退化O(n)): [10, 20, 30, 40, 50, 60, 70]</option>
+          <option value="alternate">交错震荡: [50, 20, 80, 15, 85, 30, 70]</option>
+          <option value="descending">降序逆序(退化最坏): [70, 60, 50, 40, 30, 20, 10]</option>
+          <option value="custom">自定义输入数组...</option>
+        </select>
+        <button id="btn-demo-degenerate" class="ctl-btn text-xs px-2.5 py-1 text-rose-700 border-rose-300 bg-rose-50/70 hover:bg-rose-100 hover:border-rose-400 font-bold" title="一键演示已完全有序时的退化单支树情形">
+          🚨 演示有序退化 O(n)
+        </button>
+        <button id="btn-custom" class="ctl-btn text-xs px-2 py-1">编辑数据</button>
+      </div>
+    </div>
+
+    <!-- 自定义数据输入栏 (默认隐藏) -->
+    <div id="custom-input-bar" class="hidden card-panel p-3 bg-amber-50/50 border-amber-200 flex flex-wrap items-center justify-between gap-2">
+      <div class="flex items-center gap-2 text-xs">
+        <span class="font-bold text-amber-900">自定义数组:</span>
+        <input id="input-array" type="text" value="49, 38, 65, 97, 76, 13, 27" class="border border-stone-300 rounded px-2 py-1 font-mono text-xs w-64 md:w-80 outline-none focus:border-amber-600 bg-white" placeholder="英文逗号分隔数字，建议 5~8 个">
+        <span class="text-stone-500 text-[11px]">(建议 5~8 个两位数整数)</span>
+      </div>
+      <div class="flex items-center gap-2">
+        <button id="btn-apply-custom" class="btn-primary text-xs py-1 px-3">应用数据</button>
+        <button id="btn-random-data" class="ctl-btn text-xs py-1 px-2.5">随机生成</button>
+        <button id="btn-cancel-custom" class="ctl-btn text-xs py-1 px-2.5">取消</button>
+      </div>
+    </div>
+
+    <!-- 步骤进度指示条 (可点击跳转) -->
+    <div class="w-full bg-white rounded-lg p-2 border border-[#E5E4DC] flex flex-col gap-1.5 shadow-2xs">
+      <div class="flex items-center justify-between text-xs font-mono text-stone-500">
+        <div class="flex items-center gap-2">
+          <span class="font-semibold text-stone-800" id="step-counter">步骤 0 / 0</span>
+          <span class="text-stone-300">|</span>
+          <span id="step-description" class="text-stone-700">就绪：点击“单步执行”或“自动播放”观察快速排序完整递归全过程</span>
+        </div>
+        <div class="text-[11px] text-stone-400 hidden sm:block">
+          快捷键: [Space] 播放/暂停 &nbsp;|&nbsp; [&rarr;] 单步 &nbsp;|&nbsp; [&larr;] 上步 &nbsp;|&nbsp; [R] 重置
+        </div>
+      </div>
+      <div class="w-full bg-stone-100 h-2 rounded-full overflow-hidden relative cursor-pointer" id="progress-bar-container">
+        <div id="progress-bar-fill" class="bg-gradient-to-r from-amber-500 via-indigo-600 to-emerald-600 h-full w-0 transition-all duration-200"></div>
+      </div>
+    </div>
+
+    <!-- 全排序完成胜利态横幅 (排序完成时平滑浮现) -->
+    <div id="victory-banner" class="hidden card-panel p-3.5 bg-gradient-to-r from-emerald-50 via-teal-50 to-emerald-50 border-emerald-300 text-emerald-950 flex items-center justify-between shadow-sm animate-bounce-once">
+      <div class="flex items-center gap-3">
+        <div class="w-9 h-9 rounded-full bg-emerald-600 text-white flex items-center justify-center font-bold text-lg shadow-sm">
+          ✓
+        </div>
+        <div>
+          <h3 class="text-sm font-bold flex items-center gap-2">
+            <span>🎉 全局快速排序顺利完成！已成为严格有序递增序列！</span>
+            <span class="text-xs font-mono font-normal bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded border border-emerald-300">
+              Sorted Array
+            </span>
+          </h3>
+          <p class="text-xs text-emerald-700 mt-0.5" id="victory-summary">
+            所有子区间递归全部终止返回，基准元素全部锁定归位。
+          </p>
+        </div>
+      </div>
+      <button id="btn-replay" class="ctl-btn text-xs bg-white text-emerald-800 border-emerald-300 hover:bg-emerald-50">
+        重新演练 ↺
+      </button>
+    </div>
+
+    <!-- ========================================================================= -->
+    <!-- 核心视图 1: 数组主工作区 (Array Workspace)                                 -->
+    <!-- ========================================================================= -->
+    <section class="card-panel p-5 flex flex-col justify-between relative overflow-hidden bg-gradient-to-b from-[#FFFFFF] to-[#FAF9F6]">
+      
+      <!-- 顶部信息栏与图例 -->
+      <div class="flex flex-wrap items-center justify-between border-b border-[#E5E4DC]/80 pb-3 gap-2">
+        <div class="flex items-center gap-2">
+          <span class="w-2.5 h-2.5 rounded-full bg-indigo-600"></span>
+          <h2 class="text-sm font-bold text-stone-900 tracking-tight flex items-center gap-2">
+            全局数组状态与当前活动子区间
+            <span id="active-range-badge" class="text-xs font-mono font-semibold px-2 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-200">
+              当前区间: A[0..6]
+            </span>
+          </h2>
+        </div>
+
+        <!-- 色彩图例 -->
+        <div class="flex flex-wrap items-center gap-2 text-[11px] font-mono text-stone-600">
+          <span class="legend-item"><span class="w-2.5 h-2.5 rounded-sm bg-[#D3D3D3] border border-stone-400"></span> 待排元素</span>
+          <span class="legend-item"><span class="w-2.5 h-2.5 rounded-sm bg-[#00FFFF] border border-cyan-500"></span> 当前 pivot</span>
+          <span class="legend-item"><span class="w-2.5 h-2.5 rounded-sm bg-[#000000] border border-dashed border-stone-600"></span> 坑 (Hole)</span>
+          <span class="legend-item"><span class="w-2.5 h-2.5 rounded-sm bg-[#00FF00] border border-green-600"></span> j 较小元</span>
+          <span class="legend-item"><span class="w-2.5 h-2.5 rounded-sm bg-[#FF0000] border border-red-600"></span> i 较大元</span>
+          <span class="legend-item"><span class="w-2.5 h-2.5 rounded-sm bg-amber-400 border border-amber-600"></span> ✓ 最终有序</span>
+        </div>
+      </div>
+
+      <!-- 数组展示台 (包含活动子区间高亮框和双指针) -->
+      <div class="relative my-auto py-6 w-full flex flex-col items-center justify-center min-h-[200px]" id="array-stage">
+        
+        <!-- 飞行抛物线层 -->
+        <div id="flight-layer" class="absolute inset-0 pointer-events-none z-30"></div>
+
+        <!-- 数组容器 -->
+        <div class="flex flex-col items-center gap-1.5 w-full">
+          
+          <!-- 上方索引行 -->
+          <div id="index-row" class="flex items-center justify-center gap-2 sm:gap-3 w-full">
+            <!-- 动态渲染索引 [0], [1], ... -->
+          </div>
+
+          <!-- 主数组单元格行 -->
+          <div id="array-row" class="flex items-center justify-center gap-2 sm:gap-3 w-full relative z-10">
+            <!-- 动态渲染单元格 -->
+          </div>
+
+          <!-- 下方双指针滑动轨道 (i 和 j) -->
+          <div id="pointer-track" class="relative w-full h-14 mt-1 flex items-center justify-center">
+            <!-- 指针 i -->
+            <div id="ptr-i" class="pointer-cursor pointer-i flex flex-col items-center transition-all duration-300">
+              <div class="arrow-up-blue">▲</div>
+              <div class="ptr-badge-i">
+                <span class="font-bold">i</span>
+                <span class="text-[9px] opacity-80">&rarr;</span>
+              </div>
+              <span class="text-[10px] font-mono text-blue-700 font-semibold tracking-tighter">找 &gt; pivot</span>
+            </div>
+
+            <!-- 指针 j -->
+            <div id="ptr-j" class="pointer-cursor pointer-j flex flex-col items-center transition-all duration-300">
+              <div class="arrow-up-orange">▲</div>
+              <div class="ptr-badge-j">
+                <span class="text-[9px] opacity-80">&larr;</span>
+                <span class="font-bold">j</span>
+              </div>
+              <span class="text-[10px] font-mono text-amber-700 font-semibold tracking-tighter">找 &lt; pivot</span>
+            </div>
+
+            <!-- 相遇徽章 -->
+            <div id="ptr-meet" class="ptr-meet-badge hidden">
+              <span>🤝 i 与 j 相遇！</span>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- 底部微提示 -->
+      <div class="border-t border-[#E5E4DC]/60 pt-2 flex items-center justify-between text-[11px] font-mono text-stone-400">
+        <div id="active-range-hint">当前递归处理区间：<span class="font-bold text-stone-700 font-mono">A[0..6]</span>，区间外已锁定或待递归</div>
+        <div id="status-live-hint" class="text-amber-800 font-medium">就绪</div>
+      </div>
+    </section>
+
+    <!-- ========================================================================= -->
+    <!-- 核心视图 2: 递归二叉树 + 调用栈与监视器 (Recursion Tree & Call Stack)        -->
+    <!-- ========================================================================= -->
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-4">
+
+      <!-- 左侧 (7 列): 动态二叉递归调用树 (Recursion Tree Visualizer) -->
+      <div class="lg:col-span-7 card-panel p-4 flex flex-col gap-3 bg-white">
+        <div class="flex items-center justify-between border-b border-[#E5E4DC] pb-2">
+          <div class="flex items-center gap-2">
+            <span class="w-2.5 h-2.5 rounded-full bg-emerald-600"></span>
+            <h3 class="text-xs font-bold text-stone-900 tracking-tight font-mono flex items-center gap-1.5">
+              <span>二叉递归调用树</span>
+              <span class="font-normal text-stone-400">(Dynamic Recursion Tree)</span>
+            </h3>
+          </div>
+          <div class="flex items-center gap-2 text-[10px] font-mono text-stone-500">
+            <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span> 当前活动</span>
+            <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-emerald-500"></span> 已归位完成</span>
+            <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-stone-300"></span> 基底/等待</span>
+          </div>
+        </div>
+
+        <!-- 退化单支树警告条 (检测到最坏情形时显式激活) -->
+        <div id="degrade-alert" class="hidden p-2.5 rounded-lg bg-rose-50 border border-rose-300 text-rose-950 text-xs font-mono flex items-center justify-between shadow-2xs">
+          <div class="flex items-center gap-2">
+            <span class="w-2.5 h-2.5 rounded-full bg-rose-600 animate-ping flex-shrink-0"></span>
+            <div>
+              <span class="font-bold text-rose-900">🚨 408最坏退化情形：</span>
+              <span>初始序列已完全有序！每次基准均落在边界，左右划分极度不平衡 (0 : k-1)，二叉递归树退化为<strong>单支树 (Single-branch Tree)</strong>！</span>
+            </div>
+          </div>
+          <span class="text-[10px] bg-rose-200/80 text-rose-900 px-2 py-0.5 rounded font-bold whitespace-nowrap flex-shrink-0 ml-2">树高 h = n · 栈深度 O(n)</span>
+        </div>
+
+        <!-- 递归树图形渲染区 (支持平滑自适应布局) -->
+        <div id="tree-stage" class="relative w-full overflow-auto min-h-[280px] max-h-[520px] p-4 bg-[#FCFBF8] rounded-xl border border-stone-200/60">
+          <div id="tree-nodes-container" class="relative min-w-full min-h-full flex flex-col items-center">
+            <svg id="tree-svg-links" class="absolute inset-0 pointer-events-none z-0" style="width: 100%; height: 100%;"></svg>
+            <div id="tree-root-mount" class="relative z-10 flex justify-center w-full pb-6">
+              <!-- 由 JS 动态根据递归调用生成二叉树层次结构 -->
+            </div>
+          </div>
+        </div>
+
+        <!-- 树说明小字 -->
+        <div class="flex items-center justify-between text-[11px] font-mono text-stone-400">
+          <div>分治策略：先划分求轴点，再前序遍历递归左子树、后递归右子树</div>
+          <div>点击树节点可快速跳转到对应调用</div>
+        </div>
+      </div>
+
+      <!-- 右侧 (5 列): 递归调用栈与状态监视仪表 (Call Stack & HUD) -->
+      <div class="lg:col-span-5 flex flex-col gap-3">
+
+        <!-- 1. 递归调用栈 (Call Stack) -->
+        <div class="card-panel p-4 flex flex-col gap-2.5 bg-white">
+          <div class="flex items-center justify-between border-b border-[#E5E4DC] pb-2">
+            <div class="flex items-center gap-2">
+              <span class="w-2.5 h-2.5 rounded-full bg-purple-600"></span>
+              <h3 class="text-xs font-bold text-stone-900 tracking-tight font-mono">
+                运行时递归调用栈 (Call Stack Monitor)
+              </h3>
+            </div>
+            <div class="text-[11px] font-mono text-stone-500">
+              当前深度: <span id="stack-depth" class="font-bold text-purple-700">1</span> 层 &nbsp;|&nbsp;
+              最大深度: <span id="stack-max-depth" class="font-bold text-stone-800">1</span> 层
+            </div>
+          </div>
+
+          <!-- 栈帧容器 (由下而上堆叠) -->
+          <div id="stack-frames-container" class="flex flex-col-reverse gap-1.5 min-h-[90px] p-2 bg-stone-50 rounded-lg border border-stone-200/80 font-mono text-xs">
+            <!-- 动态栈帧 -->
+          </div>
+        </div>
+
+        <!-- 2. 状态监视器 (当前 pivot、坑位与完成度) -->
+        <div class="card-panel p-4 flex flex-col gap-3 bg-white">
+          <div class="flex items-center justify-between border-b border-[#E5E4DC] pb-2">
+            <div class="flex items-center gap-2">
+              <span class="w-2.5 h-2.5 rounded-full bg-cyan-500"></span>
+              <h3 class="text-xs font-bold text-stone-900 tracking-tight font-mono">
+                划分状态与归位进度 (Partition State)
+              </h3>
+            </div>
+            <div class="text-[11px] font-mono text-stone-500">
+              已归位锁定: <span id="hud-sorted-count" class="font-bold text-emerald-700">0</span> / <span id="hud-total-count" class="font-bold text-stone-800">7</span>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-3 gap-2 text-center font-mono">
+            <!-- 当前 pivot -->
+            <div id="hud-pivot-box" class="p-2 rounded-lg bg-cyan-50/60 border border-cyan-200 flex flex-col items-center transition-all duration-300">
+              <span class="text-[10px] text-cyan-800">当前基准 pivot</span>
+              <span id="hud-pivot-val" class="text-xl font-bold text-cyan-950 my-0.5">--</span>
+              <span id="hud-pivot-range" class="text-[10px] text-cyan-700 truncate w-full">待选定</span>
+            </div>
+
+            <!-- 当前坑位 -->
+            <div class="p-2 rounded-lg bg-stone-900 text-white flex flex-col items-center">
+              <span class="text-[10px] text-stone-400">当前坑位 Hole</span>
+              <span id="hud-hole-idx" class="text-xl font-bold text-white my-0.5">--</span>
+              <span id="hud-hole-desc" class="text-[10px] text-stone-300 truncate w-full">未产生</span>
+            </div>
+
+            <!-- 双指针状态 -->
+            <div class="p-2 rounded-lg bg-stone-50 border border-stone-200 flex flex-col items-center">
+              <span class="text-[10px] text-stone-500">双指针 i / j</span>
+              <span id="hud-ptrs" class="text-xl font-bold text-stone-800 my-0.5">-- / --</span>
+              <span id="hud-ptrs-desc" class="text-[10px] text-stone-500 truncate w-full">待命</span>
+            </div>
+          </div>
+
+          <!-- 进度微条 -->
+          <div class="flex flex-col gap-1 text-[11px] font-mono text-stone-500">
+            <div class="flex items-center justify-between">
+              <span>全排序归位完成度:</span>
+              <span id="hud-progress-pct" class="font-bold text-emerald-700">0%</span>
+            </div>
+            <div class="w-full bg-stone-100 h-1.5 rounded-full overflow-hidden">
+              <div id="hud-progress-bar" class="bg-emerald-500 h-full w-0 transition-all duration-300"></div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+    </div>
+
+    <!-- ========================================================================= -->
+    <!-- 408 核心考点剖析与代码追踪                                                 -->
+    <!-- ========================================================================= -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      
+      <!-- 408 核心考点卡片 -->
+      <div class="card-panel p-4 flex flex-col gap-2.5">
+        <div class="flex items-center gap-2 border-b border-[#E5E4DC] pb-2">
+          <span class="w-2 h-2 rounded-full bg-amber-500"></span>
+          <h4 class="text-xs font-bold text-stone-900 tracking-tight font-mono">
+            408 考研真题考点深度精炼 (Recursive QuickSort)
+          </h4>
+        </div>
+
+        <div class="space-y-2 text-xs leading-relaxed text-stone-700">
+          <div class="p-2 rounded-lg bg-amber-50/70 border border-amber-200">
+            <span class="font-bold text-amber-900">1. 递归树与时空复杂度：</span>
+            <span>最好/平均时间复杂度为 \(O(n \log_2 n)\)，此时递归树高度为 \(\lceil \log_2(n+1) \rceil\)，栈空间为 \(O(\log n)\)；最坏情况（如完全正序或逆序且每次选最侧元素为基准）退化为单支树，递归树高为 \(n\)，时间复杂度 \(O(n^2)\)，栈深度 \(O(n)\)。</span>
+          </div>
+
+          <div class="p-2 rounded-lg bg-stone-50 border border-stone-200">
+            <span class="font-bold text-stone-900">2. 填坑法单趟划分与原地就地性：</span>
+            <span>填坑法通过双指针交替填补唯一的空缺，无需额外数组，空间开销严格仅为递归调用栈所需的 \(O(\log n)\)，因此属于原地（In-place）排序。</span>
+          </div>
+
+          <div class="p-2 rounded-lg bg-rose-50/60 border border-rose-200">
+            <span class="font-bold text-rose-900">3. 快速排序的不稳定性成因：</span>
+            <span>划分过程中，远距离将较小或较大元素直接搬入坑中，会破坏键值相同元素的初始先后次序（如两个相同的关键字在两端时发生跨越）。</span>
+          </div>
+
+          <div class="p-2 rounded-lg bg-red-50 border border-red-300 text-red-950">
+            <span class="font-bold text-red-900">4. 为什么完全有序时快排最慢？如何优化？</span>
+            <span>当初始序列已有序时，若固定选首元素为基准，每次划分只能减少 1 个元素，左右分割为 \((0, n-1)\)，递归树退化为单支树，递归深度达 \(O(n)\)，总比较次数达 \(\sum_{i=1}^{n-1} i = \frac{n(n-1)}{2} = O(n^2)\)。<strong>工程对策：</strong>采用<strong>“三数取中法”（首中尾取中位数）</strong>或<strong>“随机选择基准”</strong>，可将期望划分比稳定维持在对称状态，杜绝单支树退化。</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- C 语言递归代码逐行追踪 -->
+      <div class="card-panel p-4 flex flex-col gap-2">
+        <div class="flex items-center justify-between border-b border-[#E5E4DC] pb-2">
+          <div class="flex items-center gap-2">
+            <span class="w-2 h-2 rounded-full bg-indigo-500"></span>
+            <h4 class="text-xs font-bold text-stone-900 tracking-tight font-mono">
+              递归算法代码逐行追踪 (C/C++ Implementation)
+            </h4>
+          </div>
+          <span class="text-[10px] font-mono text-stone-400">调用与返回行实时点亮</span>
+        </div>
+
+        <div class="bg-stone-900 text-stone-200 p-3 rounded-lg font-mono text-xs overflow-x-auto leading-5" id="code-block">
+          <div id="code-line-1" class="code-line"><span class="text-stone-500 select-none mr-2">01</span><span class="text-indigo-400">void</span> QuickSort(<span class="text-indigo-400">int</span> A[], <span class="text-indigo-400">int</span> low, <span class="text-indigo-400">int</span> high) {</div>
+          <div id="code-line-2" class="code-line"><span class="text-stone-500 select-none mr-2">02</span>    <span class="text-amber-400">if</span> (low &lt; high) {  <span class="text-stone-400">// 递归边界：长度 &gt; 1 时继续划分</span></div>
+          <div id="code-line-3" class="code-line"><span class="text-stone-500 select-none mr-2">03</span>        <span class="text-indigo-400">int</span> pivotpos = Partition(A, low, high); <span class="text-stone-400">// 填坑划分，基准归位</span></div>
+          <div id="code-line-4" class="code-line"><span class="text-stone-500 select-none mr-2">04</span>        QuickSort(A, low, pivotpos - 1);  <span class="text-stone-400">// 递归解决左子序列</span></div>
+          <div id="code-line-5" class="code-line"><span class="text-stone-500 select-none mr-2">05</span>        QuickSort(A, pivotpos + 1, high); <span class="text-stone-400">// 递归解决右子序列</span></div>
+          <div id="code-line-6" class="code-line"><span class="text-stone-500 select-none mr-2">06</span>    }</div>
+          <div id="code-line-7" class="code-line"><span class="text-stone-500 select-none mr-2">07</span>}</div>
+          <div id="code-line-8" class="code-line"><span class="text-stone-500 select-none mr-2">08</span><span class="text-stone-500">// Partition: 选 A[low] 暂存挖首坑，双指针向内填坑并最终锁定归位</span></div>
+        </div>
+      </div>
+
+    </div>
+
+  </main>
+
+  <!-- ========================================================================= -->
+  <!-- 极简页脚 FOOTER                                                          -->
+  <!-- ========================================================================= -->
+  <footer class="border-t border-[#E5E4DC] bg-[#FAF9F5] py-3 text-center text-xs font-mono text-stone-400 mt-6">
+    LearningAnimation · 快速排序完整递归全流程与填坑法可视化 · 计算机考研 408 核心考点专题
+  </footer>
+
+  <!-- 核心逻辑脚本 -->
+  <script src="app.js"></script>
+</body>
+</html>

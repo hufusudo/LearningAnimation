@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="以微元环流抵消、补线法与挖洞法为主线，动态演示格林公式如何把线积分变成面积分。">
+  <title>格林公式的几何直观 · 可视化实验室</title>
+  <link rel="stylesheet" href="style.css">
+  <script defer src="model.js"></script>
+  <script defer src="app.js"></script>
+</head>
+<body>
+<div class="app" id="app">
+
+  <header class="topbar">
+    <a class="back-link" href="../index.html#math">← 高等数学</a>
+    <span class="title-divider" aria-hidden="true"></span>
+    <h1>格林公式的几何直观</h1>
+    <span class="subtitle">微元环流抵消 · 补线法 · 挖洞法</span>
+    <ul class="legend" aria-label="配色图例">
+      <li><i style="--c:#00F5FF"></i>正向外边界 L</li>
+      <li><i style="--c:#FFB800"></i>内部相消边</li>
+      <li><i style="--c:#FF2A85"></i>补线 / 割线</li>
+      <li><i style="--c:#FF1744"></i>奇点</li>
+      <li><i style="--c:#FFD700"></i>挖洞内环</li>
+    </ul>
+  </header>
+
+  <main class="work">
+    <!-- ===== 左视图：空间几何域 ===== -->
+    <section class="panel view-left" aria-label="空间几何域">
+      <div class="panel-head">
+        <span class="phase-tag" id="phase-tag">阶段 1 · 微元大抵消</span>
+        <span class="scene-note" id="scene-note" aria-live="polite">沿闭合曲线 L 走一圈，看线积分怎么做功。</span>
+      </div>
+      <div class="canvas-box">
+        <canvas id="left-canvas" aria-label="向量场、积分曲线与微元网格的二维演示"></canvas>
+      </div>
+    </section>
+
+    <!-- ===== 右视图：代数与微元特写 ===== -->
+    <aside class="panel-stack">
+      <section class="panel micro-panel" aria-label="单个矩形微元放大">
+        <div class="panel-head">
+          <span class="panel-title">微元特写</span>
+          <span class="micro-caption" id="micro-caption">矩形微元 dx dy</span>
+        </div>
+        <div class="canvas-box">
+          <canvas id="micro-canvas" aria-label="单个矩形微元四边环流放大图"></canvas>
+        </div>
+      </section>
+
+      <section class="panel algebra-panel" aria-label="代数等式展开器">
+        <div class="panel-head">
+          <span class="panel-title">代数等式展开器</span>
+          <span class="algebra-hint" id="algebra-hint">高亮项即将相消</span>
+        </div>
+        <div class="rows" id="rows" aria-live="polite"></div>
+      </section>
+    </aside>
+  </main>
+
+  <!-- ===== 底部状态监视器 ===== -->
+  <footer class="dash" aria-label="状态监视器">
+    <div class="dash-row dash-top">
+      <div class="gauge gauge-line">
+        <span class="g-label" id="g-line-label">∮<sub>L</sub> <b>F</b>·d<b>r</b></span>
+        <strong class="g-value" id="g-line-value">0.0000</strong>
+        <i class="g-track"><b id="g-line-fill" style="background:#00F5FF"></b></i>
+      </div>
+
+      <span class="vs" aria-hidden="true">vs</span>
+
+      <div class="gauge gauge-area">
+        <span class="g-label" id="g-area-label">∬<sub>D</sub> (∂Q/∂x − ∂P/∂y) dA</span>
+        <strong class="g-value" id="g-area-value">0.0000</strong>
+        <i class="g-track"><b id="g-area-fill" style="background:#FFD700"></b></i>
+      </div>
+
+      <div class="equation-badge" id="equation-badge">等待两侧累计…</div>
+
+      <div class="slots">
+        <div class="slot">
+          <span class="slot-key">拓扑结构</span>
+          <strong class="slot-val" id="slot-topo">单连通闭合</strong>
+        </div>
+        <div class="slot slot-grid">
+          <span class="slot-key">网格 <b id="slot-n-val">16×16</b></span>
+          <input id="n-slider" type="range" min="8" max="32" step="2" value="16" aria-label="网格密度 N">
+        </div>
+        <div class="slot">
+          <span class="slot-key">离散误差</span>
+          <strong class="slot-val" id="slot-err">—</strong>
+        </div>
+        <div class="slot slot-cancel">
+          <span class="slot-key">抵消率 <b id="cancel-val">0%</b></span>
+          <i class="cancel-track"><b id="cancel-fill"></b></i>
+        </div>
+      </div>
+    </div>
+
+    <div class="dash-row dash-bottom">
+      <div class="transport">
+        <button class="icon-button" id="btn-restart" title="从头开始" aria-label="从头开始">↺</button>
+        <button class="icon-button" id="btn-prev" title="上一步" aria-label="上一步">‹</button>
+        <button class="play-button" id="btn-play" aria-label="播放 / 暂停">❚❚ 暂停</button>
+        <button class="icon-button" id="btn-next" title="下一步" aria-label="下一步">›</button>
+        <label class="speed-label" for="speed">速度</label>
+        <select id="speed" aria-label="播放速度">
+          <option value="0.5">0.5×</option>
+          <option value="1" selected>1×</option>
+          <option value="1.5">1.5×</option>
+          <option value="2">2×</option>
+        </select>
+        <output class="time" id="time">00:00 / 00:00</output>
+      </div>
+      <input id="timeline" class="timeline" type="range" min="0" max="1000" value="0" aria-label="演示进度">
+      <div class="chips" id="chips" aria-label="步骤跳转"></div>
+    </div>
+  </footer>
+</div>
+</body>
+</html>

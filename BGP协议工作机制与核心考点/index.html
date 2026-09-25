@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="用可交互动画理解 BGP：建邻与通告、AS_PATH 防环、eBGP/iBGP 的 NEXT_HOP 差异、LOCAL_PREF 策略选路。">
+  <title>BGP 协议工作机制与考研核心考点 · 可视化实验室</title>
+  <link rel="stylesheet" href="style.css">
+  <script defer src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+  <script defer src="model.js"></script>
+  <script defer src="app.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="back" href="../index.html#net" aria-label="返回计算机网络展厅">←</a>
+    <span>可视化实验室 <span class="crumb">/ 计算机网络</span></span>
+    <span class="header-note">边界网关协议 · 考点交互实验</span>
+  </header>
+
+  <main>
+    <section class="intro">
+      <div>
+        <p class="intro-kicker">AS 之间只谈策略 · AS 内部只传可达</p>
+        <h1>BGP 怎样把“能不能到、走哪条更划算”说清楚？</h1>
+        <p>三个自治系统、六台路由器，看会话如何建立、路由如何逐跳带上 AS_PATH、NEXT_HOP 何时改写，以及策略如何压过“最短”。</p>
+      </div>
+      <div class="intro-key"><span class="key-dot"></span> 所有 BGP 报文都跑在 TCP 179 端口</div>
+    </section>
+
+    <nav class="lessons" aria-label="选择考研核心场景">
+      <button data-scene="s1" aria-pressed="true">
+        <span>01 <b>BGP 基础建邻与通告</b></span>
+        <small>TCP 握手 → OPEN → KEEPALIVE → UPDATE</small>
+      </button>
+      <button data-scene="s2" aria-pressed="false">
+        <span>02 <b>路径向量与环路避免</b></span>
+        <small>AS_PATH 逐跳追加，见本 AS 号即丢弃</small>
+      </button>
+      <button data-scene="s3" aria-pressed="false">
+        <span>03 <b>EBGP 与 IBGP 差异</b></span>
+        <small>NEXT_HOP 什么时候改、什么时候不改</small>
+      </button>
+      <button data-scene="s4" aria-pressed="false">
+        <span>04 <b>策略选路优先权</b></span>
+        <small>LOCAL_PREF 压过更短的 AS_PATH</small>
+      </button>
+    </nav>
+
+    <section class="workspace">
+      <div class="visual-pane">
+        <div class="stage-heading">
+          <div>
+            <span id="protocol" class="protocol">BGP</span>
+            <h2 id="scene-title">先建立可靠的邻居关系</h2>
+          </div>
+          <span id="phase" class="phase">准备</span>
+        </div>
+
+        <div class="stage-context">
+          <span id="stage-hint">拓扑：AS100 / AS200 / AS300，实线为 eBGP 会话，虚线为 iBGP 会话。</span>
+          <div id="bgp-states" class="bgp-states" hidden>
+            <span class="state-label">会话状态</span>
+            <ol>
+              <li data-state="Idle">Idle</li>
+              <li data-state="Connect">Connect</li>
+              <li data-state="OpenSent">OpenSent</li>
+              <li data-state="OpenConfirm">OpenConfirm</li>
+              <li data-state="Established">Established</li>
+            </ol>
+          </div>
+        </div>
+
+        <div class="network">
+          <svg id="topology" viewBox="0 0 1200 690" role="img" aria-labelledby="graph-title graph-desc">
+            <title id="graph-title">BGP 自治系统拓扑</title>
+            <desc id="graph-desc">三个自治系统气泡，每个含两台路由器；实线为 eBGP 会话，虚线为 iBGP 会话；数据包沿链路移动并携带路由属性。</desc>
+            <defs>
+              <marker id="arrow-emerald" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                <path d="M0 0 L10 5 L0 10 Z" fill="#059669"></path>
+              </marker>
+              <marker id="arrow-rose" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                <path d="M0 0 L10 5 L0 10 Z" fill="#be123c"></path>
+              </marker>
+              <filter id="soft-shadow" x="-30%" y="-30%" width="160%" height="160%">
+                <feDropShadow dx="0" dy="1.5" stdDeviation="1.8" flood-color="#57534e" flood-opacity="0.16"></feDropShadow>
+              </filter>
+            </defs>
+            <g id="layer-as"></g>
+            <g id="layer-links"></g>
+            <g id="layer-flow"></g>
+            <g id="layer-cards"></g>
+            <g id="layer-nodes"></g>
+            <g id="layer-packets"></g>
+            <g id="layer-fx"></g>
+          </svg>
+        </div>
+
+        <div class="legend">
+          <span><i class="legend-line"></i>eBGP 会话（跨 AS）</span>
+          <span><i class="legend-line dashed"></i>iBGP 会话（AS 内部）</span>
+          <span><i class="legend-dot blue"></i>BGP 报文</span>
+          <span><i class="legend-dot slate"></i>TCP 握手</span>
+          <span><i class="legend-dot rose"></i>环路丢弃</span>
+          <span><i class="legend-badge">TCP 179</i>传输层端口</span>
+        </div>
+
+        <div id="insight" class="insight" aria-live="polite">
+          <span id="step-kicker"></span>
+          <h3 id="step-title"></h3>
+          <p id="step-description"></p>
+          <div id="formula" class="formula"></div>
+          <p id="insight-note" class="insight-note"></p>
+        </div>
+
+        <div class="transport">
+          <div class="control-row">
+            <div class="playback">
+              <button id="btn-reset" type="button">↺ 重置</button>
+              <button id="btn-prev" type="button">‹ 上一步</button>
+              <button id="btn-play" type="button" class="primary">▶ 自动播放</button>
+              <button id="btn-pause" type="button" disabled>Ⅱ 暂停</button>
+              <button id="btn-next" type="button">下一步 ›</button>
+            </div>
+            <label class="speed-label">速度
+              <select id="speed">
+                <option value="0.5">0.5×</option>
+                <option value="1" selected>1×</option>
+                <option value="1.5">1.5×</option>
+                <option value="2">2×</option>
+              </select>
+            </label>
+          </div>
+          <div class="timeline">
+            <label for="seek" id="progress-label">演示进度</label>
+            <input id="seek" type="range" min="0" max="1" value="0" step="1">
+            <output id="progress" for="seek">0 / 0</output>
+          </div>
+          <div id="milestones" class="milestones"></div>
+        </div>
+      </div>
+
+      <aside class="state-pane">
+        <div class="panel-heading">
+          <h2 id="panel-title">BGP 四种报文</h2>
+          <span id="panel-hint">考研速查</span>
+        </div>
+        <div id="panel-body"></div>
+
+        <section class="plain-note">
+          <h3 id="rule-title">这一幕要记住的结论</h3>
+          <p id="rule-text"></p>
+        </section>
+
+        <details class="glossary">
+          <summary>第一次接触？看看这几个词</summary>
+          <dl>
+            <dt>自治系统 (AS)</dt>
+            <dd>一个机构管理下的、统一运行同一 IGP 的网络。用 AS 号唯一标识，16 位二进制，1~65535 为公有。</dd>
+            <dt>Speaker / Peer</dt>
+            <dd>运行 BGP 的路由器叫 BGP 发言者；互相交换路由的两台叫对等体（Peer）。TCP 连接即“会话”。</dd>
+            <dt>UPDATE 报文</dt>
+            <dd>只携带“增量变化”：要撤销的前缀，或可达的新前缀 + 路径属性。BGP 没有周期性全量路由表交换。</dd>
+            <dt>AS_PATH</dt>
+            <dd>去往该前缀所经过的 AS 号序列，既是选路依据（越短越好），也是唯一的路径向量防环手段。</dd>
+            <dt>NEXT_HOP</dt>
+            <dd>去往该前缀的数据包下一跳 IP。eBGP 通告时改写为发送方接口，iBGP 通告时默认保持不变。</dd>
+            <dt>LOCAL_PREF</dt>
+            <dd>本地优先级，只在 AS 内部（iBGP）传递，影响本 AS 的出站选路；缺省 100，越大越优先。</dd>
+          </dl>
+        </details>
+      </aside>
+    </section>
+
+    <section class="comparison">
+      <h2>四条结论，直接背</h2>
+      <div class="compare-grid">
+        <div>
+          <span class="protocol">传输层</span>
+          <h3>BGP 是应用层协议，跑在 TCP 179 之上。</h3>
+          <p>靠 TCP 保证可靠交付，因此不需要自己做确认与重传；建邻顺序必然是先 TCP 三次握手，再互发 OPEN。</p>
+        </div>
+        <div>
+          <span class="protocol">防环</span>
+          <h3>AS_PATH 是 BGP 唯一的环路检测手段。</h3>
+          <p>每经过一个 AS 就把 AS 号写到路径最前面；收到 UPDATE 时若发现本 AS 号已在 AS_PATH 中，直接丢弃。</p>
+        </div>
+        <div>
+          <span class="protocol">NEXT_HOP</span>
+          <h3>eBGP 改写 NEXT_HOP，iBGP 默认不改。</h3>
+          <p>iBGP 里 NEXT_HOP 保持为外部邻居的接口 IP，必须由 IGP 打通该地址，或在边界路由器上配置 next-hop-self。</p>
+        </div>
+        <div>
+          <span class="protocol">选路</span>
+          <h3>策略（LOCAL_PREF）优先于“路径更短”。</h3>
+          <p>BGP 选路是策略优先而非最短路优先：先比 LOCAL_PREF，再比 AS_PATH 长度。长路径配高 LOCAL_PREF 照样胜出。</p>
+        </div>
+      </div>
+    </section>
+
+    <footer>
+      教学简化：只展示一台路由器的路由表与一条前缀 <code>192.168.1.0/24</code>；省略 UPDATE 中的团体属性、MED、RR 反射与 4 字节 AS 号。选路过程只演示 LOCAL_PREF、AS_PATH 长度与 NEXT_HOP 三级规则，真实设备共有十余条判定顺序。<br>
+      协议依据：<a href="https://www.rfc-editor.org/rfc/rfc4271" target="_blank" rel="noreferrer">RFC 4271（BGP-4）</a> ·
+      <a href="https://www.rfc-editor.org/rfc/rfc1997" target="_blank" rel="noreferrer">RFC 1997（BGP Community）</a>
+    </footer>
+  </main>
+</body>
+</html>

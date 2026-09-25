@@ -1,0 +1,291 @@
+/* 
+ * 硬链接与软链接工作机制可视化系统样式表
+ * 遵循 Taste-Skill Light Editorial 浅色纸质美学与 60fps 平滑过渡规范
+ */
+
+:root {
+  --bg-warm: #FAF9F5;
+  --bg-card: #FFFFFF;
+  --border-light: #E5E4DC;
+  --border-card: #ECEBE4;
+  --border-hover: #D6D3CD;
+  --text-primary: #1C1917;
+  --text-secondary: #78716C;
+  --text-muted: #A8A29E;
+
+  /* 题目固定要求色系 */
+  --block-free-bg: #ECFDF5;
+  --block-free-border: #A7F3D0;
+  --block-free-text: #065F46;
+
+  --block-used-bg: #FEF2F2;
+  --block-used-border: #FECACA;
+  --block-used-text: #991B1B;
+
+  --block-symlink-bg: #FFF7ED;
+  --block-symlink-border: #FDBA74;
+  --block-symlink-text: #C2410C;
+
+  /* 箭头颜色 */
+  --arrow-blue: #2563EB;
+  --arrow-green: #059669;
+  --arrow-orange: #EA580C;
+  --arrow-red: #DC2626;
+
+  /* 高亮光晕 */
+  --glow-blue: rgba(37, 99, 235, 0.15);
+  --glow-green: rgba(5, 150, 105, 0.15);
+  --glow-orange: rgba(234, 88, 12, 0.15);
+}
+
+body {
+  background-color: var(--bg-warm);
+  color: var(--text-primary);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  overflow-x: hidden;
+}
+
+/* 纸质卡片微拟物与细线边框 */
+.card-panel {
+  background-color: var(--bg-card);
+  border: 1px solid var(--border-light);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02), 0 1px 2px rgba(0, 0, 0, 0.03);
+}
+
+.card-subtle {
+  background-color: #FAF9F6;
+  border: 1px solid var(--border-card);
+}
+
+/* 机械物理键程微按键 */
+.ctl-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.375rem;
+  padding: 0.4rem 0.75rem;
+  border-radius: 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  border: 1px solid var(--border-light);
+  background-color: #FFFFFF;
+  color: var(--text-primary);
+  box-shadow: 0 1.5px 0 #D6D3CD;
+  transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+.ctl-btn:hover:not(:disabled) {
+  background-color: #FBFBF9;
+  border-color: #D6D3D1;
+  transform: translateY(-1px);
+  box-shadow: 0 2.5px 0 #D6D3CD;
+}
+.ctl-btn:active:not(:disabled) {
+  transform: translateY(1.5px);
+  box-shadow: none;
+}
+.ctl-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+/* 操作主要按键强调 */
+.ctl-btn-primary {
+  background-color: #1C1917;
+  color: #FFFFFF;
+  border-color: #1C1917;
+  box-shadow: 0 1.5px 0 #000000;
+}
+.ctl-btn-primary:hover:not(:disabled) {
+  background-color: #292524;
+  border-color: #292524;
+  color: #FFFFFF;
+}
+
+/* 标签切换按键 */
+.tab-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.45rem 0.85rem;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  border-radius: 0.5rem;
+  border: 1px solid transparent;
+  color: var(--text-secondary);
+  transition: all 0.18s ease;
+  white-space: nowrap;
+  user-select: none;
+}
+.tab-btn:hover:not(.active) {
+  color: var(--text-primary);
+  background-color: rgba(255, 255, 255, 0.7);
+}
+.tab-btn.active {
+  background-color: #FFFFFF;
+  color: var(--text-primary);
+  border-color: var(--border-light);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+
+/* 全屏动态 SVG 连线层 */
+#connection-svg-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 25;
+  overflow: visible;
+}
+
+/* SVG 箭头路径 */
+.flow-arrow-path {
+  fill: none;
+  stroke-width: 2.25px;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: stroke 0.3s ease, opacity 0.3s ease;
+}
+
+.flow-arrow-dash {
+  stroke-dasharray: 6, 4;
+}
+
+.flow-arrow-head {
+  transition: transform 0.25s ease, opacity 0.25s ease;
+}
+
+/* 脉冲与动画效果 */
+@keyframes pulse-ring {
+  0% { transform: scale(0.95); opacity: 0.8; }
+  50% { transform: scale(1.05); opacity: 0.3; }
+  100% { transform: scale(0.95); opacity: 0.8; }
+}
+
+@keyframes broken-flash {
+  0%, 100% { background-color: #FEF2F2; border-color: #EF4444; }
+  50% { background-color: #FEE2E2; border-color: #B91C1C; box-shadow: 0 0 12px rgba(239, 68, 68, 0.4); }
+}
+
+.broken-link-alert {
+  animation: broken-flash 1s infinite ease-in-out;
+}
+
+@keyframes highlight-pulse-blue {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(37, 99, 235, 0); }
+  50% { box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.25); }
+}
+
+.pulse-target-blue {
+  animation: highlight-pulse-blue 1.2s infinite ease-in-out;
+}
+
+@keyframes highlight-pulse-green {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(5, 150, 105, 0); }
+  50% { box-shadow: 0 0 0 4px rgba(5, 150, 105, 0.25); }
+}
+
+.pulse-target-green {
+  animation: highlight-pulse-green 1.2s infinite ease-in-out;
+}
+
+@keyframes highlight-pulse-orange {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(234, 88, 12, 0); }
+  50% { box-shadow: 0 0 0 4px rgba(234, 88, 12, 0.25); }
+}
+
+.pulse-target-orange {
+  animation: highlight-pulse-orange 1.2s infinite ease-in-out;
+}
+
+/* 数字变化跳动 */
+.count-animate {
+  display: inline-block;
+  transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1), color 0.25s ease;
+}
+
+/* 磁盘块状态样式 */
+.block-free {
+  background-color: var(--block-free-bg);
+  border-color: var(--block-free-border);
+  color: var(--block-free-text);
+}
+
+.block-occupied {
+  background-color: var(--block-used-bg);
+  border-color: var(--block-used-border);
+  color: var(--block-used-text);
+}
+
+.block-symlink {
+  background-color: var(--block-symlink-bg);
+  border-color: var(--block-symlink-border);
+  color: var(--block-symlink-text);
+}
+
+/* 锚点小圆点用于对齐连线 */
+.connect-anchor {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  position: absolute;
+  pointer-events: none;
+}
+.connect-anchor-left {
+  left: -3px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+.connect-anchor-right {
+  right: -3px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+/* 节拍指示器 */
+.step-dot {
+  width: 20px;
+  height: 20px;
+  border-radius: 9999px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: bold;
+  transition: all 0.25s ease;
+}
+.step-dot-active {
+  background-color: #1C1917;
+  color: #FFFFFF;
+  transform: scale(1.15);
+}
+.step-dot-done {
+  background-color: #E7E5E4;
+  color: #78716C;
+}
+.step-dot-pending {
+  background-color: #F5F5F4;
+  color: #D6D3D1;
+  border: 1px dashed #D6D3D1;
+}
+
+/* 滚动条美化 */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #FAF9F6;
+}
+::-webkit-scrollbar-thumb {
+  background: #D6D3D1;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #A8A29E;
+}

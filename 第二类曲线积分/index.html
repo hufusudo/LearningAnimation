@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>第二类曲线积分 · 看见每一步的功</title>
+  <meta name="description" content="拖动力箭头看正功、零功与负功，再把曲线切段、投影、累加，理解第二类曲线积分。">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+  <link rel="stylesheet" href="style.css">
+  <script defer src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+  <script defer src="model.js"></script><script defer src="app.js"></script>
+</head>
+<body>
+  <header class="topbar"><a href="../index.html#math">← 高等数学</a><h1>第二类曲线积分</h1><button id="guide" class="primary">自动讲一遍</button></header>
+  <main id="lesson" data-stage="1">
+    <nav class="steps" aria-label="理解曲线积分的五步">
+      <button data-stage="1" aria-current="step"><b>1</b>一步的功</button>
+      <button data-stage="2"><b>2</b>弯路切小</button>
+      <button data-stage="3"><b>3</b>两个方向</button>
+      <button data-stage="4"><b>4</b>沿路相加</button>
+      <button data-stage="5"><b>5</b>反向再走</button>
+    </nav>
+    <section class="narration" aria-live="polite"><span id="chapter">先理解“功”</span><h2 id="headline">同样大小的力，换个方向，功就变了。</h2><p id="explanation">把橙色力箭头拖一拖。看它落在前进方向上的“影子”，这一部分才计入功。</p></section>
+    <div class="workspace">
+      <section class="drawing-panel">
+        <div class="drawing-header"><h3 id="scene-title">把一个物体向右移动 1 m</h3><span id="scene-hint">拖橙色圆点，或用下方滑块</span></div>
+        <svg id="scene" viewBox="0 0 780 470" role="img" aria-label="力、位移以及力在位移方向上的正交投影"></svg>
+        <div id="angle-controls" class="context-controls">
+          <div class="presets" role="group" aria-label="力的典型方向"><button data-angle="0">顺着拉</button><button data-angle="90">垂直拉</button><button data-angle="150">逆着拉</button></div>
+          <label class="slider-label">力与位移的夹角 <input id="angle" type="range" min="0" max="180" value="45"><output id="angle-value">45°</output></label>
+        </div>
+        <div id="curve-controls" class="context-controls" hidden>
+          <div class="curve-options"><label>力场 <select id="field"><option value="mixed">有助推，也有阻碍</option><option value="assist">沿途助推</option></select></label><label id="partition-label">分成 <input id="partitions" type="range" min="0" max="4" step="1" value="1"><output id="partition-value">8 段</output></label></div>
+          <label class="slider-label"><span id="position-title">选择一小段</span><input id="position" type="range" min="0" max="1" step="0.001" value="0.25"><output id="position-value">第 3 段</output></label>
+        </div>
+      </section>
+      <aside class="insight-panel" aria-labelledby="insight-title"><span id="insight-kicker">只看顺着路的那部分力</span><h3 id="insight-title">箭头的影子，决定功的正负</h3><div id="insight"></div></aside>
+    </div>
+    <section class="formula-panel"><span id="formula-label">这一小步</span><div><div id="formula"></div><p id="formula-note"></p></div></section>
+    <section class="playback" aria-label="演示控制"><button id="previous">上一步</button><button id="play" class="primary">播放这一幕</button><button id="advance">只走一小段</button><label>速度 <select id="speed"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option></select></label><button id="next" class="next">下一步：把弯路切小 →</button></section>
+    <p class="footnote">本例长度以 m、力以 N、功以 J 计；不同物理量使用各自的比例尺。弧段的数值功采用中点近似；Δ 表示有限小段，d 表示切细后的微分。</p>
+    <details><summary>查看本例的曲线与力场</summary><p>曲线 r(t) = (−2 + 4t, 0.72 sin πt)，0 ≤ t ≤ 1。</p><p>沿途助推：F = (1 + 0.16y, 0.55 cos(π(x + 2)/4))。</p><p>助推与阻碍：F = (0.3 + 0.1y, 1.8 + 0.15x)。上坡段做正功，下坡后段做负功。</p></details>
+  </main>
+</body>
+</html>

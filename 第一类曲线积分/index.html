@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="从变色金属丝出发，用切段、相加和加密直观理解第一类曲线积分。">
+  <title>第一类曲线积分 · 可视化实验室</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+  <link rel="stylesheet" href="style.css">
+  <script defer src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+  <script defer src="model.js"></script>
+  <script defer src="app.js"></script>
+</head>
+<body>
+  <div class="app-shell" id="app" data-stage="1" data-view="2d">
+    <header class="topbar">
+      <div class="title-group">
+        <a class="back-link" href="../index.html#math">← 高等数学</a>
+        <span class="title-divider" aria-hidden="true"></span>
+        <h1>第一类曲线积分</h1>
+      </div>
+      <div class="view-switch" role="group" aria-label="选择观察视角">
+        <button type="button" class="view-button is-active" id="view-2d" aria-pressed="true">2D</button>
+        <button type="button" class="view-button" id="view-3d" aria-pressed="false">3D</button>
+      </div>
+    </header>
+
+    <main class="lesson">
+      <section class="stage-card" aria-label="曲线积分互动演示">
+        <div class="stage-head">
+          <div class="stage-labels">
+            <span class="stage-kicker" id="stage-kicker">先看这根弯弯的金属丝</span>
+            <span class="function-name" id="function-name" hidden></span>
+          </div>
+          <div class="density-legend" aria-label="颜色越亮表示密度越大">
+            <span>低密度</span><i aria-hidden="true"></i><span>高密度</span>
+          </div>
+          <div class="metrics" id="metrics" aria-label="积分近似与误差">
+            <div class="metric"><span>段数 n</span><strong id="metric-n">—</strong></div>
+            <div class="metric"><span>近似和</span><strong id="metric-sum">—</strong></div>
+            <div class="metric"><span>真实值</span><strong id="metric-exact">—</strong></div>
+            <div class="metric metric-error"><span>误差</span><strong id="metric-error">—</strong><i class="error-track"><b id="error-fill"></b></i></div>
+          </div>
+        </div>
+
+        <div class="scene-wrap" id="scene-wrap">
+          <svg id="scene" viewBox="0 0 1200 520" role="img" aria-label="一根密度沿位置改变颜色的弯曲金属丝">
+            <defs>
+              <linearGradient id="density-gradient" x1="0" x2="1" y1="1" y2="0">
+                <stop offset="0%" stop-color="#347a78"></stop>
+                <stop offset="100%" stop-color="#dfb64f"></stop>
+              </linearGradient>
+              <filter id="soft-shadow" x="-30%" y="-30%" width="160%" height="160%">
+                <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#183d3b" flood-opacity=".14"></feDropShadow>
+              </filter>
+              <marker id="direction-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+                <path d="M 0 1 L 10 5 L 0 9 z" fill="#183d3b"></path>
+              </marker>
+              <marker id="tiny-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+                <path d="M 0 1 L 10 5 L 0 9 z" fill="#3c7673"></path>
+              </marker>
+            </defs>
+            <g id="scene-grid" aria-hidden="true"></g>
+            <g id="curtain-layer" aria-hidden="true"></g>
+            <g id="wire-layer" aria-hidden="true"></g>
+            <g id="piece-layer" aria-hidden="true"></g>
+            <g id="point-layer" aria-hidden="true"></g>
+            <g id="sum-layer" aria-hidden="true"></g>
+            <g id="annotation-layer" aria-hidden="true"></g>
+            <g id="intro-layer" aria-hidden="true"></g>
+          </svg>
+          <div class="hover-card" id="hover-card" role="status" aria-live="polite" hidden></div>
+          <div class="drag-hint" id="drag-hint" hidden>拖动旋转帘幕</div>
+        </div>
+
+        <div class="formula-reveal" id="formula-reveal" aria-live="polite" hidden>
+          <span class="formula-caption">切得越来越细以后</span>
+          <div class="formula" aria-label="曲线积分等于分割和的极限">
+            <span class="formula-integral" id="formula-integral">∫<sub>C</sub> f&nbsp;ds</span>
+            <span class="formula-equals">=</span>
+            <span class="formula-limit" id="formula-limit">lim<sub>n→∞</sub></span>
+            <span class="formula-sum"><span id="formula-sigma">Σ</span> <span class="formula-term" id="formula-term">f(Pᵢ) · Δsᵢ</span></span>
+          </div>
+          <p>每一项是“这一小段的密度 × 这一小段的长度”，把所有小段加起来。</p>
+        </div>
+      </section>
+
+      <section class="lesson-log" aria-live="polite" aria-atomic="true">
+        <span class="log-mark" id="log-mark">先想一想</span>
+        <p id="lesson-message">这根弯的金属丝，总质量是多少？</p>
+        <p class="curtain-message" id="curtain-message" hidden>帘幕每一处的高度就是密度 f；一片片小帘加起来，帘幕面积就是曲线积分。</p>
+      </section>
+
+      <section class="control-deck" aria-label="演示控制">
+        <label class="partition-control" for="partition-slider">
+          <span class="control-label">切成几段</span>
+          <input id="partition-slider" type="range" min="4" max="128" step="1" value="4" aria-label="切成几段">
+          <output id="partition-label" for="partition-slider">4 段</output>
+        </label>
+        <div class="action-row">
+          <button type="button" class="action-button action-primary" id="auto-refine">自动加密</button>
+          <button type="button" class="action-button" id="single-step">单步</button>
+          <button type="button" class="action-button" id="reverse-curve" aria-pressed="false">反向曲线</button>
+          <button type="button" class="action-button" id="change-function">换函数</button>
+          <button type="button" class="action-button action-reset" id="reset">重置</button>
+        </div>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

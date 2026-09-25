@@ -1,0 +1,808 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>硬链接与软链接工作机制 · 交互动画演示系统</title>
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- GSAP CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+  <!-- Google Fonts -->
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Newsreader:ital,opsz,wght@0,6..72,500;0,6..72,600;1,6..72,400&display=swap">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="min-h-screen antialiased flex flex-col justify-between relative selection:bg-stone-200">
+
+  <!-- 动态全屏 SVG 覆盖层 (用于画目录项->inode、inode->磁盘块、路径解析有向箭头) -->
+  <svg id="connection-svg-layer">
+    <defs>
+      <!-- 蓝色箭头 (目录项 -> inode) -->
+      <marker id="arrow-blue" viewBox="0 0 12 12" refX="9" refY="6" markerUnits="userSpaceOnUse" markerWidth="12" markerHeight="12" orient="auto">
+        <path d="M 1 2 L 10 6 L 1 10 L 3.5 6 z" fill="#2563EB" />
+      </marker>
+      <!-- 绿色箭头 (inode -> 数据块) -->
+      <marker id="arrow-green" viewBox="0 0 12 12" refX="9" refY="6" markerUnits="userSpaceOnUse" markerWidth="12" markerHeight="12" orient="auto">
+        <path d="M 1 2 L 10 6 L 1 10 L 3.5 6 z" fill="#059669" />
+      </marker>
+      <!-- 橙色箭头 (软链接路径解析) -->
+      <marker id="arrow-orange" viewBox="0 0 12 12" refX="9" refY="6" markerUnits="userSpaceOnUse" markerWidth="12" markerHeight="12" orient="auto">
+        <path d="M 1 2 L 10 6 L 1 10 L 3.5 6 z" fill="#EA580C" />
+      </marker>
+      <!-- 红色箭头 (悬空断裂警示) -->
+      <marker id="arrow-red" viewBox="0 0 12 12" refX="9" refY="6" markerUnits="userSpaceOnUse" markerWidth="12" markerHeight="12" orient="auto">
+        <path d="M 1 2 L 10 6 L 1 10 L 3.5 6 z" fill="#DC2626" />
+      </marker>
+    </defs>
+  </svg>
+
+  <!-- 顶部标题与返回导航栏 -->
+  <header class="border-b border-[#E5E4DC] bg-[#FAF9F5]/90 backdrop-blur sticky top-0 z-40 px-5 lg:px-8 py-3.5">
+    <div class="max-w-7xl mx-auto flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <span class="w-8 h-8 rounded-lg bg-stone-900 text-white flex items-center justify-center font-mono font-bold text-xs shadow-sm">
+          FS
+        </span>
+        <div>
+          <h1 class="text-base md:text-lg font-bold text-stone-900 leading-tight flex items-center gap-2">
+            <span>硬链接与软链接工作机制演示系统</span>
+            <span class="text-xs px-2 py-0.5 rounded bg-stone-100 border border-stone-200 text-stone-600 font-mono font-normal">Linux Inode Architecture</span>
+          </h1>
+          <p class="text-xs text-stone-500 font-mono mt-0.5">
+            408 核心考点 · 目录项 / Inode 表 / 数据块寻址 / 符号链接路径解析 / 悬空链接异常
+          </p>
+        </div>
+      </div>
+      <a href="../index.html" class="text-xs font-mono text-stone-500 hover:text-stone-900 transition-colors flex items-center gap-1">
+        <span>&larr;</span> <span>返回展厅</span>
+      </a>
+    </div>
+  </header>
+
+  <!-- 主体工作区 -->
+  <main class="flex-1 max-w-7xl w-full mx-auto px-4 md:px-6 py-4 flex flex-col gap-4">
+
+    <!-- 顶部四区控制栏：模式切换、操作按钮与节拍控制器 -->
+    <div class="card-panel rounded-2xl p-4 flex flex-col gap-3 shadow-sm bg-white">
+      
+      <!-- 第一行：三大模式切换 (硬链接 / 软链接 / 对比模式) 与 预设演示脚本 -->
+      <div class="flex items-center justify-between flex-wrap gap-3 pb-3 border-b border-[#ECEBE4]">
+        
+        <!-- 模式切换选项卡 -->
+        <div class="flex items-center gap-1.5 bg-stone-100/80 p-1 rounded-xl border border-stone-200/80 flex-wrap">
+          <button id="tab-hard" onclick="switchMode('hard')" class="tab-btn active">
+            <span class="w-2 h-2 rounded-full bg-blue-600"></span>
+            <span>硬链接模式 (Hard Link)</span>
+          </button>
+          <button id="tab-soft" onclick="switchMode('soft')" class="tab-btn">
+            <span class="w-2 h-2 rounded-full bg-amber-500"></span>
+            <span>软链接模式 (Symbolic Link)</span>
+          </button>
+          <button id="tab-compare" onclick="switchMode('compare')" class="tab-btn">
+            <span class="w-2 h-2 rounded-full bg-purple-600"></span>
+            <span>核心机制并排对比 (Comparison)</span>
+          </button>
+        </div>
+
+        <!-- 预设全流程演练脚本快捷键 -->
+        <div class="flex items-center gap-2 flex-wrap">
+          <span class="text-xs text-stone-500 font-mono">经典剧本:</span>
+          <button id="btn-tour-hard" onclick="playScenarioTour('hard_lifecycle')" class="ctl-btn text-xs hover:border-blue-300">
+            <span>🎬</span> <span>硬链接全生命周期</span>
+          </button>
+          <button id="btn-tour-soft" onclick="playScenarioTour('soft_lifecycle')" class="ctl-btn text-xs hover:border-amber-300">
+            <span>🎬</span> <span>软链接与悬空断链</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- 第二行：原子操作按钮群 + 播放控制器 -->
+      <div class="flex items-center justify-between flex-wrap gap-3 pt-1">
+        
+        <!-- 操作按钮群 (按题目要求六大操作) -->
+        <div class="flex items-center gap-1.5 flex-wrap" id="action-buttons-group">
+          <!-- 1. 创建文件 -->
+          <button id="btn-create-file" onclick="handleAction('create_file')" class="ctl-btn" title="创建普通文件 /home/user/report.txt">
+            <span class="text-emerald-600 font-bold">＋</span> <span>创建原文件</span>
+          </button>
+
+          <!-- 2. 创建硬链接 -->
+          <button id="btn-create-hard" onclick="handleAction('create_hard')" class="ctl-btn" title="创建硬链接 report-hard">
+            <span class="text-blue-600 font-bold">🔗</span> <span>创建硬链接</span>
+          </button>
+
+          <!-- 3. 创建软链接 -->
+          <button id="btn-create-soft" onclick="handleAction('create_soft')" class="ctl-btn" title="创建软链接 report-soft">
+            <span class="text-amber-600 font-bold">🔀</span> <span>创建软链接</span>
+          </button>
+
+          <!-- 分隔线 -->
+          <span class="h-4 w-[1px] bg-stone-200 mx-1"></span>
+
+          <!-- 4. 打开文件/链接 (下拉选择) -->
+          <div class="relative inline-block text-left" id="open-dropdown-container">
+            <div class="flex items-center">
+              <button id="btn-open-target" onclick="toggleOpenMenu()" class="ctl-btn ctl-btn-primary gap-1.5">
+                <span>📂</span>
+                <span id="open-target-label">打开: report.txt</span>
+                <span class="text-[10px]">▼</span>
+              </button>
+            </div>
+            <!-- 下拉菜单 -->
+            <div id="open-menu" class="hidden absolute left-0 mt-1.5 w-44 rounded-xl bg-white shadow-lg border border-stone-200 py-1.5 z-50 text-xs">
+              <button onclick="selectOpenTarget('report.txt')" class="w-full text-left px-3 py-1.5 hover:bg-stone-50 flex items-center justify-between">
+                <span>原文件 report.txt</span>
+                <span class="text-stone-400 font-mono text-[10px]">inode 10</span>
+              </button>
+              <button onclick="selectOpenTarget('report-hard')" class="w-full text-left px-3 py-1.5 hover:bg-stone-50 flex items-center justify-between">
+                <span>硬链接 report-hard</span>
+                <span class="text-stone-400 font-mono text-[10px]">inode 10</span>
+              </button>
+              <button onclick="selectOpenTarget('report-soft')" class="w-full text-left px-3 py-1.5 hover:bg-stone-50 flex items-center justify-between">
+                <span>软链接 report-soft</span>
+                <span class="text-stone-400 font-mono text-[10px]">inode 20</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- 立即执行打开 -->
+          <button id="btn-execute-open" onclick="handleAction('open_file')" class="ctl-btn hover:border-emerald-300" title="执行打开所选文件/链接">
+            <span>▶ 执行打开</span>
+          </button>
+
+          <!-- 分隔线 -->
+          <span class="h-4 w-[1px] bg-stone-200 mx-1"></span>
+
+          <!-- 5. 删除原文件 -->
+          <button id="btn-delete-orig" onclick="handleAction('delete_original')" class="ctl-btn hover:border-rose-300 text-rose-700" title="删除原文件 report.txt">
+            <span>🗑 删除原文件</span>
+          </button>
+
+          <!-- 6. 删除链接 -->
+          <div class="relative inline-block text-left" id="delete-link-container">
+            <button id="btn-delete-link" onclick="handleAction('delete_link')" class="ctl-btn hover:border-stone-400" title="删除链接">
+              <span>✂ 删除链接</span>
+              <span id="delete-link-badge" class="text-[10px] bg-stone-100 px-1 rounded text-stone-500 font-mono">硬链接</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- 播放节拍控制：单步、播放/暂停、重置、速率 -->
+        <div class="flex items-center gap-2">
+          <!-- 单步前进 -->
+          <button id="btn-step" onclick="stepForward()" class="ctl-btn" title="执行当前操作的下一节拍">
+            <span>⏯</span> <span>单步</span>
+          </button>
+
+          <!-- 自动播放/暂停 -->
+          <button id="btn-play-pause" onclick="togglePlayPause()" class="ctl-btn" title="自动播放/暂停">
+            <span id="play-icon">▶</span> <span id="play-label">自动播放</span>
+          </button>
+
+          <!-- 重置恢复初始状态 -->
+          <button id="btn-reset" onclick="resetToInitialState()" class="ctl-btn text-stone-600 hover:text-stone-900" title="重置恢复初始 report.txt 场景">
+            <span>↺</span> <span>重置</span>
+          </button>
+
+          <!-- 速度调节 -->
+          <div class="flex items-center bg-stone-100 rounded-lg p-0.5 border border-stone-200 text-xs font-mono">
+            <button onclick="setSpeed(0.5)" id="spd-05" class="px-2 py-0.5 rounded text-stone-600 hover:text-stone-900">0.5x</button>
+            <button onclick="setSpeed(1.0)" id="spd-10" class="px-2 py-0.5 rounded bg-white font-bold text-stone-900 shadow-xs">1.0x</button>
+            <button onclick="setSpeed(2.0)" id="spd-20" class="px-2 py-0.5 rounded text-stone-600 hover:text-stone-900">2.0x</button>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- 节拍流水线指示器 (按规范：定位 -> 查找/创建 -> 状态变化 -> 画箭头 -> 写日志) -->
+      <div class="pt-2 border-t border-[#ECEBE4] flex items-center justify-between flex-wrap gap-2 text-xs">
+        <div class="flex items-center gap-3">
+          <span class="text-stone-500 font-mono text-[11px]">操作执行节拍:</span>
+          <div class="flex items-center gap-2 font-mono text-[11px]">
+            <div id="beat-1" class="flex items-center gap-1 text-stone-400">
+              <span class="step-dot step-dot-pending" id="beat-dot-1">1</span>
+              <span>定位目录项</span>
+            </div>
+            <span class="text-stone-300">&rarr;</span>
+            <div id="beat-2" class="flex items-center gap-1 text-stone-400">
+              <span class="step-dot step-dot-pending" id="beat-dot-2">2</span>
+              <span>查找/创建 Inode</span>
+            </div>
+            <span class="text-stone-300">&rarr;</span>
+            <div id="beat-3" class="flex items-center gap-1 text-stone-400">
+              <span class="step-dot step-dot-pending" id="beat-dot-3">3</span>
+              <span>状态与计数变化</span>
+            </div>
+            <span class="text-stone-300">&rarr;</span>
+            <div id="beat-4" class="flex items-center gap-1 text-stone-400">
+              <span class="step-dot step-dot-pending" id="beat-dot-4">4</span>
+              <span>更新箭头连线</span>
+            </div>
+            <span class="text-stone-300">&rarr;</span>
+            <div id="beat-5" class="flex items-center gap-1 text-stone-400">
+              <span class="step-dot step-dot-pending" id="beat-dot-5">5</span>
+              <span>写入系统日志</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 连线图例提示 -->
+        <div class="flex items-center gap-4 text-[11px] font-mono text-stone-500">
+          <div class="flex items-center gap-1.5">
+            <span class="w-3 h-0.5 bg-blue-600 inline-block"></span>
+            <span>目录项 &rarr; Inode (实线)</span>
+          </div>
+          <div class="flex items-center gap-1.5">
+            <span class="w-3 h-0.5 bg-emerald-600 inline-block"></span>
+            <span>Inode &rarr; 数据块 (实线)</span>
+          </div>
+          <div class="flex items-center gap-1.5">
+            <span class="w-3 h-0.5 border-t-2 border-dashed border-amber-600 inline-block"></span>
+            <span>软链接路径解析 (虚线)</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============================================================ -->
+    <!-- 视图 1：单模式工作区 (包含 左侧目录树、中间 Inode 表、右侧磁盘块网格) -->
+    <!-- ============================================================ -->
+    <div id="single-mode-view" class="grid grid-cols-12 gap-4">
+      
+      <!-- 2. 左侧：目录树 (显示“文件名 -> inode 号”) -->
+      <section class="col-span-12 lg:col-span-3 card-panel rounded-2xl p-4 flex flex-col justify-between gap-3 shadow-sm bg-white relative">
+        <div class="space-y-3">
+          <div class="flex items-center justify-between pb-2 border-b border-[#ECEBE4]">
+            <div class="flex items-center gap-2">
+              <span class="w-2 h-2 rounded-full bg-blue-600"></span>
+              <h2 class="text-sm font-bold text-stone-900">目录项树 (Directory Tree)</h2>
+            </div>
+            <span class="text-[10px] font-mono text-stone-400 bg-stone-50 px-1.5 py-0.5 rounded border border-stone-200">
+              dentry 映射
+            </span>
+          </div>
+
+          <!-- 当前工作路径指示 -->
+          <div class="text-xs font-mono text-stone-500 bg-stone-50 p-2 rounded-xl border border-stone-200/80 flex items-center justify-between">
+            <span class="text-stone-700 font-semibold truncate">📁 /home/user/</span>
+            <span class="text-[10px] text-stone-400">目录 inode: 4</span>
+          </div>
+
+          <!-- 树形层级结构 -->
+          <div class="space-y-1.5 text-xs font-mono" id="dir-tree-container">
+            <!-- 根目录与中间目录 (支持路径解析时高亮闪烁) -->
+            <div id="dir-node-root" class="p-1.5 rounded-lg border border-transparent transition-all flex items-center gap-1.5 text-stone-500">
+              <span class="text-stone-400">/</span>
+              <span class="text-[11px] text-stone-700">根目录 [inode: 2]</span>
+            </div>
+            <div id="dir-node-home" class="p-1.5 rounded-lg border border-transparent transition-all flex items-center gap-1.5 text-stone-500 pl-4">
+              <span class="text-stone-400">└── home/</span>
+              <span class="text-[11px] text-stone-700">[inode: 3]</span>
+            </div>
+            <div id="dir-node-user" class="p-1.5 rounded-lg border border-transparent transition-all flex items-center gap-1.5 text-stone-500 pl-8">
+              <span class="text-stone-400">└── user/</span>
+              <span class="text-[11px] text-stone-700">[inode: 4]</span>
+            </div>
+
+            <!-- 具体文件目录项容器 (在 user/ 下) -->
+            <div class="pl-11 space-y-2 pt-1" id="dentry-list">
+              
+              <!-- 1. 原文件 report.txt 目录项 -->
+              <div id="dentry-report-txt" class="relative p-2.5 rounded-xl border border-blue-200 bg-blue-50/40 transition-all flex items-center justify-between group hover:border-blue-400">
+                <div class="flex items-center gap-2">
+                  <span class="text-base">📄</span>
+                  <div>
+                    <div class="font-bold text-stone-900 flex items-center gap-1.5">
+                      <span>report.txt</span>
+                      <span class="text-[9px] px-1 py-0.2 rounded bg-blue-100 text-blue-700 border border-blue-200">原文件</span>
+                    </div>
+                    <div class="text-[10px] text-stone-500">
+                      指向 &rarr; <span class="font-bold text-blue-600">inode 10</span>
+                    </div>
+                  </div>
+                </div>
+                <!-- 连线右侧锚点 -->
+                <div id="anchor-dentry-txt" class="connect-anchor connect-anchor-right bg-blue-600"></div>
+              </div>
+
+              <!-- 2. 硬链接 report-hard 目录项 (动态展示) -->
+              <div id="dentry-report-hard" class="hidden relative p-2.5 rounded-xl border border-blue-200 bg-blue-50/40 transition-all flex items-center justify-between group hover:border-blue-400">
+                <div class="flex items-center gap-2">
+                  <span class="text-base">🔗</span>
+                  <div>
+                    <div class="font-bold text-stone-900 flex items-center gap-1.5">
+                      <span>report-hard</span>
+                      <span class="text-[9px] px-1 py-0.2 rounded bg-indigo-100 text-indigo-700 border border-indigo-200">硬链接</span>
+                    </div>
+                    <div class="text-[10px] text-stone-500">
+                      同指 &rarr; <span class="font-bold text-blue-600">inode 10</span>
+                    </div>
+                  </div>
+                </div>
+                <!-- 连线右侧锚点 -->
+                <div id="anchor-dentry-hard" class="connect-anchor connect-anchor-right bg-blue-600"></div>
+              </div>
+
+              <!-- 3. 软链接 report-soft 目录项 (动态展示) -->
+              <div id="dentry-report-soft" class="hidden relative p-2.5 rounded-xl border border-amber-200 bg-amber-50/40 transition-all flex items-center justify-between group hover:border-amber-400">
+                <div class="flex items-center gap-2">
+                  <span class="text-base">🔀</span>
+                  <div>
+                    <div class="font-bold text-stone-900 flex items-center gap-1.5">
+                      <span>report-soft</span>
+                      <span class="text-[9px] px-1 py-0.2 rounded bg-amber-100 text-amber-800 border border-amber-200">软链接</span>
+                    </div>
+                    <div class="text-[10px] text-stone-500">
+                      独指 &rarr; <span class="font-bold text-amber-700">inode 20</span>
+                    </div>
+                  </div>
+                </div>
+                <!-- 连线右侧锚点 -->
+                <div id="anchor-dentry-soft" class="connect-anchor connect-anchor-right bg-amber-600"></div>
+              </div>
+
+            </div>
+          </div>
+        </div>
+
+        <!-- 目录项概念提示卡 -->
+        <div class="p-2.5 rounded-xl bg-stone-50 border border-stone-200 text-[11px] text-stone-600 leading-relaxed font-mono">
+          💡 <span class="font-semibold text-stone-800">Linux 目录的本质</span>：目录也是一个文件，里面存储的是一系列「文件名 &rarr; inode 编号」的映射表项（dentry）。
+        </div>
+      </section>
+
+      <!-- 3. 中间：inode 表 (显示 inode 号、类型、链接计数、数据块指针、状态) -->
+      <section class="col-span-12 lg:col-span-4 card-panel rounded-2xl p-4 flex flex-col justify-between gap-3 shadow-sm bg-white relative">
+        <div class="space-y-3">
+          <div class="flex items-center justify-between pb-2 border-b border-[#ECEBE4]">
+            <div class="flex items-center gap-2">
+              <span class="w-2 h-2 rounded-full bg-emerald-600"></span>
+              <h2 class="text-sm font-bold text-stone-900">Inode 索引节点表 (Inode Table)</h2>
+            </div>
+            <span class="text-[10px] font-mono text-stone-400 bg-stone-50 px-1.5 py-0.5 rounded border border-stone-200">
+              元数据区
+            </span>
+          </div>
+
+          <!-- Inode 表格卡片列表 -->
+          <div class="space-y-3" id="inode-table-container">
+            
+            <!-- Inode 10 卡片 (普通文件 report.txt 与硬链接共用) -->
+            <div id="inode-row-10" class="relative p-3 rounded-xl border border-stone-200 bg-stone-50/60 transition-all">
+              <!-- 左侧锚点 (接入 dentry) -->
+              <div id="anchor-inode-10-left" class="connect-anchor connect-anchor-left bg-blue-600"></div>
+
+              <div class="flex items-center justify-between pb-2 border-b border-stone-200/80">
+                <div class="flex items-center gap-2 font-mono">
+                  <span class="px-2 py-0.5 rounded bg-stone-900 text-white font-bold text-xs">Inode 10</span>
+                  <span id="inode-10-type-badge" class="text-[11px] px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 font-semibold">
+                    普通文件 (-)
+                  </span>
+                </div>
+                <div id="inode-10-status-badge" class="text-[10px] px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-mono font-bold">
+                  活跃 (Active)
+                </div>
+              </div>
+
+              <!-- Inode 详细属性网格 -->
+              <div class="grid grid-cols-2 gap-2 pt-2.5 text-xs font-mono">
+                <div class="p-1.5 rounded-lg bg-white border border-stone-200/80">
+                  <div class="text-[10px] text-stone-400">链接计数 (i_nlink)</div>
+                  <div class="flex items-center gap-1.5 mt-0.5">
+                    <span id="inode-10-nlink" class="text-base font-bold text-stone-900 count-animate">1</span>
+                    <span class="text-[10px] text-stone-400">次引用</span>
+                  </div>
+                </div>
+
+                <div class="p-1.5 rounded-lg bg-white border border-stone-200/80 relative">
+                  <div class="text-[10px] text-stone-400">直接数据块指针</div>
+                  <div class="mt-0.5 flex items-center justify-between">
+                    <span id="inode-10-ptr" class="text-xs font-bold text-emerald-700">Block #5</span>
+                    <span class="text-[10px] text-stone-400">5 Bytes</span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="mt-2 text-[10px] font-mono text-stone-400 flex items-center justify-between">
+                <span>权限: -rw-r--r--</span>
+                <span>UID: 1000 (user)</span>
+              </div>
+
+              <!-- 右侧锚点 (指向数据块) -->
+              <div id="anchor-inode-10-right" class="connect-anchor connect-anchor-right bg-emerald-600"></div>
+            </div>
+
+            <!-- Inode 20 卡片 (符号链接 report-soft 独享) -->
+            <div id="inode-row-20" class="hidden relative p-3 rounded-xl border border-amber-200 bg-amber-50/30 transition-all">
+              <!-- 左侧锚点 (接入 dentry) -->
+              <div id="anchor-inode-20-left" class="connect-anchor connect-anchor-left bg-amber-600"></div>
+
+              <div class="flex items-center justify-between pb-2 border-b border-amber-200/80">
+                <div class="flex items-center gap-2 font-mono">
+                  <span class="px-2 py-0.5 rounded bg-amber-600 text-white font-bold text-xs">Inode 20</span>
+                  <span class="text-[11px] px-1.5 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-300 font-semibold">
+                    符号链接 (l)
+                  </span>
+                </div>
+                <div id="inode-20-status-badge" class="text-[10px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 font-mono font-bold">
+                  独立分配
+                </div>
+              </div>
+
+              <!-- Inode 20 详细属性网格 -->
+              <div class="grid grid-cols-2 gap-2 pt-2.5 text-xs font-mono">
+                <div class="p-1.5 rounded-lg bg-white border border-stone-200/80">
+                  <div class="text-[10px] text-stone-400">链接计数 (i_nlink)</div>
+                  <div class="flex items-center gap-1.5 mt-0.5">
+                    <span id="inode-20-nlink" class="text-base font-bold text-amber-800 count-animate">1</span>
+                    <span class="text-[10px] text-stone-400">次引用</span>
+                  </div>
+                </div>
+
+                <div class="p-1.5 rounded-lg bg-white border border-stone-200/80 relative">
+                  <div class="text-[10px] text-stone-400">路径数据块指针</div>
+                  <div class="mt-0.5 flex items-center justify-between">
+                    <span id="inode-20-ptr" class="text-xs font-bold text-amber-700">Block #6</span>
+                    <span class="text-[10px] text-stone-400">22 Bytes</span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="mt-2 text-[10px] font-mono text-stone-400 flex items-center justify-between">
+                <span>权限: lrwxrwxrwx</span>
+                <span>UID: 1000 (user)</span>
+              </div>
+
+              <!-- 右侧锚点 (指向路径块) -->
+              <div id="anchor-inode-20-right" class="connect-anchor connect-anchor-right bg-amber-600"></div>
+            </div>
+
+            <!-- 空闲 Inode 槽位示意 -->
+            <div class="p-2.5 rounded-xl border border-dashed border-stone-200 text-stone-400 text-xs font-mono flex items-center justify-between bg-stone-50/30">
+              <span class="text-[11px]">Inode 21..32 (未分配空闲节点槽位)</span>
+              <span class="text-[10px] text-stone-400">空闲 (Free)</span>
+            </div>
+
+          </div>
+        </div>
+
+        <!-- Inode 关键机制提示卡 -->
+        <div class="p-2.5 rounded-xl bg-stone-50 border border-stone-200 text-[11px] text-stone-600 leading-relaxed font-mono">
+          💡 <span class="font-semibold text-stone-800">链接计数 (i_nlink)</span>：当且仅当该计数降至 0 且无进程占用打开该文件句柄时，内核才会真正清空释放 inode 并回收盘块。
+        </div>
+      </section>
+
+      <!-- 4. 右侧：磁盘块网格 (空闲绿色、占用红色、软链接路径块橙色) -->
+      <section class="col-span-12 lg:col-span-5 card-panel rounded-2xl p-4 flex flex-col justify-between gap-3 shadow-sm bg-white relative">
+        <div class="space-y-3">
+          <div class="flex items-center justify-between pb-2 border-b border-[#ECEBE4]">
+            <div class="flex items-center gap-2">
+              <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
+              <h2 class="text-sm font-bold text-stone-900">磁盘块网格 (Disk Blocks Grid)</h2>
+            </div>
+            <!-- 状态图例 -->
+            <div class="flex items-center gap-2 text-[10px] font-mono">
+              <span class="flex items-center gap-1 text-emerald-700">
+                <span class="w-2 h-2 rounded bg-emerald-100 border border-emerald-300"></span> 空闲
+              </span>
+              <span class="flex items-center gap-1 text-rose-700">
+                <span class="w-2 h-2 rounded bg-rose-100 border border-rose-300"></span> 占用
+              </span>
+              <span class="flex items-center gap-1 text-amber-700">
+                <span class="w-2 h-2 rounded bg-amber-100 border border-amber-300"></span> 软链接路径
+              </span>
+            </div>
+          </div>
+
+          <!-- 16 个磁盘块网格 (4x4) -->
+          <div class="grid grid-cols-4 gap-2.5" id="disk-grid-container">
+            <!-- 动态生成 16 块 -->
+          </div>
+
+          <!-- 磁盘块内容详情检视卡片 -->
+          <div id="block-inspector" class="p-3 rounded-xl bg-stone-50 border border-stone-200 text-xs font-mono space-y-1.5 transition-all">
+            <div class="flex items-center justify-between text-stone-500 text-[11px] pb-1 border-b border-stone-200">
+              <span class="font-semibold text-stone-800 flex items-center gap-1.5">
+                <span>🔍 盘块检视器:</span>
+                <span id="inspect-block-id" class="text-stone-900 font-bold">Block #5</span>
+              </span>
+              <span id="inspect-block-type" class="px-1.5 py-0.2 rounded bg-rose-50 text-rose-700 border border-rose-200 font-bold text-[10px]">
+                普通文件数据块
+              </span>
+            </div>
+            <div class="flex items-center justify-between pt-1">
+              <span class="text-stone-500">实际存储内容:</span>
+              <span id="inspect-block-content" class="font-bold text-stone-900 bg-white px-2 py-0.5 rounded border border-stone-200">
+                "Hello"
+              </span>
+            </div>
+            <div class="text-[10px] text-stone-400 flex items-center justify-between">
+              <span id="inspect-block-desc">存放用户真实写入的文件数据 payload</span>
+              <span id="inspect-block-size">占用 5 字节</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 磁盘寻址说明 -->
+        <div class="p-2.5 rounded-xl bg-stone-50 border border-stone-200 text-[11px] text-stone-600 leading-relaxed font-mono">
+          💡 <span class="font-semibold text-stone-800">外存分配</span>：硬链接直接复用已有数据块；软链接则将目标路径作为独立文本内容存入全新分配的数据块中。
+        </div>
+      </section>
+
+    </div>
+
+    <!-- ============================================================ -->
+    <!-- 视图 2：对比模式专属工作区 (五、对比模式：左右并排硬链接与软链接，同一操作同步播放) -->
+    <!-- ============================================================ -->
+    <div id="comparison-mode-view" class="hidden flex flex-col gap-4">
+      
+      <!-- 对比模式操作控制台 -->
+      <div class="card-panel rounded-2xl p-4 bg-white flex flex-col gap-3 shadow-sm">
+        <div class="flex items-center justify-between flex-wrap gap-2 pb-2 border-b border-[#ECEBE4]">
+          <div class="flex items-center gap-2">
+            <span class="w-3 h-3 rounded-md bg-purple-600"></span>
+            <h2 class="text-sm font-bold text-stone-900">硬链接 vs 软链接 · 同步对照实验舱</h2>
+            <span class="text-xs text-stone-500 font-mono">点击下方同步操作，观察双侧在 inode、数据块与生命周期上的本质差异</span>
+          </div>
+          <div class="text-xs font-mono text-purple-700 font-semibold bg-purple-50 px-2 py-1 rounded border border-purple-200">
+            双侧同步渲染中
+          </div>
+        </div>
+
+        <!-- 四大核心对比操作按钮 -->
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-2.5 pt-1">
+          <button onclick="runComparisonScenario('create')" class="ctl-btn py-2 text-xs flex-col items-center justify-center gap-1 text-center hover:border-blue-400">
+            <span class="font-bold text-blue-700">1. 对比：创建链接</span>
+            <span class="text-[10px] text-stone-500">硬链接加计数 vs 软链接新建 inode</span>
+          </button>
+          <button onclick="runComparisonScenario('open')" class="ctl-btn py-2 text-xs flex-col items-center justify-center gap-1 text-center hover:border-emerald-400">
+            <span class="font-bold text-emerald-700">2. 对比：打开访问</span>
+            <span class="text-[10px] text-stone-500">硬链接一步直达 vs 软链接逐段解析</span>
+          </button>
+          <button onclick="runComparisonScenario('delete_orig')" class="ctl-btn py-2 text-xs flex-col items-center justify-center gap-1 text-center hover:border-rose-400">
+            <span class="font-bold text-rose-700">3. 对比：删除原文件</span>
+            <span class="text-[10px] text-stone-500">硬链接仍可读 vs 软链接悬空断裂</span>
+          </button>
+          <button onclick="runComparisonScenario('delete_link')" class="ctl-btn py-2 text-xs flex-col items-center justify-center gap-1 text-center hover:border-purple-400">
+            <span class="font-bold text-purple-700">4. 对比：删除链接本身</span>
+            <span class="text-[10px] text-stone-500">硬链接减计数 vs 软链接释放自身</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- 左右并排沙盒：左侧硬链接，右侧软链接 -->
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        
+        <!-- 左侧：硬链接独立沙箱 -->
+        <div class="card-panel rounded-2xl p-4 bg-white flex flex-col gap-3 shadow-sm border-blue-200">
+          <div class="flex items-center justify-between pb-2 border-b border-blue-100">
+            <div class="flex items-center gap-2">
+              <span class="w-2.5 h-2.5 rounded-full bg-blue-600"></span>
+              <h3 class="text-sm font-bold text-blue-950">硬链接沙盒 (Hard Link Architecture)</h3>
+            </div>
+            <span class="text-[10px] font-mono px-2 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-200">
+              同属一个 Inode
+            </span>
+          </div>
+
+          <!-- 硬链接拓扑图示 -->
+          <div class="p-3 rounded-xl bg-blue-50/30 border border-blue-100 font-mono text-xs space-y-3">
+            <div class="flex items-center justify-between">
+              <span class="text-stone-500">目录项 (Dentries):</span>
+              <div class="flex gap-2">
+                <span class="px-2 py-1 rounded bg-white border border-blue-200 text-stone-800 font-semibold" id="comp-hard-dentry1">
+                  report.txt &rarr; 10
+                </span>
+                <span class="px-2 py-1 rounded bg-white border border-blue-200 text-blue-700 font-semibold" id="comp-hard-dentry2">
+                  report-hard &rarr; 10
+                </span>
+              </div>
+            </div>
+
+            <!-- Inode 节点 -->
+            <div class="p-2.5 rounded-lg bg-white border border-blue-200 flex items-center justify-between">
+              <div>
+                <span class="font-bold text-stone-900">Inode 10</span>
+                <span class="text-[10px] text-stone-400 ml-1">(普通文件)</span>
+              </div>
+              <div class="flex items-center gap-2">
+                <span class="text-[10px] text-stone-500">链接计数:</span>
+                <span id="comp-hard-nlink" class="text-sm font-bold text-blue-700 px-2 py-0.5 bg-blue-50 rounded">2</span>
+              </div>
+              <div class="text-[10px] text-stone-500">
+                指针 &rarr; <span class="font-bold text-emerald-600">Block 5</span>
+              </div>
+            </div>
+
+            <!-- 数据块 -->
+            <div class="p-2 rounded-lg bg-emerald-50 border border-emerald-200 flex items-center justify-between text-emerald-800">
+              <span class="font-bold">数据块 Block #5:</span>
+              <span class="font-bold bg-white px-2 py-0.5 rounded border border-emerald-300">"Hello"</span>
+              <span id="comp-hard-data-status" class="text-[10px] font-semibold text-emerald-600">正常可访问</span>
+            </div>
+          </div>
+
+          <!-- 硬链接机制诊断结论 -->
+          <div id="comp-hard-analysis" class="p-3 rounded-xl bg-stone-50 border border-stone-200 text-xs text-stone-700 space-y-1 font-mono">
+            <div class="font-bold text-stone-900 flex items-center gap-1.5">
+              <span>📌 机制特性总结:</span>
+            </div>
+            <p class="text-stone-600 leading-relaxed">
+              硬链接仅仅是目录表中新增一条映射记录，与原文件地位完全对等；两者完全共享 Inode 10 和数据块 5。删除原文件仅减小计数，硬链接依然可以完整读取数据。
+            </p>
+          </div>
+        </div>
+
+        <!-- 右侧：软链接独立沙箱 -->
+        <div class="card-panel rounded-2xl p-4 bg-white flex flex-col gap-3 shadow-sm border-amber-200">
+          <div class="flex items-center justify-between pb-2 border-b border-amber-100">
+            <div class="flex items-center gap-2">
+              <span class="w-2.5 h-2.5 rounded-full bg-amber-600"></span>
+              <h3 class="text-sm font-bold text-amber-950">软链接沙盒 (Symbolic Link Architecture)</h3>
+            </div>
+            <span class="text-[10px] font-mono px-2 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200">
+              独立 Inode + 路径文件
+            </span>
+          </div>
+
+          <!-- 软链接拓扑图示 -->
+          <div class="p-3 rounded-xl bg-amber-50/30 border border-amber-100 font-mono text-xs space-y-3">
+            <div class="flex items-center justify-between">
+              <span class="text-stone-500">目录项 (Dentries):</span>
+              <div class="flex gap-2">
+                <span class="px-2 py-1 rounded bg-white border border-stone-200 text-stone-800 font-semibold" id="comp-soft-dentry1">
+                  report.txt &rarr; 10
+                </span>
+                <span class="px-2 py-1 rounded bg-white border border-amber-300 text-amber-700 font-semibold" id="comp-soft-dentry2">
+                  report-soft &rarr; 20
+                </span>
+              </div>
+            </div>
+
+            <!-- Inode 20 节点 -->
+            <div class="p-2.5 rounded-lg bg-white border border-amber-200 flex items-center justify-between">
+              <div>
+                <span class="font-bold text-stone-900">Inode 20</span>
+                <span class="text-[10px] text-amber-700 ml-1">(符号链接)</span>
+              </div>
+              <div class="flex items-center gap-2">
+                <span class="text-[10px] text-stone-500">软链接计数:</span>
+                <span class="text-sm font-bold text-amber-800 px-2 py-0.5 bg-amber-50 rounded">1</span>
+              </div>
+              <div class="text-[10px] text-stone-500">
+                指针 &rarr; <span class="font-bold text-amber-600">Block 6</span>
+              </div>
+            </div>
+
+            <!-- 软链接数据块 -->
+            <div class="p-2 rounded-lg bg-amber-50 border border-amber-200 flex items-center justify-between text-amber-800">
+              <span class="font-bold">路径块 Block #6:</span>
+              <span class="font-bold bg-white px-1.5 py-0.5 rounded border border-amber-300 text-[11px]">"/home/user/report.txt"</span>
+              <span id="comp-soft-path-status" class="text-[10px] font-semibold text-emerald-600">路径有效</span>
+            </div>
+
+            <!-- 目标解析结果 -->
+            <div id="comp-soft-target-box" class="p-2 rounded-lg bg-stone-100 border border-stone-200 flex items-center justify-between text-stone-700">
+              <span class="font-bold">最终解析目标:</span>
+              <span id="comp-soft-target-val" class="font-bold text-stone-900">Inode 10 &rarr; Block 5 ("Hello")</span>
+              <span id="comp-soft-target-badge" class="text-[10px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 font-semibold">就绪</span>
+            </div>
+          </div>
+
+          <!-- 软链接机制诊断结论 -->
+          <div id="comp-soft-analysis" class="p-3 rounded-xl bg-stone-50 border border-stone-200 text-xs text-stone-700 space-y-1 font-mono">
+            <div class="font-bold text-stone-900 flex items-center gap-1.5">
+              <span>📌 机制特性总结:</span>
+            </div>
+            <p class="text-stone-600 leading-relaxed">
+              软链接是一个完全独立的文件，拥有自己的 Inode 和数据块，盘块里保存的是指向目标的字符串路径。若原文件被删除，软链接不会自动销毁，但会因目标消失而成为「悬空断链」。
+            </p>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- 核心考点全景对比矩阵表 -->
+      <div class="card-panel rounded-2xl p-4 bg-white shadow-sm overflow-x-auto">
+        <div class="flex items-center gap-2 pb-3 border-b border-[#ECEBE4]">
+          <span class="w-2 h-2 rounded-full bg-stone-800"></span>
+          <h3 class="text-sm font-bold text-stone-900">408 考研与操作系统核心考点全景对比表</h3>
+        </div>
+
+        <table class="w-full text-xs font-mono text-left mt-3 border-collapse">
+          <thead>
+            <tr class="bg-stone-50 text-stone-600 border-b border-stone-200">
+              <th class="p-2.5 font-bold">对比维度</th>
+              <th class="p-2.5 font-bold text-blue-700">硬链接 (Hard Link)</th>
+              <th class="p-2.5 font-bold text-amber-700">软链接 / 符号链接 (Symbolic Link)</th>
+              <th class="p-2.5 font-bold text-stone-800">底层机制解析</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-stone-200">
+            <tr>
+              <td class="p-2.5 font-bold text-stone-900">是否新建 Inode</td>
+              <td class="p-2.5 text-blue-700 font-semibold">❌ 否 (共享原文件的 Inode)</td>
+              <td class="p-2.5 text-amber-700 font-semibold">✅ 是 (分配独立的新 Inode)</td>
+              <td class="p-2.5 text-stone-500">硬链接仅增加目录项映射；软链接作为独立文件需要元数据结构</td>
+            </tr>
+            <tr>
+              <td class="p-2.5 font-bold text-stone-900">是否占用磁盘数据块</td>
+              <td class="p-2.5 text-blue-700 font-semibold">❌ 否 (直接访问原有数据块)</td>
+              <td class="p-2.5 text-amber-700 font-semibold">✅ 是 (分配数据块存放目标路径文本)</td>
+              <td class="p-2.5 text-stone-500">软链接把绝对或相对路径作为普通数据内容存放在磁盘块中</td>
+            </tr>
+            <tr>
+              <td class="p-2.5 font-bold text-stone-900">链接计数影响 (i_nlink)</td>
+              <td class="p-2.5 text-blue-700 font-semibold">原文件 Inode 计数 +1</td>
+              <td class="p-2.5 text-amber-700 font-semibold">原文件计数不变，软链接自身计数为 1</td>
+              <td class="p-2.5 text-stone-500">硬链接创建直接反映在 Inode 的物理引用计数器上</td>
+            </tr>
+            <tr>
+              <td class="p-2.5 font-bold text-stone-900">原文件删除后的状态</td>
+              <td class="p-2.5 text-emerald-700 font-semibold">数据仍完好，硬链接照常读写</td>
+              <td class="p-2.5 text-rose-700 font-semibold">变成悬空链接 (Dangling Link)，解析报错</td>
+              <td class="p-2.5 text-stone-500">硬链接计数未归零不释放物理块；软链接按路径找目标但目标已消失</td>
+            </tr>
+            <tr>
+              <td class="p-2.5 font-bold text-stone-900">跨文件系统支持 (Cross-FS)</td>
+              <td class="p-2.5 text-rose-600 font-semibold">❌ 不支持 (跨分区 Inode 编号冲突)</td>
+              <td class="p-2.5 text-emerald-600 font-semibold">✅ 支持 (基于全局统一路径文本解析)</td>
+              <td class="p-2.5 text-stone-500">Inode 仅在同一文件系统内唯一有效；路径是跨挂载点的通用抽象</td>
+            </tr>
+            <tr>
+              <td class="p-2.5 font-bold text-stone-900">能否对目录创建链接</td>
+              <td class="p-2.5 text-rose-600 font-semibold">❌ 通常禁止 (避免目录成环与无限遍历)</td>
+              <td class="p-2.5 text-emerald-600 font-semibold">✅ 允许 (常用于目录快捷方式)</td>
+              <td class="p-2.5 text-stone-500">为了防止 `fsck` 和路径遍历陷入死循环，POSIX 严格限制对目录的硬链接</td>
+            </tr>
+            <tr>
+              <td class="p-2.5 font-bold text-stone-900">访问速度与 I/O 开销</td>
+              <td class="p-2.5 text-emerald-700 font-semibold">极快 (一步直接寻址 Inode 与盘块)</td>
+              <td class="p-2.5 text-amber-700 font-semibold">稍慢 (先读链接数据块，再逐段解析路径)</td>
+              <td class="p-2.5 text-stone-500">软链接需要额外的磁盘读取和目录遍历，具有间接寻址开销</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+    </div>
+
+    <!-- ============================================================ -->
+    <!-- 底部：详细日志与状态流转监控台 (按要求：底部日志解释每一步在做什么) -->
+    <!-- ============================================================ -->
+    <div class="card-panel rounded-2xl p-4 bg-white flex flex-col gap-2.5 shadow-sm">
+      <div class="flex items-center justify-between pb-2 border-b border-[#ECEBE4]">
+        <div class="flex items-center gap-2">
+          <span class="w-2.5 h-2.5 rounded-full bg-stone-900"></span>
+          <h3 class="text-xs font-bold text-stone-900 font-mono">内核执行日志与底层微操作流 (Kernel Trace & OS Explanation)</h3>
+        </div>
+        <div class="flex items-center gap-3 text-xs font-mono">
+          <span id="log-status-tag" class="px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 font-semibold">
+            系统就绪
+          </span>
+          <button onclick="clearLogs()" class="text-stone-400 hover:text-stone-700 transition-colors text-[11px]">
+            清空日志
+          </button>
+        </div>
+      </div>
+
+      <!-- 实时日志容器 -->
+      <div id="log-container" class="h-28 overflow-y-auto space-y-1.5 font-mono text-xs pr-1">
+        <!-- 动态日志行将插入在此处 -->
+      </div>
+    </div>
+
+  </main>
+
+  <!-- 底部页脚 -->
+  <footer class="border-t border-[#E5E4DC] py-4 bg-[#FAF9F5] text-center text-xs font-mono text-stone-500 mt-6">
+    <div class="max-w-7xl mx-auto px-6 flex items-center justify-between">
+      <span>LearningAnimation · 计算机操作系统 408 核心考点可视化</span>
+      <span>遵循 Taste-Skill Light Editorial 浅色纸质美学</span>
+    </div>
+  </footer>
+
+  <!-- 引入主应用交互脚本 -->
+  <script src="app.js"></script>
+</body>
+</html>
