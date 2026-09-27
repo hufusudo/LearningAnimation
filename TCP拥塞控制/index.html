@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#FAF9F5">
+  <title>TCP 拥塞控制演示系统</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Newsreader:ital,opsz,wght@0,6..72,500;0,6..72,600;1,6..72,400&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="page-header">
+    <div class="header-inner">
+      <a class="back-link" href="../index.html#net" aria-label="返回计算机网络展厅">← <span>计算机网络</span></a>
+      <div class="title-group">
+        <span class="title-kicker">TRANSMISSION CONTROL PROTOCOL</span>
+        <h1>TCP 拥塞控制</h1>
+      </div>
+      <span class="model-tag">慢开始 · 拥塞避免 · Reno</span>
+    </div>
+  </header>
+
+  <section class="control-deck" aria-label="演进控制">
+    <div class="control-row">
+      <div class="control-cluster transport-controls">
+        <button id="btn-play" class="key-button primary-button" type="button">
+          <span id="play-icon">▶</span><span id="play-label">播放</span>
+        </button>
+        <button id="btn-step" class="key-button" type="button">单步推进 <span aria-hidden="true">›</span></button>
+        <button id="btn-reset" class="key-button" type="button">重新开始 <span aria-hidden="true">↺</span></button>
+        <label class="speed-control" for="speed-slider">
+          <span>速度</span>
+          <input id="speed-slider" class="taste-slider" type="range" min="0.5" max="2.5" step="0.1" value="1">
+          <b id="speed-value">1.0×</b>
+        </label>
+      </div>
+
+      <div class="control-cluster incident-controls">
+        <button id="btn-timeout" class="key-button danger-button" type="button">💥 模拟超时丢包 <span class="button-en">(Timeout)</span></button>
+        <button id="btn-fast-loss" class="key-button warning-button" type="button">⚡ 模拟个别丢包 <span class="button-en">(快重传)</span></button>
+      </div>
+    </div>
+    <div class="status-row" aria-live="polite">
+      <div class="status-pill phase-pill"><span class="status-led"></span><span>阶段</span><strong id="phase-value">慢开始</strong></div>
+      <div class="status-pill"><span class="mono-label">cwnd</span><strong id="cwnd-value">1 MSS</strong></div>
+      <div class="status-pill"><span class="mono-label">ssthresh</span><strong id="ssthresh-value">16 MSS</strong></div>
+      <div class="status-pill round-pill"><span class="mono-label">RTT</span><strong id="round-value">0</strong></div>
+      <div class="status-note" id="status-note">等待开始 · 每轮 RTT 完成后更新窗口</div>
+    </div>
+  </section>
+
+  <main class="page-main">
+    <section class="intro-row">
+      <div>
+        <p class="eyebrow">CONGESTION WINDOW · RTT LOOP</p>
+        <h2>窗口发多少，确认回来后再决定下一轮</h2>
+      </div>
+      <p class="intro-copy">自动播放依次展示：慢开始 → 拥塞避免 → 超时重传 → 再增长 → 快重传与快恢复。播放中点击丢包按钮，可预约本轮结束后演示。</p>
+    </section>
+
+    <section class="panel network-panel" aria-labelledby="network-title">
+      <div class="panel-heading">
+        <div class="heading-title">
+          <span class="section-marker blue-marker"></span>
+          <div>
+            <h2 id="network-title">物理信道 · 连发与确认</h2>
+            <p class="panel-subtitle">数据包向右，累计 ACK 沿反向信道返回</p>
+          </div>
+        </div>
+        <div class="capacity-pill"><span class="capacity-led"></span>链路承载极限 <b>16 包 / RTT</b></div>
+      </div>
+
+      <div class="event-banner" id="event-banner" role="status" aria-live="assertive" hidden></div>
+      <ol class="event-steps" id="event-steps" aria-label="当前丢包演示进度" hidden>
+        <li id="event-step-0"></li><li id="event-step-1"></li><li id="event-step-2"></li><li id="event-step-3"></li><li id="event-step-4"></li>
+      </ol>
+
+      <div class="network-stage">
+        <article class="host-card sender-card" id="sender-host">
+          <div class="host-heading">
+            <span class="host-icon sender-icon">S</span>
+            <div><strong>发送端</strong><small>TCP Sender</small></div>
+          </div>
+          <div class="host-divider"></div>
+          <div class="host-stat"><span>待确认窗口</span><b id="sender-window">1 包</b></div>
+          <div class="host-stat"><span>正在飞行</span><b id="sender-flight">0 包</b></div>
+          <div class="sender-timer">
+            <svg class="timer-ring" viewBox="0 0 40 40" aria-hidden="true">
+              <circle class="timer-track" cx="20" cy="20" r="16"></circle>
+              <circle class="timer-progress" id="timer-progress" cx="20" cy="20" r="16"></circle>
+            </svg>
+            <div><small>重传计时器</small><strong id="timer-label">空闲</strong></div>
+          </div>
+        </article>
+
+        <div class="channel" aria-label="双向网络信道">
+          <div class="channel-caption">
+            <span>双向通信信道</span><span id="channel-caption-detail">拥塞窗口决定本轮发送量</span>
+          </div>
+          <div class="lane lane-data" id="data-lane">
+            <div class="lane-line"></div>
+            <span class="lane-label">DATA <span>→</span></span>
+          </div>
+          <div class="lane lane-ack" id="ack-lane">
+            <div class="lane-line"></div>
+            <span class="lane-label">← <span>ACK</span></span>
+          </div>
+          <div class="channel-endpoints"><span>发送方</span><span>接收方</span></div>
+          <div class="duplicate-counter" id="duplicate-counter" hidden>重复 ACK <b id="duplicate-value">0</b> / 3</div>
+        </div>
+
+        <article class="host-card receiver-card" id="receiver-host">
+          <div class="host-heading">
+            <span class="host-icon receiver-icon">R</span>
+            <div><strong>接收端</strong><small>TCP Receiver</small></div>
+          </div>
+          <div class="host-divider"></div>
+          <div class="host-stat"><span>累计确认</span><b id="receiver-ack">&lt;ack=1&gt;</b></div>
+          <div class="host-stat"><span>已收到数据</span><b id="receiver-count">0 包</b></div>
+          <div class="receiver-ready"><span class="pulse-dot"></span><span id="receiver-state">就绪，等待数据</span></div>
+        </article>
+      </div>
+
+      <div class="round-toast" id="round-toast" aria-live="polite"></div>
+      <div class="network-footnote">
+        <span><i class="legend-square data-legend"></i>数据包</span>
+        <span><i class="legend-square ack-legend"></i>ACK 确认包</span>
+        <span><i class="legend-square lost-legend"></i>丢失 / 超时</span>
+        <span class="footnote-right" id="flight-note">下一事件：cwnd 超过 16 时，演示超时重传</span>
+      </div>
+    </section>
+
+    <section class="panel chart-panel" aria-labelledby="chart-title">
+      <div class="panel-heading chart-heading">
+        <div class="heading-title">
+          <span class="section-marker amber-marker"></span>
+          <div>
+            <h2 id="chart-title">拥塞窗口变化 · cwnd 对 RTT</h2>
+            <p class="panel-subtitle">每轮确认完成后落点；丢包时在当前 RTT 处显示垂直回落</p>
+          </div>
+        </div>
+        <div class="chart-legend">
+          <span><i class="legend-line cwnd-legend"></i>cwnd</span>
+          <span><i class="legend-line threshold-legend"></i>ssthresh</span>
+        </div>
+      </div>
+      <div class="loss-summary" id="loss-summary" hidden aria-live="polite">
+        <div class="loss-summary-heading"><strong id="loss-title"></strong><span id="loss-progress"></span></div>
+        <div class="loss-values">
+          <div><span>丢包前 cwnd</span><strong id="loss-before"></strong></div>
+          <div><span>慢开始门限 ssthresh</span><strong id="loss-threshold"></strong><small id="loss-formula"></small></div>
+          <div><span>拥塞窗口 cwnd</span><strong id="loss-window"></strong></div>
+        </div>
+      </div>
+      <div class="chart-wrap">
+        <svg id="cwnd-chart" viewBox="0 0 960 320" role="img" aria-label="TCP 拥塞窗口随 RTT 变化折线图">
+          <defs><marker id="threshold-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#BE123C"></path></marker></defs>
+          <g id="chart-grid"></g>
+          <g id="chart-x-labels"></g>
+          <text class="axis-title y-axis-title" x="18" y="32">cwnd</text>
+          <text class="axis-title x-axis-title" x="886" y="307">RTT</text>
+          <line id="ssthresh-line" class="threshold-line" x1="74" x2="930" y1="180" y2="180"></line>
+          <line id="previous-threshold-line" class="previous-threshold-line" x1="74" x2="930" y1="22" y2="22" visibility="hidden"></line>
+          <text id="previous-threshold-label" class="grid-label" x="700" y="22" visibility="hidden"></text>
+          <line id="threshold-change-arrow" class="threshold-change-arrow" x1="907" x2="907" y1="22" y2="22" marker-end="url(#threshold-arrow)" visibility="hidden"></line>
+          <text id="ssthresh-label" class="threshold-label" x="84" y="174">ssthresh 16</text>
+          <line id="time-cursor" class="time-cursor" x1="74" x2="74" y1="22" y2="260"></line>
+          <path id="cwnd-path" class="cwnd-path" d=""></path>
+          <path id="cwnd-latest-segment" class="cwnd-latest-segment" d=""></path>
+          <g id="chart-points"></g>
+        </svg>
+      </div>
+      <div class="chart-caption">
+        <span><b class="formula-tag">慢开始</b> 每轮 ×2，直到 ssthresh</span>
+        <span><b class="formula-tag">拥塞避免</b> 每轮 +1</span>
+        <span><b class="formula-tag loss-tag">Timeout</b> ssthresh ← cwnd / 2，cwnd ← 1</span>
+        <span><b class="formula-tag fast-tag">3 个重复 ACK</b> cwnd ← cwnd / 2，快速补发</span>
+      </div>
+    </section>
+
+    <section class="concept-note">
+      <span class="note-icon">i</span>
+      <p><strong>动画模型：</strong>门限按丢包前的 cwnd / 2 计算，整数 MSS 向下取整且至少为 2；超时后 cwnd 回到 1。快恢复按教材简化曲线显示折半窗口，省略 Reno 临时窗口膨胀，修复后直接继续拥塞避免。</p>
+    </section>
+  </main>
+
+  <footer class="page-footer">COMPUTER NETWORKS <span>·</span> TCP CONGESTION CONTROL</footer>
+  <script src="app.js"></script>
+</body>
+</html>

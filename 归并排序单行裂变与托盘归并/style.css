@@ -1,0 +1,500 @@
+/* =========================================================================
+   归并排序单行裂变与悬浮托盘归并 — 视觉设计系统
+   Taste-Skill Light Editorial (严格浅色纸质美学与高保真动效)
+   ========================================================================= */
+
+:root {
+  --bg-page: #FAF9F5;
+  --bg-card: #FFFFFF;
+  --bg-subtle: #F4F3EE;
+  --border-subtle: #E5E4DC;
+  --border-strong: #D6D3CD;
+  --text-primary: #1C1917;
+  --text-secondary: #57534E;
+  --text-muted: #78716C;
+
+  /* 功能色（严格限定规范色板） */
+  --c-blue: #2563EB;
+  --c-amber: #D97706;
+  --c-emerald: #059669;
+  --c-stone: #57534E;
+}
+
+body {
+  background-color: var(--bg-page);
+  color: var(--text-primary);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, sans-serif;
+}
+
+.font-serif { font-family: 'Newsreader', Georgia, serif; }
+.font-mono, .font-mono-num {
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- 纸质卡片面板 -------------------------------------------------------- */
+.card-panel {
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: 1rem;
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.02);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+.card-panel:hover { border-color: var(--border-strong); }
+
+.shadow-2xs { box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.03); }
+
+/* ---- 物理触感机械按键 (Tactile Micro-Buttons) ---------------------------- */
+.ctl-btn {
+  padding: 0.35rem 0.75rem;
+  background: #FFFFFF;
+  border: 1px solid var(--border-strong);
+  border-radius: 0.5rem;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: #44403C;
+  box-shadow: 0 1.5px 0 #D6D3CD;
+  transition: all 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  user-select: none;
+  cursor: pointer;
+}
+.ctl-btn:hover:not(:disabled) {
+  background: #FBFBFA;
+  border-color: #78716C;
+  color: #1C1917;
+  transform: translateY(-1px);
+}
+.ctl-btn:active:not(:disabled) {
+  transform: translateY(1.5px);
+  box-shadow: none;
+}
+.ctl-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  box-shadow: none;
+  border-color: #E5E4DC;
+}
+
+.btn-primary {
+  padding: 0.35rem 0.85rem;
+  background: #1C1917;
+  border: 1px solid #1C1917;
+  border-radius: 0.5rem;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #FFFFFF;
+  box-shadow: 0 1.5px 0 #000000;
+  transition: all 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  user-select: none;
+  cursor: pointer;
+}
+.btn-primary:hover:not(:disabled) {
+  background: #292524;
+  border-color: #292524;
+  transform: translateY(-1px);
+}
+.btn-primary:active:not(:disabled) {
+  transform: translateY(1.5px);
+  box-shadow: none;
+}
+
+/* ---- 顶部图例胶囊 --------------------------------------------------------- */
+.legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  background: #FAF9F5;
+  padding: 0.15rem 0.45rem;
+  border-radius: 0.375rem;
+  border: 1px solid var(--border-subtle);
+}
+
+/* ---- 状态呼吸脉冲指示灯 (Pulse Indicators) -------------------------------- */
+.pulse-led {
+  position: relative;
+  display: inline-flex;
+  width: 8px;
+  height: 8px;
+  border-radius: 9999px;
+  flex-shrink: 0;
+}
+.pulse-led::after {
+  content: '';
+  position: absolute;
+  inset: -2px;
+  border-radius: 9999px;
+  opacity: 0.75;
+  animation: pulseRing 2s cubic-bezier(0.16, 1, 0.3, 1) infinite;
+}
+@keyframes pulseRing {
+  0% { transform: scale(0.9); opacity: 0.8; }
+  70%, 100% { transform: scale(2.4); opacity: 0; }
+}
+.pulse-led-stone { background-color: #78716C; }
+.pulse-led-stone::after { background-color: #A8A29E; }
+.pulse-led-amber { background-color: #D97706; }
+.pulse-led-amber::after { background-color: #F59E0B; }
+.pulse-led-blue { background-color: #2563EB; }
+.pulse-led-blue::after { background-color: #60A5FA; }
+.pulse-led-emerald { background-color: #059669; }
+.pulse-led-emerald::after { background-color: #10B981; }
+
+/* ---- 定制纸质滑块 (Paper Slider) ------------------------------------------ */
+.taste-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  background: #E5E4DC;
+  border-radius: 2px;
+  outline: none;
+  transition: all 0.2s ease;
+  cursor: pointer;
+}
+.taste-slider:hover { background: #D6D3CD; }
+.taste-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #FFFFFF;
+  border: 2px solid #1C1917;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+.taste-slider::-webkit-slider-thumb:hover {
+  transform: scale(1.25);
+  box-shadow: 0 0 0 4px rgba(217, 119, 6, 0.18);
+}
+.taste-slider::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #FFFFFF;
+  border: 2px solid #1C1917;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+  transition: transform 0.15s ease;
+}
+
+/* ---- 纯 CSS 悬浮信息气泡 (Taste Tooltip) ----------------------------------- */
+.taste-tooltip-box {
+  position: relative;
+  display: inline-flex;
+}
+.taste-tooltip-box .taste-tooltip-content {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%) translateY(4px);
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  z-index: 60;
+  white-space: nowrap;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background-color: #1C1917;
+  color: #FAF9F5;
+  font-size: 11px;
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 500;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+.taste-tooltip-box .taste-tooltip-content::after {
+  content: '';
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border-width: 4px;
+  border-style: solid;
+  border-color: #1C1917 transparent transparent transparent;
+}
+.taste-tooltip-box:hover .taste-tooltip-content {
+  opacity: 1;
+  visibility: visible;
+  transform: translateX(-50%) translateY(0);
+}
+
+/* =========================================================================
+   主舞台组件 (Main Stage Components)
+   ========================================================================= */
+
+/* ---- 单行数字卡片 ---------------------------------------------------------- */
+.ms-card {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 64px;
+  height: 84px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #FFFFFF;
+  border: 1.5px solid #A8A29E;
+  border-radius: 14px;
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 700;
+  font-size: 1.4rem;
+  color: #1C1917;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.05);
+  user-select: none;
+  will-change: transform;
+  z-index: 4;
+  transition: border-color 0.25s ease, background-color 0.25s ease,
+              box-shadow 0.25s ease, opacity 0.3s ease, filter 0.3s ease;
+}
+
+/* 重复元素下标角标 (稳定性观察: 49a / 49b) */
+.ms-sub {
+  position: absolute;
+  right: 7px;
+  bottom: 5px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #78716C;
+  line-height: 1;
+}
+.ms-sub sub { font-size: 0.62rem; }
+
+/* 排头兵高亮（左右两色环） */
+.ms-card.is-head-l {
+  border-color: var(--c-blue);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.18), 0 2px 6px rgba(37, 99, 235, 0.22);
+}
+.ms-card.is-head-r {
+  border-color: var(--c-amber);
+  box-shadow: 0 0 0 3px rgba(217, 119, 6, 0.18), 0 2px 6px rgba(217, 119, 6, 0.22);
+}
+
+/* 半透明待命状态（段内非排头 / 区段外元素） */
+.ms-card.is-dim-soft { opacity: 0.62; }
+.ms-card.is-dim-out { opacity: 0.28; filter: grayscale(0.85); }
+
+/* 最终有序态 */
+.ms-card.is-sorted {
+  background: #ECFDF5;
+  border-color: var(--c-emerald);
+  color: #064E3B;
+  box-shadow: 0 2px 6px rgba(5, 150, 105, 0.18);
+}
+
+/* ---- 已出列空槽（虚线幽灵位） ---------------------------------------------- */
+.ms-hole {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 64px;
+  height: 84px;
+  border: 1.5px dashed #C9C5BA;
+  border-radius: 14px;
+  background:
+    repeating-linear-gradient(45deg, transparent, transparent 5px, rgba(214, 211, 205, 0.28) 5px, rgba(214, 211, 205, 0.28) 7px);
+  opacity: 0;
+  z-index: 3;
+  will-change: transform, opacity;
+}
+
+/* ---- 段聚焦外边框（左右两段高亮聚焦框） ------------------------------------- */
+.ms-bracket {
+  position: absolute;
+  left: 0;
+  top: 0;
+  height: 96px;
+  border-radius: 18px;
+  border: 1.5px solid transparent;
+  opacity: 0;
+  z-index: 1;
+  pointer-events: none;
+  will-change: transform, width, opacity;
+}
+.ms-bracket-l { border-color: rgba(37, 99, 235, 0.55); background: rgba(37, 99, 235, 0.045); }
+.ms-bracket-r { border-color: rgba(217, 119, 6, 0.55); background: rgba(217, 119, 6, 0.05); }
+
+.ms-bracket-tag {
+  position: absolute;
+  top: -18px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 7px;
+  border-radius: 6px;
+  white-space: nowrap;
+}
+.ms-bracket-l .ms-bracket-tag { background: #EFF6FF; color: #1D4ED8; border: 1px solid #BFDBFE; }
+.ms-bracket-r .ms-bracket-tag { background: #FFFBEB; color: #B45309; border: 1px solid #FDE68A; }
+
+/* ---- 悬浮托盘（伴随式动态浮现） --------------------------------------------- */
+.ms-tray-rect {
+  position: absolute;
+  border: 1.5px dashed #A8A29E;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.72);
+  box-shadow: 0 6px 18px rgba(28, 25, 23, 0.06);
+  z-index: 2;
+}
+.ms-tray-label {
+  position: absolute;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10.5px;
+  font-weight: 700;
+  color: #57534E;
+  background: #FFFFFF;
+  border: 1px solid var(--border-strong);
+  border-radius: 9999px;
+  padding: 2px 10px;
+  white-space: nowrap;
+  z-index: 3;
+  transform: translateX(-50%);
+}
+.ms-slot {
+  position: absolute;
+  width: 64px;
+  height: 84px;
+  border: 1.5px dashed #C9C5BA;
+  border-radius: 14px;
+  background: rgba(250, 249, 245, 0.55);
+  z-index: 2;
+  transition: border-color 0.25s ease, background-color 0.25s ease;
+}
+.ms-slot.is-filled {
+  border-color: #D6D3CD;
+  background: rgba(255, 251, 235, 0.65);
+}
+
+/* ---- 双指针排头光标 --------------------------------------------------------- */
+.ms-pointer {
+  position: absolute;
+  left: 0;
+  top: 24px;
+  width: 64px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  z-index: 6;
+  pointer-events: none;
+  will-change: transform, opacity;
+}
+.ms-ptr-chip {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  font-weight: 700;
+  color: #FFFFFF;
+  border-radius: 6px;
+  padding: 1.5px 7px;
+  white-space: nowrap;
+  animation: ptrFloat 1.4s ease-in-out infinite;
+}
+.ms-ptr-chip-l { background: var(--c-blue); box-shadow: 0 2px 5px rgba(37, 99, 235, 0.35); }
+.ms-ptr-chip-r { background: var(--c-amber); box-shadow: 0 2px 5px rgba(217, 119, 6, 0.35); }
+.ms-ptr-arrow { font-size: 11px; line-height: 1; }
+@keyframes ptrFloat {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-2.5px); }
+}
+
+/* ---- 排头对决判定气泡 -------------------------------------------------------- */
+.ms-bubble {
+  position: absolute;
+  left: 0;
+  top: -2px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11.5px;
+  font-weight: 700;
+  background: #FFFFFF;
+  border: 1.5px solid var(--border-strong);
+  border-radius: 9999px;
+  padding: 3px 12px;
+  white-space: nowrap;
+  z-index: 6;
+  pointer-events: none;
+  box-shadow: 0 3px 8px rgba(28, 25, 23, 0.08);
+  transform: translateX(-50%);
+  will-change: transform, opacity;
+}
+.ms-bubble sub { font-size: 0.6em; }
+.ms-bubble.tone-l { border-color: rgba(37, 99, 235, 0.6); color: #1D4ED8; background: #F5F8FF; }
+.ms-bubble.tone-r { border-color: rgba(217, 119, 6, 0.6); color: #B45309; background: #FFFBF0; }
+.ms-bubble.tone-gray { color: #57534E; background: #FAF9F5; }
+
+/* ---- 切分虚线光标 ------------------------------------------------------------- */
+.ms-cutline {
+  position: absolute;
+  left: 0;
+  top: 6px;
+  width: 0;
+  height: 176px;
+  border-left: 2px dashed var(--c-amber);
+  transform: translateX(-50%);
+  transform-origin: top center;
+  z-index: 7;
+  filter: drop-shadow(0 0 4px rgba(217, 119, 6, 0.35));
+}
+.ms-cutline::before {
+  content: '';
+  position: absolute;
+  top: -5px;
+  left: -5px;
+  width: 8px;
+  height: 8px;
+  background: var(--c-amber);
+  transform: rotate(45deg);
+  border-radius: 2px;
+}
+.ms-cutline-tag {
+  position: absolute;
+  top: -7px;
+  left: 10px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  font-weight: 700;
+  color: #92400E;
+  background: #FFFBEB;
+  border: 1px solid #FDE68A;
+  border-radius: 6px;
+  padding: 1px 6px;
+  white-space: nowrap;
+}
+
+/* ---- 单元素天然有序绿光 -------------------------------------------------------- */
+@keyframes unitGlow {
+  0% { box-shadow: 0 0 0 0 rgba(5, 150, 105, 0); border-color: #A8A29E; }
+  40% { box-shadow: 0 0 14px 3px rgba(5, 150, 105, 0.4); border-color: var(--c-emerald); background-color: #ECFDF5; }
+  100% { box-shadow: 0 2px 5px rgba(0, 0, 0, 0.05); border-color: #A8A29E; background-color: #FFFFFF; }
+}
+.ms-card.unit-glow { animation: unitGlow 1.15s ease-in-out both; }
+
+/* ---- 缝合闪光 ------------------------------------------------------------------- */
+@keyframes sealFlash {
+  0% { box-shadow: 0 0 0 0 rgba(217, 119, 6, 0); }
+  45% { box-shadow: 0 0 12px 2px rgba(217, 119, 6, 0.35); border-color: var(--c-amber); }
+  100% { box-shadow: 0 2px 5px rgba(0, 0, 0, 0.05); }
+}
+.ms-card.seal-flash { animation: sealFlash 0.7s ease-out both; }
+
+/* ---- 单次弹出（胜利横幅） ---------------------------------------------------------- */
+@keyframes bounce-once {
+  0% { transform: scale(0.95); opacity: 0; }
+  60% { transform: scale(1.02); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+.animate-bounce-once { animation: bounce-once 0.45s ease-out forwards; }
+
+/* ---- 动效降级 --------------------------------------------------------------------- */
+@media (prefers-reduced-motion: reduce) {
+  .pulse-led::after,
+  .ms-ptr-chip { animation: none; }
+  .ms-card, .ms-slot, .ms-bubble { transition: none !important; }
+}

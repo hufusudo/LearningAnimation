@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>希尔排序 · 交织跳跃抽样与稳定性分析 · 交互教学系统</title>
+
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['-apple-system', 'BlinkMacSystemFont', 'SF Pro Display', 'Segoe UI', 'Roboto', 'sans-serif'],
+            mono: ['JetBrains Mono', 'Fira Code', 'SF Mono', 'monospace'],
+            serif: ['Newsreader', 'Georgia', 'serif']
+          }
+        }
+      }
+    }
+  </script>
+
+  <!-- GSAP CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+
+  <!-- KaTeX CDN -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/contrib/auto-render.min.js"></script>
+
+  <!-- Google Fonts -->
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Newsreader:ital,opsz,wght@0,6..72,500;0,6..72,600;1,6..72,400&display=swap">
+
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="min-h-screen bg-[#FAF9F5] text-stone-900 antialiased selection:bg-amber-100 selection:text-amber-900 flex flex-col overflow-x-hidden">
+
+  <!-- ========================================================================= -->
+  <!-- 极简顶栏 HEADER                                                          -->
+  <!-- ========================================================================= -->
+  <header class="border-b border-[#E5E4DC] bg-[#FAF9F5]/90 backdrop-blur sticky top-0 z-40 px-4 md:px-6 py-2.5">
+    <div class="max-w-7xl mx-auto flex items-center justify-between gap-3">
+      <div class="flex items-center gap-3 min-w-0">
+        <a href="../index.html#ds" class="w-7 h-7 rounded-lg bg-stone-900 text-white flex items-center justify-center font-mono font-bold text-xs hover:bg-stone-800 transition-colors shadow-sm flex-shrink-0" title="返回数据结构展厅">
+          ←
+        </a>
+        <div class="min-w-0">
+          <h1 class="text-base font-bold tracking-tight text-stone-900 flex items-center gap-2 truncate">
+            希尔排序 · 交织跳跃抽样与稳定性分析
+            <span class="text-xs font-mono font-normal px-2 py-0.5 rounded bg-blue-50 text-blue-800 border border-blue-200 whitespace-nowrap hidden sm:inline">
+              408 核心考点 · 远距离消除逆序对 · 增量收敛物理本质
+            </span>
+          </h1>
+        </div>
+      </div>
+
+      <div class="flex items-center gap-2 flex-shrink-0">
+        <div class="bg-stone-100 p-0.5 rounded-lg border border-stone-200 flex items-center text-xs font-mono">
+          <span class="px-2.5 py-1 rounded-md font-semibold text-stone-700 bg-white shadow-sm">
+            测试序列: [49<sub>a</sub>, 38, 65, 97, 76, 13, 27, 49<sub>b</sub>]
+          </span>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- ========================================================================= -->
+  <!-- 主体工作区 MAIN                                                          -->
+  <!-- ========================================================================= -->
+  <main class="flex-1 max-w-7xl w-full mx-auto px-4 md:px-6 py-4 flex flex-col gap-4">
+
+    <!-- 控制面板 -->
+    <div class="card-panel p-3 flex flex-wrap items-center justify-between gap-3">
+      <div class="flex flex-wrap items-center gap-2">
+        <button id="btn-reset" class="ctl-btn" title="重置回初始状态">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+          重置
+        </button>
+        <button id="btn-prev" class="ctl-btn" title="上一步">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path></svg>
+          上一步
+        </button>
+        <button id="btn-play" class="btn-primary" title="自动播放/暂停">
+          <span id="play-icon">▶</span>
+          <span id="play-label">自动播放</span>
+        </button>
+        <button id="btn-next" class="ctl-btn font-semibold text-stone-900 border-stone-400" title="执行下一步">
+          单步执行
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
+        </button>
+      </div>
+
+      <div class="flex items-center gap-3 text-xs font-mono">
+        <div class="flex items-center gap-1 bg-stone-100 p-1 rounded-lg border border-stone-200">
+          <span class="text-stone-500 pl-1">速率:</span>
+          <button class="speed-btn" data-speed="0.5">0.5x</button>
+          <button class="speed-btn active" data-speed="1">1.0x</button>
+          <button class="speed-btn" data-speed="1.5">1.5x</button>
+          <button class="speed-btn" data-speed="2">2.0x</button>
+        </div>
+        <div class="hidden lg:flex items-center gap-1.5 bg-stone-50 px-2.5 py-1 rounded-md border border-stone-200 text-stone-600">
+          <span class="text-stone-400">阶段:</span>
+          <span id="phase-badge" class="font-bold text-blue-700">Phase 0 · 阵列初始化</span>
+        </div>
+      </div>
+
+      <div class="flex items-center gap-2 text-xs font-mono text-stone-500">
+        <span class="hidden md:inline">快捷键: [Space] 播放/暂停 &nbsp;|&nbsp; [&rarr;] 单步 &nbsp;|&nbsp; [&larr;] 上步 &nbsp;|&nbsp; [R] 重置</span>
+      </div>
+    </div>
+
+    <!-- 步骤进度指示条 -->
+    <div class="w-full bg-white rounded-lg p-2.5 border border-[#E5E4DC] flex flex-col gap-1.5 shadow-2xs">
+      <div class="flex items-center justify-between gap-3 text-xs font-mono text-stone-500">
+        <div class="flex items-center gap-2 min-w-0">
+          <span class="font-semibold text-stone-800 whitespace-nowrap" id="step-counter">步骤 0 / 0</span>
+          <span class="text-stone-300 hidden sm:inline">|</span>
+          <span id="step-description" class="text-stone-700 truncate">就绪：点击“单步执行”或“自动播放”观察希尔排序交织跳跃与宏观粗排</span>
+        </div>
+        <div class="text-[11px] text-stone-400 hidden lg:block whitespace-nowrap">Timeline Controller</div>
+      </div>
+      <div class="w-full bg-stone-100 h-2 rounded-full overflow-hidden relative cursor-pointer" id="progress-bar-container">
+        <div id="progress-bar-fill" class="bg-gradient-to-r from-[#00B4D8] via-[#F77F00] to-[#2EC4B6] h-full w-0 transition-all duration-200"></div>
+      </div>
+    </div>
+
+    <!-- ========================================================================= -->
+    <!-- 分层仪表盘 DASHBOARD (16:9 三段式物理映射架构)                             -->
+    <!-- ========================================================================= -->
+    <section id="dashboard" class="card-panel overflow-hidden">
+
+      <!-- ===== 1. 顶部状态与增量控制台 (15%) ===== -->
+      <div class="border-b border-[#E5E4DC] bg-gradient-to-r from-[#FAF9F5] to-white px-4 py-3">
+        <div class="flex items-center justify-between gap-3 mb-2.5">
+          <div class="flex items-center gap-2 text-xs font-mono">
+            <span class="w-2.5 h-2.5 rounded-full bg-blue-600"></span>
+            <span class="font-bold text-stone-900 tracking-tight">状态与增量控制台 (State & Incremental Console)</span>
+          </div>
+
+          <!-- 子序列彩色余数图例 -->
+          <div class="flex flex-wrap items-center gap-2 text-[10px] font-mono text-stone-600">
+            <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-sm bg-[#00B4D8]"></span> rem 0 (天蓝)</span>
+            <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-sm bg-[#F77F00]"></span> rem 1 (橙色)</span>
+            <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-sm bg-[#2EC4B6]"></span> rem 2 (薄荷)</span>
+            <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-sm bg-[#7209B7]"></span> rem 3 (紫罗兰)</span>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2">
+          <!-- 动态增量显示器 -->
+          <div class="hud-tile">
+            <span class="hud-label">增量步长 d</span>
+            <div class="hud-value" id="hud-d-container">
+              <span id="hud-d" class="step-badge-d d4">d = 4</span>
+              <span class="text-[10px] text-stone-400 font-normal">⌊n/2⌋</span>
+            </div>
+          </div>
+
+          <!-- 全局逆序对计数板 (断崖下跌) -->
+          <div class="hud-tile">
+            <span class="hud-label">全局逆序对 Inversions</span>
+            <div class="hud-value">
+              <span id="hud-inv" class="text-stone-900">15</span>
+              <span id="hud-inv-delta" class="inv-pill inv-drop" style="display:none">-4</span>
+            </div>
+          </div>
+
+          <!-- 逆序对历史断崖 Sparkline -->
+          <div class="hud-tile">
+            <span class="hud-label">逆序跌落走势 Sparkline</span>
+            <div id="inv-sparkline">
+              <!-- 由 JS 动态渲染各阶段柱状图 -->
+            </div>
+          </div>
+
+          <!-- 活跃外层指针 i -->
+          <div class="hud-tile">
+            <span class="hud-label">外层指针 i</span>
+            <span class="hud-value" id="hud-i">—</span>
+          </div>
+
+          <!-- 内部比较指针 j -->
+          <div class="hud-tile">
+            <span class="hud-label">比较指针 j</span>
+            <span class="hud-value" id="hud-j">—</span>
+          </div>
+
+          <!-- 暂存值 temp -->
+          <div class="hud-tile">
+            <span class="hud-label">暂存槽 temp</span>
+            <span class="hud-value" id="hud-temp">—</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== 2. 中央核心阵列舞台 (60%) ===== -->
+      <div class="px-4 md:px-6 py-4 flex flex-col justify-center relative bg-gradient-to-b from-white to-[#FAF9F6] border-b border-[#E5E4DC]">
+        <div class="flex items-center justify-between mb-2 text-[11px] font-mono text-stone-400">
+          <div class="flex items-center gap-2">
+            <span>核心阵列舞台 · <span class="text-stone-700 font-semibold">A[0..7]</span></span>
+            <span class="text-stone-300">|</span>
+            <span class="text-amber-700 font-medium">49<sub>a</sub> (金色描边)</span>
+            <span class="text-purple-700 font-medium">49<sub>b</sub> (银紫描边)</span>
+          </div>
+          <span id="stage-hint" class="text-stone-500">彩色贝塞尔曲线跨越步长 d 连接同余子序列</span>
+        </div>
+
+        <!-- 子序列直接插入排序透视展台 (展示希尔排序每个分组用的是直接插入排序) -->
+        <div id="sublist-inspector-panel" class="mb-3 p-3 rounded-xl bg-white border border-[#E5E4DC] flex flex-col gap-2 shadow-2xs">
+          <!-- 顶栏：分组名称与步长信息 -->
+          <div class="flex flex-wrap items-center justify-between gap-2 border-b border-[#ECEBE4] pb-2 text-xs font-mono">
+            <div class="flex items-center gap-2">
+              <span class="w-3 h-3 rounded-full bg-[#00B4D8] flex-shrink-0" id="spotlight-dot"></span>
+              <span class="font-bold text-stone-900" id="spotlight-title">【就绪】装载测试用例，准备进入第一趟排序</span>
+              <span class="text-stone-300 hidden sm:inline">|</span>
+              <span class="text-stone-600" id="spotlight-stride">步长 d = 4</span>
+            </div>
+            <div id="spotlight-action" class="text-[11px] font-mono font-semibold px-2 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-200">
+              就绪
+            </div>
+          </div>
+
+          <!-- 中栏：经典直接插入排序三段式流水线 (已排序区 vs 待插入 temp vs 未扫描区) -->
+          <div class="flex flex-wrap items-center gap-2.5 text-xs font-mono py-0.5">
+            <span class="text-stone-400 font-semibold text-[11px]">子表插入结构:</span>
+
+            <!-- 已排序前驱 (Sorted Prefix) -->
+            <div class="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 shadow-2xs">
+              <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+              <span class="font-bold text-[10px] text-emerald-600 uppercase">子表已排序区:</span>
+              <span id="inspector-sorted-prefix" class="font-bold text-stone-800">[ — ]</span>
+            </div>
+
+            <span class="text-amber-500 font-bold text-xs animate-pulse">⟵ 插入 ⟵</span>
+
+            <!-- 待插入元素 (Insert Target) -->
+            <div class="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-50 border border-amber-300 text-amber-900 shadow-2xs">
+              <span class="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
+              <span class="font-bold text-[10px] text-amber-700 uppercase">待插入 temp:</span>
+              <span id="inspector-insert-target" class="font-bold text-amber-900">—</span>
+            </div>
+
+            <!-- 未排序后缀 (Unsorted Suffix) -->
+            <div class="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-stone-100 text-stone-500" id="inspector-unsorted-container">
+              <span class="text-[10px] text-stone-400 uppercase">待扫描后驱:</span>
+              <span id="inspector-unsorted-suffix" class="text-stone-600">[ — ]</span>
+            </div>
+          </div>
+
+          <!-- 底栏：插入排序当前微操作讲解 -->
+          <div class="text-[11px] font-mono text-stone-600 flex items-center gap-1.5 pt-1.5 border-t border-[#F2F1EB]">
+            <span class="text-blue-600 font-bold flex-shrink-0">› 插入操作剖析:</span>
+            <span id="inspector-op-desc" class="text-stone-700 font-medium">希尔排序的每一次循环，都是在当前子表的【已排序前驱】中寻找插入位并执行直接插入排序。</span>
+          </div>
+        </div>
+
+        <!-- 舞台主画布容器 (自适应 16:9 比例空间) -->
+        <div id="stage-container">
+          <!-- 1. SVG 贝塞尔跳线覆盖层 -->
+          <svg id="bezier-svg">
+            <defs>
+              <filter id="glow-arc" x="-20%" y="-20%" width="140%" height="140%">
+                <feGaussianBlur stdDeviation="3" result="blur" />
+                <feMerge>
+                  <feMergeNode in="blur" />
+                  <feMergeNode in="SourceGraphic" />
+                </feMerge>
+              </filter>
+            </defs>
+            <g id="bezier-paths-group"></g>
+          </svg>
+
+          <!-- 2. 游离浮动暂存槽行 (上方 40px) -->
+          <div id="temp-slot-row">
+            <div class="temp-slot" data-slot="0"><span class="temp-slot-tag">Temp 0</span></div>
+            <div class="temp-slot" data-slot="1"><span class="temp-slot-tag">Temp 1</span></div>
+            <div class="temp-slot" data-slot="2"><span class="temp-slot-tag">Temp 2</span></div>
+            <div class="temp-slot" data-slot="3"><span class="temp-slot-tag">Temp 3</span></div>
+            <div class="temp-slot" data-slot="4"><span class="temp-slot-tag">Temp 4</span></div>
+            <div class="temp-slot" data-slot="5"><span class="temp-slot-tag">Temp 5</span></div>
+            <div class="temp-slot" data-slot="6"><span class="temp-slot-tag">Temp 6</span></div>
+            <div class="temp-slot" data-slot="7"><span class="temp-slot-tag">Temp 7</span></div>
+          </div>
+
+          <!-- 3. 主物理槽位底座行 (固定底座，显示 A[0..7] 与空穴) -->
+          <div id="array-slot-row">
+            <!-- 由 JS 初始化 8 个底座 -->
+          </div>
+
+          <!-- 4. 连续动量卡片实体层 (Absolute Positioning Card Layer) -->
+          <div id="card-layer">
+            <!-- 8 个实体卡片直接在此层中，由 GSAP 执行 60fps 连续平滑位移与升降，拒绝瞬时跳变 -->
+          </div>
+
+          <!-- 5. 指针游标层 (Pointer Cursor Overlay) -->
+          <div id="ptr-overlay">
+            <div id="cursor-i-node" class="cursor-i" style="display:none;">
+              <span class="cursor-i-badge">i = <span id="val-cursor-i">4</span></span>
+              <span class="cursor-i-arrow">▲</span>
+            </div>
+            <div id="cursor-j-node" class="cursor-j" style="display:none;">
+              <span class="cursor-j-badge">j = <span id="val-cursor-j">0</span></span>
+              <span class="cursor-j-arrow">▲</span>
+            </div>
+          </div>
+
+          <!-- 6. 浮动比较判定气泡 -->
+          <div id="compare-bubble">
+            <span id="cmp-left">38</span>
+            <span id="cmp-op">&gt;</span>
+            <span id="cmp-right">13</span>
+            <span id="cmp-res" class="text-amber-300 font-bold ml-1">需跨步后移</span>
+          </div>
+        </div>
+
+        <!-- 相同键值稳定性实时雷达 -->
+        <div id="stability-tracker-bar" class="mt-3 p-2.5 rounded-xl bg-stone-50 border border-stone-200 flex flex-wrap items-center justify-between gap-3 text-xs font-mono">
+          <div class="flex items-center gap-2">
+            <span class="font-bold text-stone-800">相同键值稳定性雷达：</span>
+            <span class="px-2 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-300 font-semibold" id="pos-49a">49ₐ 位于槽位 0</span>
+            <span class="text-stone-400">vs</span>
+            <span class="px-2 py-0.5 rounded bg-purple-100 text-purple-800 border border-purple-300 font-semibold" id="pos-49b">49ᵦ 位于槽位 7</span>
+            <span class="text-stone-500 hidden sm:inline">| 相对间距: <strong id="dist-49" class="text-stone-800">7</strong></span>
+          </div>
+          <div id="stability-status-pill" class="px-2 py-0.5 rounded font-semibold text-[11px] bg-emerald-50 text-emerald-700 border border-emerald-200">
+            相对次序正常 (49ₐ 前，49ᵦ 后)
+          </div>
+        </div>
+
+        <!-- 考点特写警告横幅 (不稳定时高亮弹出) -->
+        <div id="instability-alert" class="hidden mt-3 p-2.5 rounded-lg bg-red-50 border border-red-200 text-xs font-mono text-red-800 flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <span class="pulse-led-red"></span>
+            <span class="font-bold">【跨步长破坏相对次序预警】</span>
+            <span>49<sub>b</sub> 从末尾槽位 7 跨步大跳跃直达槽位 3，49<sub>a</sub> 留在槽位 0，两者相对距离发生不可逆重构！</span>
+          </div>
+          <span class="text-[11px] text-red-600 bg-white px-2 py-0.5 rounded border border-red-200 font-semibold whitespace-nowrap">
+            破坏稳定性根因
+          </span>
+        </div>
+      </div>
+
+      <!-- ===== 底部状态实时终端 (Terminal Strip) ===== -->
+      <div id="terminal-strip">
+        <span class="pulse-led-amber" id="terminal-led"></span>
+        <span id="terminal-prompt">›</span>
+        <span id="terminal-text">初始化就绪：装载 8 元素测试序列，计算初始逆序对为 15。</span>
+      </div>
+    </section>
+
+    <!-- ========================================================================= -->
+    <!-- 3. 底部考点观察与代码追踪区 (25%)                                          -->
+    <!-- ========================================================================= -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+
+      <!-- 左侧：希尔排序标准 C 语言逐行跟踪 -->
+      <div class="card-panel p-4 flex flex-col gap-2">
+        <div class="flex items-center justify-between border-b border-[#E5E4DC] pb-2">
+          <div class="flex items-center gap-2">
+            <span class="w-2 h-2 rounded-full bg-blue-600"></span>
+            <h4 class="text-xs font-bold text-stone-900 tracking-tight font-mono">
+              希尔排序逐行伪代码跟踪 (Shell Sort Implementation)
+            </h4>
+          </div>
+          <span class="text-[10px] font-mono text-stone-400">交织多子表 · 步长逐级折半</span>
+        </div>
+
+        <div class="bg-stone-900 text-stone-200 p-3 rounded-lg font-mono text-xs overflow-x-auto leading-5" id="code-block">
+          <div id="code-1" class="code-line"><span class="text-stone-500 select-none mr-2">01</span><span class="text-indigo-400">void</span> ShellSort(<span class="text-indigo-400">int</span> A[], <span class="text-indigo-400">int</span> n) {</div>
+          <div id="code-2" class="code-line"><span class="text-stone-500 select-none mr-2">02</span>    <span class="text-amber-400">for</span> (<span class="text-indigo-400">int</span> d = n / 2; d &gt;= 1; d /= 2) {  <span class="text-stone-400">// 步长递减收敛</span></div>
+          <div id="code-3" class="code-line"><span class="text-stone-500 select-none mr-2">03</span>        <span class="text-amber-400">for</span> (<span class="text-indigo-400">int</span> i = d; i &lt; n; i++) {        <span class="text-stone-400">// 交织穿插推进各个子表</span></div>
+          <div id="code-4" class="code-line"><span class="text-stone-500 select-none mr-2">04</span>            <span class="text-indigo-400">int</span> temp = A[i];                  <span class="text-stone-400">// 暂存抽离卡片</span></div>
+          <div id="code-5" class="code-line"><span class="text-stone-500 select-none mr-2">05</span>            <span class="text-indigo-400">int</span> j = i - d;</div>
+          <div id="code-6" class="code-line"><span class="text-stone-500 select-none mr-2">06</span>            <span class="text-amber-400">while</span> (j &gt;= 0 &amp;&amp; A[j] &gt; temp) {   <span class="text-stone-400">// 跨越步长 d 进行对比</span></div>
+          <div id="code-7" class="code-line"><span class="text-stone-500 select-none mr-2">07</span>                A[j + d] = A[j];              <span class="text-stone-400">// 顺着跳线大跨步右移</span></div>
+          <div id="code-8" class="code-line"><span class="text-stone-500 select-none mr-2">08</span>                j -= d;</div>
+          <div id="code-9" class="code-line"><span class="text-stone-500 select-none mr-2">09</span>            }</div>
+          <div id="code-10" class="code-line"><span class="text-stone-500 select-none mr-2">10</span>            A[j + d] = temp;                  <span class="text-stone-400">// temp 下坠嵌入最终槽位</span></div>
+          <div id="code-11" class="code-line"><span class="text-stone-500 select-none mr-2">11</span>        }</div>
+          <div id="code-12" class="code-line"><span class="text-stone-500 select-none mr-2">12</span>    }</div>
+          <div id="code-13" class="code-line"><span class="text-stone-500 select-none mr-2">13</span>}</div>
+        </div>
+      </div>
+
+      <!-- 右侧：408 考点特写雷达 -->
+      <div class="card-panel p-4 flex flex-col gap-2.5">
+        <div class="flex items-center justify-between border-b border-[#E5E4DC] pb-2">
+          <div class="flex items-center gap-2">
+            <span class="w-2 h-2 rounded-full bg-amber-500"></span>
+            <h4 class="text-xs font-bold text-stone-900 tracking-tight font-mono">
+              408 考点深度剖析雷达 (Key Examination Insights)
+            </h4>
+          </div>
+          <span class="text-[10px] font-mono text-stone-400">物理本质 · 稳定性 · 复杂度</span>
+        </div>
+
+        <div class="space-y-2">
+          <div class="callout co-tip">
+            <div class="callout-title">
+              <span class="w-2 h-2 rounded-full bg-blue-600 inline-block"></span>
+              ◆ 物理本质：每个分组严格执行直接插入排序
+            </div>
+            希尔排序的理论定义是：<strong>将待排序列按增量 $d$ 分割成若干个子序列，分别对每个子序列进行直接插入排序</strong>。<br>
+            代码中 <code>for (int i = d; i &lt; n; i++)</code> 并没有改变算法本质，而是把 $d$ 个子序列的直接插入排序<strong>穿插交替</strong>推进 —— 每次指针 $i$ 步进到某个元素，就是将其插入到该子序列的【已排序前驱】中（比较、后移空位、插入），本质与普通直接插入排序完全一致！
+          </div>
+
+          <div class="callout co-tip">
+            <div class="callout-title">◆ 远距离消除逆序对物理本质</div>
+            普通直接插入排序只能<strong>相邻交换</strong>（每次最多消去 1 个逆序对）。希尔排序通过跨越步长 $d$ 的远距离比较移动，<strong>一次跨步即可击穿消除多个跨区间逆序对</strong>，使逆序对计数板出现“断崖式下跌”。
+          </div>
+
+          <div class="callout co-danger">
+            <div class="callout-title">
+              <span class="pulse-led-red"></span>
+              ◆ 不稳定性根因：子序列相互孤立的跨步跳跃
+            </div>
+            相同关键字（如 49ₐ 与 49ᵦ）被<strong>划分到了不同的独立子序列中</strong>。在首趟 d=4 中，49ᵦ 在紫色子表跨步越过了其他元素直达槽位 3，破坏了原本的绝对与相对次序，因此<strong>希尔排序是不稳定排序</strong>。
+            <div class="mt-2 pt-2 border-t border-red-200/80 text-[11px] leading-relaxed bg-red-100/60 p-2 rounded">
+              <div class="font-bold text-red-900 mb-1">【408 考点经典颠倒反例：A = [3, 2ₐ, 2ᵦ, 1], d=2】</div>
+              <div>• 偶数子表 [3, 2ᵦ] 排序得 [2ᵦ, 3]</div>
+              <div>• 奇数子表 [2ₐ, 1] 排序得 [1, 2ₐ]</div>
+              <div>• 合并后序列突变为：[2ᵦ, 1, 3, 2ₐ] —— <strong class="text-red-700">2ᵦ 飞跃至 2ₐ 前面！</strong></div>
+              <div>• 末趟 d=1 排序得 [1, 2ᵦ, 2ₐ, 3]，相对次序被<strong>永久逆转</strong>！</div>
+            </div>
+          </div>
+
+          <div class="callout co-warn">
+            <div class="callout-title">◆ 宏观粗排 → 基本有序 → 微调收敛</div>
+            前两趟（$d=4, d=2$）让序列迅速趋近“基本有序”。最后一趟（$d=1$）虽然退化为直接插入排序，但由于绝大多数元素已满足 $A[j] \le temp$ 零位移直接 break，扫描速度极高！
+          </div>
+
+          <div class="callout co-note">
+            <div class="callout-title">◆ 增量序列的数学性质与突破 $O(n^2)$</div>
+            希尔增量（$\lfloor n/2^k \rfloor$）最坏为 $O(n^2)$；改用互质增量（如 Hibbard 增量 $2^k-1$、Sedgewick 增量）可彻底规避子表偶数重叠，复杂度一举突破至 $O(n^{3/2})$ 或 $O(n^{4/3})$。
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </main>
+
+  <!-- ========================================================================= -->
+  <!-- 极简页脚 FOOTER                                                          -->
+  <!-- ========================================================================= -->
+  <footer class="border-t border-[#E5E4DC] bg-[#FAF9F5] py-3 text-center text-xs font-mono text-stone-400 mt-6">
+    LearningAnimation · 希尔排序交织跳跃抽样机制与稳定性分析 · 计算机考研 408 核心考点专题
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>

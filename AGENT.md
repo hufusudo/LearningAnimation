@@ -121,3 +121,9 @@
     └── app.js       # 3D 场景、动态计算与 KaTeX 联动
     ```
   - 严禁引入 Webpack / Vite / npm 等重型打包依赖，确保双击 HTML 或运行轻量静态服务器（如 `python3 -m http.server`）即可开箱即用。
+
+---
+
+## §6 会话技能使用偏好
+
+- 除非用户在当前任务中明确要求使用 Superpowers，否则不要主动调用 Superpowers 系列技能或流程；按用户当前要求直接推进工作。

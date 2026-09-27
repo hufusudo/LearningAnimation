@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>归并排序单行裂变与悬浮托盘归并 · 交互教学系统</title>
+
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['-apple-system', 'BlinkMacSystemFont', 'SF Pro Display', 'Segoe UI', 'Roboto', 'sans-serif'],
+            mono: ['JetBrains Mono', 'Fira Code', 'SF Mono', 'monospace'],
+            serif: ['Newsreader', 'Georgia', 'serif']
+          },
+          colors: {
+            paper: '#FAF9F5',
+            card: '#FFFFFF',
+            borderSubtle: '#E5E4DC',
+            borderStrong: '#D6D3CD'
+          }
+        }
+      }
+    }
+  </script>
+
+  <!-- GSAP CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+
+  <!-- Google Fonts -->
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Newsreader:ital,opsz,wght@0,6..72,500;0,6..72,600;1,6..72,400&display=swap">
+
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="min-h-screen bg-[#FAF9F5] text-stone-900 antialiased selection:bg-amber-100 selection:text-amber-900 flex flex-col overflow-x-hidden">
+
+  <!-- ========================================================================= -->
+  <!-- 极简顶栏 HEADER                                                          -->
+  <!-- ========================================================================= -->
+  <header class="border-b border-[#E5E4DC] bg-[#FAF9F5]/90 backdrop-blur sticky top-0 z-40 px-4 md:px-6 py-2.5">
+    <div class="max-w-7xl mx-auto flex items-center justify-between gap-3">
+      <div class="flex items-center gap-3">
+        <a href="../index.html#ds" class="w-7 h-7 rounded-lg bg-stone-900 text-white flex items-center justify-center font-mono font-bold text-xs hover:bg-stone-800 transition-colors shadow-sm" title="返回数据结构展厅">
+          ←
+        </a>
+        <div>
+          <h1 class="text-base font-bold tracking-tight text-stone-900 flex flex-wrap items-center gap-2">
+            归并排序单行裂变与悬浮托盘归并
+            <span class="text-xs font-mono font-normal px-2 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200">
+              408 核心考点 · 分治策略 · 稳定 O(n log n)
+            </span>
+          </h1>
+        </div>
+      </div>
+
+      <!-- 阶段指示标签 -->
+      <div class="hidden md:flex items-center gap-2 bg-white px-3 py-1.5 rounded-lg border border-[#E5E4DC] shadow-2xs">
+        <span id="phase-led" class="pulse-led pulse-led-stone"></span>
+        <span class="text-[10px] font-mono text-stone-400">阶段</span>
+        <span id="phase-badge" class="text-xs font-mono font-bold text-stone-700">就绪</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- ========================================================================= -->
+  <!-- 主体工作区 MAIN                                                          -->
+  <!-- ========================================================================= -->
+  <main class="flex-1 max-w-7xl w-full mx-auto px-4 md:px-6 py-4 flex flex-col gap-4">
+
+    <!-- 播放控制栏 -->
+    <div class="card-panel p-3 flex flex-wrap items-center justify-between gap-3">
+      <!-- 左：播放控制按键组 -->
+      <div class="flex flex-wrap items-center gap-2">
+        <button id="btn-reset" class="ctl-btn" title="重新开始（回到初始单行序列）">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+          重新开始
+        </button>
+        <button id="btn-prev" class="ctl-btn" title="单步后退">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path></svg>
+          后退
+        </button>
+        <button id="btn-play" class="btn-primary" title="自动播放 / 暂停">
+          <span id="play-icon">▶</span>
+          <span id="play-label">播放</span>
+        </button>
+        <button id="btn-next" class="ctl-btn font-semibold text-stone-900 border-stone-400" title="单步前进">
+          前进
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
+        </button>
+        <button id="btn-random" class="ctl-btn" title="随机生成 8 个新元素并重置演示">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"></path></svg>
+          随机生成
+        </button>
+      </div>
+
+      <!-- 中：速度调节滑块 -->
+      <div class="taste-tooltip-box">
+        <div class="flex items-center gap-2 bg-stone-50 px-3 py-1.5 rounded-lg border border-[#E5E4DC]">
+          <span class="text-[10px] font-mono text-stone-500">速率</span>
+          <input id="speed-slider" class="taste-slider w-28 md:w-36" type="range" min="50" max="300" step="25" value="100">
+          <span id="speed-readout" class="text-xs font-mono font-bold text-stone-800 w-10 text-right">1.0x</span>
+        </div>
+        <span class="taste-tooltip-content">速度调节滑块 · 实时联动所有过渡动画时长（0.5x ~ 3.0x）</span>
+      </div>
+
+      <!-- 右：实时统计 -->
+      <div class="flex items-center gap-2 text-[11px] font-mono">
+        <div class="bg-white px-2.5 py-1.5 rounded-lg border border-[#E5E4DC] flex items-center gap-1.5">
+          <span class="text-stone-400">比较</span>
+          <span id="stat-cmp" class="font-bold text-blue-700">0</span>
+        </div>
+        <div class="bg-white px-2.5 py-1.5 rounded-lg border border-[#E5E4DC] flex items-center gap-1.5">
+          <span class="text-stone-400">入盘移动</span>
+          <span id="stat-mv" class="font-bold text-amber-700">0</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 步骤进度指示条（可点击跳转） -->
+    <div class="w-full bg-white rounded-xl p-2.5 border border-[#E5E4DC] flex flex-col gap-1.5 shadow-2xs">
+      <div class="flex items-center justify-between gap-3 text-xs font-mono text-stone-500">
+        <div class="flex items-center gap-2 min-w-0">
+          <span class="font-semibold text-stone-800 whitespace-nowrap" id="step-counter">步骤 0 / 0</span>
+          <span class="text-stone-300">|</span>
+          <span id="step-title" class="font-bold text-amber-700 whitespace-nowrap">就绪</span>
+          <span id="step-description" class="text-stone-600 truncate">点击「播放」或「前进」观察单行裂变与悬浮托盘拉链归并全过程</span>
+        </div>
+        <div class="text-[11px] text-stone-400 hidden lg:block whitespace-nowrap">
+          快捷键: [Space] 播放/暂停 &nbsp;|&nbsp; [→] 前进 &nbsp;|&nbsp; [←] 后退 &nbsp;|&nbsp; [R] 重新开始
+        </div>
+      </div>
+      <div class="w-full bg-stone-100 h-2 rounded-full overflow-hidden relative cursor-pointer" id="progress-bar-container">
+        <div id="progress-bar-fill" class="bg-gradient-to-r from-blue-500 via-amber-500 to-emerald-600 h-full w-0 transition-all duration-200"></div>
+      </div>
+    </div>
+
+    <!-- 排序完成胜利态横幅（平滑浮现） -->
+    <div id="victory-banner" class="hidden card-panel p-3.5 bg-gradient-to-r from-emerald-50 via-teal-50 to-emerald-50 border-emerald-300 text-emerald-950 items-center justify-between shadow-sm animate-bounce-once">
+      <div class="flex items-center gap-3">
+        <div class="w-9 h-9 rounded-full bg-emerald-600 text-white flex items-center justify-center font-bold text-lg shadow-sm">✓</div>
+        <div>
+          <h3 class="text-sm font-bold flex items-center gap-2">
+            <span>🎉 归并排序完成！全序列无缝贴合、严格升序</span>
+            <span class="text-xs font-mono font-normal bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded border border-emerald-300">Sorted · Stable</span>
+          </h3>
+          <p class="text-xs text-emerald-700 mt-0.5" id="victory-summary"></p>
+        </div>
+      </div>
+      <button id="btn-replay" class="ctl-btn text-xs bg-white text-emerald-800 border-emerald-300 hover:bg-emerald-50">重新演练 ↺</button>
+    </div>
+
+    <!-- ========================================================================= -->
+    <!-- 主舞台区：单行原序列 + 动态悬浮托盘                                        -->
+    <!-- ========================================================================= -->
+    <section class="card-panel p-4 md:p-5 flex flex-col gap-3 relative overflow-hidden bg-gradient-to-b from-[#FFFFFF] to-[#FAF9F6]">
+
+      <!-- 舞台标题与图例 -->
+      <div class="flex flex-wrap items-center justify-between gap-2 border-b border-[#E5E4DC]/80 pb-2.5">
+        <div class="flex items-center gap-2">
+          <span class="w-2.5 h-2.5 rounded-full bg-amber-500"></span>
+          <h2 class="text-sm font-bold text-stone-900 tracking-tight flex items-center gap-2 flex-wrap">
+            主舞台 · 单行原序列
+            <span class="text-[11px] font-mono font-semibold px-2 py-0.5 rounded bg-stone-100 text-stone-600 border border-stone-200">
+              单行动态裂变 + 伴随式悬浮托盘 · 不做树状展开
+            </span>
+          </h2>
+        </div>
+        <div class="flex flex-wrap items-center gap-1.5 text-[10px] font-mono text-stone-600">
+          <span class="legend-item"><span class="w-2.5 h-2.5 rounded-sm bg-white border-[1.5px] border-stone-400"></span> 待命元素</span>
+          <span class="legend-item"><span class="w-2.5 h-2.5 rounded-sm bg-white border-2 border-blue-600"></span> 左排头 L</span>
+          <span class="legend-item"><span class="w-2.5 h-2.5 rounded-sm bg-white border-2 border-amber-500"></span> 右排头 R</span>
+          <span class="legend-item"><span class="w-2.5 h-2.5 rounded-sm bg-white border-[1.5px] border-dashed border-stone-400"></span> 托盘槽位 / 已出列空槽</span>
+          <span class="legend-item"><span class="w-2.5 h-2.5 rounded-sm bg-emerald-50 border-[1.5px] border-emerald-600"></span> 有序</span>
+        </div>
+      </div>
+
+      <!-- 舞台画布 -->
+      <div id="stage-outer" class="relative w-full overflow-hidden flex justify-center" style="height: 360px;">
+        <div id="stage-scaler" class="relative mx-auto" style="width: 836px; height: 360px;">
+
+          <!-- 段聚焦外边框（左右两段高亮聚焦框） -->
+          <div id="bracket-l" class="ms-bracket ms-bracket-l">
+            <span class="ms-bracket-tag" id="bracket-l-tag"></span>
+          </div>
+          <div id="bracket-r" class="ms-bracket ms-bracket-r">
+            <span class="ms-bracket-tag" id="bracket-r-tag"></span>
+          </div>
+
+          <!-- 悬浮托盘（拆分阶段完全隐形） -->
+          <div id="tray-group" class="absolute left-0 top-0 w-full h-full pointer-events-none" style="opacity: 0;">
+            <div id="tray-rect" class="ms-tray-rect"></div>
+            <div id="tray-label" class="ms-tray-label"></div>
+            <div id="tray-slots" class="absolute left-0 top-0"></div>
+          </div>
+
+          <!-- 已出列空槽层 -->
+          <div id="holes-host" class="absolute left-0 top-0 w-full h-full pointer-events-none"></div>
+
+          <!-- 单行卡片层 -->
+          <div id="cards-host" class="absolute left-0 top-0 w-full h-full"></div>
+
+          <!-- 双指针光标层 -->
+          <div id="ptr-l" class="ms-pointer" style="opacity: 0;">
+            <div class="ms-ptr-chip ms-ptr-chip-l">L 排头</div>
+            <div class="ms-ptr-arrow text-blue-600">▼</div>
+          </div>
+          <div id="ptr-r" class="ms-pointer" style="opacity: 0;">
+            <div class="ms-ptr-chip ms-ptr-chip-r">R 排头</div>
+            <div class="ms-ptr-arrow text-amber-500">▼</div>
+          </div>
+
+          <!-- 排头对决判定气泡 -->
+          <div id="cmp-bubble" class="ms-bubble" style="opacity: 0;"></div>
+
+          <!-- 切分虚线光标 / 一次性特效层 -->
+          <div id="fx-host" class="absolute left-0 top-0 w-full h-full pointer-events-none"></div>
+        </div>
+      </div>
+
+      <!-- 底部微提示 -->
+      <div class="border-t border-[#E5E4DC]/60 pt-2 flex flex-wrap items-center justify-between gap-2 text-[11px] font-mono text-stone-400">
+        <div id="stage-hint">裂变：切分虚线光标落刀 → 弹性拉缝逐级细分 ｜ 归并：托盘按需浮现 → 排头兵对决 → 电梯回填缝合</div>
+        <div id="status-live-hint" class="text-amber-800 font-medium">就绪 · 悬浮托盘在切分完毕前保持隐形</div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ========================================================================= -->
+  <!-- 极简页脚 FOOTER                                                          -->
+  <!-- ========================================================================= -->
+  <footer class="border-t border-[#E5E4DC] bg-[#FAF9F5] py-3 text-center text-xs font-mono text-stone-400 mt-6">
+    LearningAnimation · 归并排序单行裂变与悬浮托盘归并 · 计算机考研 408 核心考点专题
+  </footer>
+
+  <!-- 核心逻辑脚本 -->
+  <script src="app.js"></script>
+</body>
+</html>

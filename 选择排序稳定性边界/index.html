@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>简单选择排序 · 稳定性边界特写 · 交互教学系统</title>
+
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['-apple-system', 'BlinkMacSystemFont', 'SF Pro Display', 'Segoe UI', 'Roboto', 'sans-serif'],
+            mono: ['JetBrains Mono', 'Fira Code', 'SF Mono', 'monospace'],
+            serif: ['Newsreader', 'Georgia', 'serif']
+          },
+          colors: {
+            paper: '#FAF9F5',
+            card: '#FFFFFF',
+            borderSubtle: '#E5E4DC',
+            graphite: '#2B2D42',
+            emerald2: '#2EC4B6',
+            amber2: '#FF9F1C',
+            crimson2: '#E71D36'
+          }
+        }
+      }
+    }
+  </script>
+
+  <!-- GSAP CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+
+  <!-- Google Fonts -->
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Newsreader:ital,opsz,wght@0,6..72,500;0,6..72,600;1,6..72,400&display=swap">
+
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="min-h-screen bg-[#FAF9F5] text-stone-900 antialiased selection:bg-amber-100 selection:text-amber-900 flex flex-col overflow-x-hidden">
+
+  <!-- ========================================================================= -->
+  <!-- 极简顶栏 HEADER                                                          -->
+  <!-- ========================================================================= -->
+  <header class="border-b border-[#E5E4DC] bg-[#FAF9F5]/90 backdrop-blur sticky top-0 z-40 px-4 md:px-6 py-2.5">
+    <div class="max-w-7xl mx-auto flex items-center justify-between gap-3">
+      <div class="flex items-center gap-3 min-w-0">
+        <a href="../index.html#ds" class="w-7 h-7 rounded-lg bg-stone-900 text-white flex items-center justify-center font-mono font-bold text-xs hover:bg-stone-800 transition-colors shadow-sm flex-shrink-0" title="返回数据结构展厅">
+          ←
+        </a>
+        <div class="min-w-0">
+          <h1 class="text-base font-bold tracking-tight text-stone-900 flex items-center gap-2 truncate">
+            简单选择排序 · 稳定性边界特写
+            <span class="text-xs font-mono font-normal px-2 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200 whitespace-nowrap hidden sm:inline">
+              408 核心考点 · 只记索引 · 趟末单次交换
+            </span>
+          </h1>
+        </div>
+      </div>
+
+      <div class="flex items-center gap-2 flex-shrink-0">
+        <div class="bg-stone-100 p-0.5 rounded-lg border border-stone-200 flex items-center text-xs font-mono">
+          <span class="px-2.5 py-1 rounded-md font-semibold text-stone-700 bg-white shadow-sm whitespace-nowrap"> <span id="case-badge">不稳定边界 [5, 8, 5, 2]</span> </span>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- ========================================================================= -->
+  <!-- 主体工作区 MAIN                                                          -->
+  <!-- ========================================================================= -->
+  <main class="flex-1 max-w-7xl w-full mx-auto px-4 md:px-6 py-4 flex flex-col gap-4">
+
+    <!-- 控制面板 -->
+    <div class="card-panel p-3.5 flex flex-wrap items-center justify-between gap-3">
+      <div class="flex flex-wrap items-center gap-2">
+        <button id="btn-reset" class="ctl-btn" title="重置回初始状态">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+          重置
+        </button>
+        <button id="btn-prev" class="ctl-btn" title="上一步">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path></svg>
+          上一步
+        </button>
+        <button id="btn-play" class="btn-primary" title="自动播放/暂停">
+          <span id="play-icon">▶</span>
+          <span id="play-label">自动播放</span>
+        </button>
+        <button id="btn-next" class="ctl-btn font-semibold text-stone-900 border-stone-400" title="执行下一步">
+          单步执行
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
+        </button>
+      </div>
+
+      <div class="flex items-center gap-2 text-xs font-mono">
+        <span class="text-stone-500 hidden xl:inline">演示用例:</span>
+        <select id="preset-select" class="text-xs font-mono bg-white border border-[#D6D3CD] rounded-md px-2 py-1.5 text-stone-700 outline-none focus:border-stone-500 cursor-pointer max-w-[260px]">
+          <option value="edge">🎯 不稳定边界 [5, 8, 5, 2]</option>
+          <option value="dup">🔁 同值前置 [5, 5, 3, 8]</option>
+          <option value="classic">📘 408教材经典 [49,38,65,97,76,13,27]</option>
+          <option value="sorted">✅ 完全有序·零交换 [10..70]</option>
+          <option value="desc">🔻 完全逆序·最坏交换 [70..10]</option>
+          <option value="custom">✏️ 自定义输入…</option>
+        </select>
+        <span class="hidden md:inline text-[11px] text-stone-400">切换用例将重置时间线</span>
+      </div>
+
+      <div class="flex items-center gap-3 text-xs font-mono">
+        <div class="flex items-center gap-1 bg-stone-100 p-1 rounded-lg border border-stone-200">
+          <span class="text-stone-500 pl-1">速率:</span>
+          <button class="speed-btn" data-speed="0.5">0.5x</button>
+          <button class="speed-btn active" data-speed="1">1.0x</button>
+          <button class="speed-btn" data-speed="1.5">1.5x</button>
+          <button class="speed-btn" data-speed="2">2.0x</button>
+        </div>
+        <div class="hidden lg:flex items-center gap-1 bg-stone-50 px-2.5 py-1 rounded-md border border-stone-200 text-stone-600">
+          <span class="text-stone-400">状态:</span>
+          <span id="phase-badge" class="font-bold text-amber-700">Phase 0 · 初始化</span>
+        </div>
+      </div>
+
+      <div class="flex items-center gap-2 text-xs font-mono text-stone-500">
+        <span class="hidden md:inline">快捷键: [Space] 播放/暂停 &nbsp;|&nbsp; [&rarr;] 单步 &nbsp;|&nbsp; [&larr;] 上步 &nbsp;|&nbsp; [R] 重置</span>
+      </div>
+    </div>
+
+    <!-- 自定义数据输入栏（默认隐藏） -->
+    <div id="custom-input-bar" style="display:none" class="card-panel p-3 bg-amber-50/60 border-amber-200 flex flex-wrap items-center justify-between gap-2">
+      <div class="flex items-center gap-2 text-xs flex-wrap">
+        <span class="font-bold text-amber-900 font-mono whitespace-nowrap">自定义数组:</span>
+        <input id="input-array" type="text" value="5, 8, 5, 2"
+          class="border border-stone-300 rounded px-2 py-1 font-mono text-xs w-56 md:w-72 outline-none focus:border-amber-600 bg-white"
+          placeholder="英文逗号分隔 3~8 个整数，允许重复值">
+        <button id="btn-apply-custom" class="btn-primary text-xs py-1 px-3">应用数据</button>
+        <button id="btn-cancel-custom" class="ctl-btn text-xs py-1 px-2.5">取消</button>
+      </div>
+      <span id="custom-hint" class="text-[11px] font-mono text-stone-500">支持 3 ~ 8 个整数，允许重复值（同值元素自动打 A/B/C 身份标签）</span>
+    </div>
+
+    <!-- 步骤进度指示条 -->
+    <div class="w-full bg-white rounded-lg p-2 border border-[#E5E4DC] flex flex-col gap-1.5 shadow-2xs">
+      <div class="flex items-center justify-between gap-3 text-xs font-mono text-stone-500">
+        <div class="flex items-center gap-2 min-w-0">
+          <span class="font-semibold text-stone-800 whitespace-nowrap" id="step-counter">步骤 0 / 0</span>
+          <span class="text-stone-300 hidden sm:inline">|</span>
+          <span id="step-description" class="text-stone-700 truncate">就绪：点击“单步执行”或“自动播放”观察选择排序的轻量化移动机制</span>
+        </div>
+        <div class="text-[11px] text-stone-400 hidden lg:block whitespace-nowrap">Timeline</div>
+      </div>
+      <div class="w-full bg-stone-100 h-2 rounded-full overflow-hidden relative cursor-pointer" id="progress-bar-container">
+        <div id="progress-bar-fill" class="bg-gradient-to-r from-[#2B2D42] via-[#FF9F1C] to-[#2EC4B6] h-full w-0 transition-all duration-200"></div>
+      </div>
+    </div>
+
+    <!-- ========================================================================= -->
+    <!-- 分层仪表盘 DASHBOARD (16:9 三段结构)                                      -->
+    <!-- ========================================================================= -->
+    <section id="dashboard" class="card-panel overflow-hidden">
+
+      <!-- ===== 顶部状态与指标面板 (15%) ===== -->
+      <div class="border-b border-[#E5E4DC] bg-gradient-to-r from-[#FAF9F5] to-white px-4 py-3">
+        <div class="flex items-center justify-between gap-3 mb-2">
+          <div class="flex items-center gap-2 text-xs font-mono">
+            <span class="w-2.5 h-2.5 rounded-full bg-[#2B2D42]"></span>
+            <span class="font-bold text-stone-900 tracking-tight">状态与指标面板 (State & Metrics)</span>
+          </div>
+          <div class="flex flex-wrap items-center gap-2 text-[10px] font-mono text-stone-600">
+            <span class="legend-item"><span class="w-2.5 h-2.5 rounded-sm bg-[#2B2D42] border border-[#1E2033]"></span> 待排序区</span>
+            <span class="legend-item"><span class="w-2.5 h-2.5 rounded-sm bg-[#2EC4B6] border border-[#17A99C]"></span> 有序区</span>
+            <span class="legend-item"><span class="w-2.5 h-2.5 rounded-sm bg-[#FF9F1C] border border-[#E08A00]"></span> 扫描光标 j</span>
+            <span class="legend-item"><span class="w-2.5 h-2.5 rounded-sm bg-[#E71D36] border border-[#B7142B]"></span> minIndex</span>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-3 md:grid-cols-6 gap-2">
+          <div class="hud-tile tint-unsorted">
+            <span class="hud-label">外层轮次 i</span>
+            <span class="hud-value" id="hud-i">—</span>
+          </div>
+          <div class="hud-tile tint-scan">
+            <span class="hud-label">扫描指针 j</span>
+            <span class="hud-value" id="hud-j">—</span>
+          </div>
+          <div class="hud-tile tint-min">
+            <span class="hud-label">minIndex（无序区最小值索引）</span>
+            <span class="hud-value" id="hud-min">—</span>
+          </div>
+          <div class="hud-tile tint-min">
+            <span class="hud-label">A[minIndex] 当前值</span>
+            <span class="hud-value" id="hud-minval">—</span>
+          </div>
+          <div class="hud-tile tint-scan">
+            <span class="hud-label">Comp Count 比较计数</span>
+            <span class="hud-value" id="hud-comp">0</span>
+          </div>
+          <div class="hud-tile tint-sorted">
+            <span class="hud-label">Swap Count 交换计数</span>
+            <span class="hud-value" id="hud-swap">0</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== 主舞台 (65%) ===== -->
+      <div class="flex-1 px-4 md:px-6 py-4 flex flex-col justify-center relative overflow-hidden bg-gradient-to-b from-white to-[#FAF9F6]">
+        <div class="flex items-center justify-between mb-1 text-[11px] font-mono text-stone-400">
+          <span>主舞台 · 数组卡片行 <span class="text-stone-600 font-semibold" id="stage-range">A[0..3]</span></span>
+          <span id="stage-hint">虚线门左侧 = 有序区（已固化） · 右侧 = 无序区（待扫描）</span>
+        </div>
+
+        <div id="stage-canvas">
+          <!-- 数组卡片行 -->
+          <div id="array-row">
+            <!-- 由 JS 动态渲染 4 个 slot -->
+          </div>
+
+          <!-- 扫描光标 j 轨道（占位高度，光标本体在覆盖层） -->
+          <div id="ptr-row"></div>
+
+          <!-- 区域标签 -->
+          <div id="region-bar">
+            <div class="region-lbl" id="region-ordered">⟵ 有序区</div>
+            <div class="region-lbl" id="region-unsorted">无序区（待扫描） ⟶</div>
+          </div>
+
+          <!-- 覆盖层：虚线门 / minIndex 绯红框 / 比较气泡 -->
+          <div id="overlay" class="absolute inset-0 pointer-events-none">
+            <div id="compare-chip"></div>
+            <div id="j-cursor">
+              <div class="j-arrow">▲</div>
+              <div class="j-badge">j = <span id="j-badge-idx">1</span></div>
+              <div class="j-hint">扫描光标</div>
+            </div>
+            <div id="gate"><span class="gate-cap"></span></div>
+            <div id="min-frame"><span class="min-flag">minIndex</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== Phase 3 复杂度定格面板 ===== -->
+      <div id="final-stats">
+        <div class="flex flex-wrap items-center gap-2 text-xs">
+          <span class="font-mono font-bold text-stone-800 mr-1">复杂度收敛定格：</span>
+          <div class="stat-chip"><span class="sc-label">比较次数 Comp</span><span class="sc-value" id="stat-comp">n(n−1)/2 = 6</span></div>
+          <div class="stat-chip"><span class="sc-label">交换次数 Swap</span><span class="sc-value" id="stat-swap">3 ≤ n−1</span></div>
+          <div class="stat-chip"><span class="sc-label">时间复杂度</span><span class="sc-value">O(n²) 恒定</span></div>
+          <div class="stat-chip"><span class="sc-label">空间复杂度</span><span class="sc-value">O(1) 原地</span></div>
+          <div class="stat-chip warn-chip"><span class="sc-label">稳定性 Stability</span><span class="sc-value" id="stat-stab">✗ 不稳定</span></div>
+          <div class="stat-chip warn-chip"><span class="sc-label">最终序列</span><span class="sc-value" id="stat-final">[2, 5_B, 5_A, 8]</span></div>
+        </div>
+      </div>
+
+      <!-- ===== 考点高亮浮层：底部终端 (20%) ===== -->
+      <div id="terminal-strip">
+        <span class="warn-dot" id="warn-dot" style="display:none"></span>
+        <span id="terminal-prompt">›</span>
+        <span id="terminal-text">初始化中…</span>
+      </div>
+    </section>
+
+    <!-- ========================================================================= -->
+    <!-- 伪代码追踪 + 考点剖析                                                     -->
+    <!-- ========================================================================= -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+
+      <!-- 伪代码逐行追踪 -->
+      <div class="card-panel p-4 flex flex-col gap-2">
+        <div class="flex items-center justify-between border-b border-[#E5E4DC] pb-2">
+          <div class="flex items-center gap-2">
+            <span class="w-2 h-2 rounded-full bg-[#2B2D42]"></span>
+            <h4 class="text-xs font-bold text-stone-900 tracking-tight font-mono">
+              选择排序代码逐行追踪 (C Implementation)
+            </h4>
+          </div>
+          <span class="text-[10px] font-mono text-stone-400">内层循环零交换，仅更新索引</span>
+        </div>
+
+        <div class="bg-stone-900 text-stone-200 p-3 rounded-lg font-mono text-xs overflow-x-auto leading-5" id="code-block">
+          <div id="code-1" class="code-line"><span class="text-stone-500 select-none mr-2">01</span><span class="text-indigo-400">void</span> SelectSort(<span class="text-indigo-400">int</span> A[], <span class="text-indigo-400">int</span> n) {</div>
+          <div id="code-2" class="code-line"><span class="text-stone-500 select-none mr-2">02</span>    <span class="text-amber-400">for</span> (<span class="text-indigo-400">int</span> i = 0; i &lt; n - 1; i++) {</div>
+          <div id="code-3" class="code-line"><span class="text-stone-500 select-none mr-2">03</span>        <span class="text-indigo-400">int</span> minIndex = i;      <span class="text-stone-500">// 只记索引，不搬元素</span></div>
+          <div id="code-4" class="code-line"><span class="text-stone-500 select-none mr-2">04</span>        <span class="text-amber-400">for</span> (<span class="text-indigo-400">int</span> j = i + 1; j &lt; n; j++)</div>
+          <div id="code-5" class="code-line"><span class="text-stone-500 select-none mr-2">05</span>            <span class="text-amber-400">if</span> (A[j] &lt; A[minIndex])  <span class="text-stone-500">// 严格小于</span></div>
+          <div id="code-6" class="code-line"><span class="text-stone-500 select-none mr-2">06</span>                minIndex = j;    <span class="text-stone-500">// 指针平移，代价 O(1)</span></div>
+          <div id="code-7" class="code-line"><span class="text-stone-500 select-none mr-2">07</span>        <span class="text-amber-400">if</span> (minIndex != i)      <span class="text-stone-500">// 自交换规避</span></div>
+          <div id="code-8" class="code-line"><span class="text-stone-500 select-none mr-2">08</span>            swap(A[i], A[minIndex]); <span class="text-stone-500">// 趟末唯一交换</span></div>
+          <div id="code-9" class="code-line"><span class="text-stone-500 select-none mr-2">09</span>    }  <span class="text-stone-500">// 该位固化为有序区，边界右移</span></div>
+          <div id="code-10" class="code-line"><span class="text-stone-500 select-none mr-2">10</span>}</div>
+        </div>
+      </div>
+
+      <!-- 408 考点剖析 -->
+      <div class="card-panel p-4 flex flex-col gap-2.5">
+        <div class="flex items-center justify-between border-b border-[#E5E4DC] pb-2">
+          <div class="flex items-center gap-2">
+            <span class="w-2 h-2 rounded-full bg-[#E71D36]"></span>
+            <h4 class="text-xs font-bold text-stone-900 tracking-tight font-mono">
+              408 考点深度精炼 (Selection Sort)
+            </h4>
+          </div>
+          <span class="text-[10px] font-mono text-stone-400">轻量化移动 · 不稳定性成因</span>
+        </div>
+
+        <div class="space-y-2">
+          <div class="callout co-tip">
+            <div class="callout-title">◆ 轻量化移动机制：只记索引，趟末单次交换</div>
+            内层扫描过程中<strong>零交换、零搬移</strong>，仅做“比较 → 刷新 minIndex 指针”，每趟至多在末尾触发 <strong>1 次 swap</strong>。n 趟总交换次数 ≤ n−1，本例严格为 <span class="font-mono font-bold">3</span> 次。
+          </div>
+          <div class="callout co-warn">
+            <div class="callout-title">◆ 比较次数恒定：n(n−1)/2</div>
+            无论序列是否有序，内层 j 都<strong>必须扫到底</strong>，比较次数恒为 <span class="font-mono font-bold">6 = 4×3/2</span> 次 —— 这也是选择排序对“已有序输入”无法加速的原因，时间复杂度始终 O(n²)。
+          </div>
+          <div class="callout co-danger">
+            <div class="callout-title">◆ 不稳定性根因：远距离跨越交换</div>
+            首趟把 <span class="font-mono font-bold">5_A</span> 从下标 0 一步换到下标 3，<strong>跨过了下标 2 的 5_B</strong>，原相对次序 5_A…5_B 突变为 5_B…5_A —— 这正是“选择排序是不稳定排序”的经典边界场景。
+          </div>
+          <div class="callout co-note">
+            <div class="callout-title">◆ 自交换规避与时空复杂度</div>
+            当某趟扫完发现 <span class="font-mono">minIndex == i</span>（如末趟单元素）时直接跳过 swap，避免无意义自交换；整体<strong>原地排序</strong>，空间复杂度 O(1)。
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </main>
+
+  <!-- ========================================================================= -->
+  <!-- 极简页脚 FOOTER                                                          -->
+  <!-- ========================================================================= -->
+  <footer class="border-t border-[#E5E4DC] bg-[#FAF9F5] py-3 text-center text-xs font-mono text-stone-400 mt-6">
+    LearningAnimation · 简单选择排序轻量化移动机制与不稳定性边界可视化 · 计算机考研 408 核心考点专题
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>

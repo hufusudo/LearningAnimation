@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>堆排序 · 双视角映射与下滤三步曲 · 交互教学系统</title>
+
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['-apple-system', 'BlinkMacSystemFont', 'SF Pro Display', 'Segoe UI', 'Roboto', 'sans-serif'],
+            mono: ['JetBrains Mono', 'Fira Code', 'SF Mono', 'monospace'],
+            serif: ['Newsreader', 'Georgia', 'serif']
+          }
+        }
+      }
+    }
+  </script>
+
+  <!-- GSAP CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+
+  <!-- KaTeX CDN -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/contrib/auto-render.min.js"></script>
+
+  <!-- Google Fonts -->
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Newsreader:ital,opsz,wght@0,6..72,500;0,6..72,600;1,6..72,400&display=swap">
+
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="min-h-screen bg-[#FAF9F5] text-stone-900 antialiased selection:bg-amber-100 selection:text-amber-900 flex flex-col overflow-x-hidden">
+
+  <!-- ========================================================================= -->
+  <!-- 极简顶栏 HEADER                                                          -->
+  <!-- ========================================================================= -->
+  <header class="border-b border-[#E5E4DC] bg-[#FAF9F5]/90 backdrop-blur sticky top-0 z-40 px-4 md:px-6 py-2.5">
+    <div class="max-w-7xl mx-auto flex items-center justify-between gap-3">
+      <div class="flex items-center gap-3 min-w-0">
+        <a href="../index.html#ds" class="w-7 h-7 rounded-lg bg-stone-900 text-white flex items-center justify-center font-mono font-bold text-xs hover:bg-stone-800 transition-colors shadow-sm flex-shrink-0" title="返回数据结构展厅">
+          ←
+        </a>
+        <div class="min-w-0">
+          <h1 class="text-base font-bold tracking-tight text-stone-900 flex items-center gap-2 truncate">
+            堆排序 · 双视角映射与下滤三步曲
+            <span class="text-xs font-mono font-normal px-2 py-0.5 rounded bg-blue-50 text-blue-800 border border-blue-200 whitespace-nowrap hidden sm:inline">
+              408 核心考点 · 建堆 → 出堆 → 重整
+            </span>
+          </h1>
+        </div>
+      </div>
+
+      <div class="flex items-center gap-2 flex-shrink-0">
+        <div class="bg-stone-100 p-0.5 rounded-lg border border-stone-200 flex items-center text-xs font-mono">
+          <span class="px-2.5 py-1 rounded-md font-semibold text-stone-700 bg-white shadow-sm whitespace-nowrap" id="data-badge">
+            MAX · [49, 38, 65, 97, 76, 13, 27]
+          </span>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- ========================================================================= -->
+  <!-- 主体工作区 MAIN                                                          -->
+  <!-- ========================================================================= -->
+  <main class="flex-1 max-w-7xl w-full mx-auto px-4 md:px-6 py-4 flex flex-col gap-4">
+
+    <!-- ============================================================ -->
+    <!-- 顶部控制区：模式胶囊 + 播放控制栏 + 速度滑块 + 阶段标签        -->
+    <!-- ============================================================ -->
+    <div class="card-panel p-3 flex flex-wrap items-center justify-between gap-3">
+      <!-- 模式切换胶囊 -->
+      <div class="mode-capsule" id="mode-capsule">
+        <button id="mode-max" class="mode-btn active" title="大根堆：堆顶最大，依次出堆得到升序序列">
+          <span class="mode-dot dot-max"></span>
+          大根堆（升序）
+        </button>
+        <button id="mode-min" class="mode-btn" title="小根堆：堆顶最小，依次出堆得到降序序列">
+          <span class="mode-dot dot-min"></span>
+          小根堆（降序）
+        </button>
+      </div>
+
+      <!-- 播放控制栏 -->
+      <div class="flex flex-wrap items-center gap-2">
+        <button id="btn-reset" class="ctl-btn" title="重新开始（快捷键 R）">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+          重新开始
+        </button>
+        <button id="btn-prev" class="ctl-btn" title="单步后退（←）">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path></svg>
+          后退
+        </button>
+        <button id="btn-play" class="btn-primary" title="自动播放 / 暂停（Space）">
+          <span id="play-icon">▶</span>
+          <span id="play-label">播放</span>
+        </button>
+        <button id="btn-next" class="ctl-btn font-semibold text-stone-900 border-stone-400" title="单步前进（→）">
+          前进
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
+        </button>
+        <button id="btn-random" class="ctl-btn" title="随机生成一组新数据">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15M15 4v5h5m-5 0a8 8 0 0115.357 2"></path></svg>
+          随机生成
+        </button>
+      </div>
+
+      <!-- 速度滑块 + 阶段标签 -->
+      <div class="flex items-center gap-3">
+        <div class="speed-box">
+          <span class="text-stone-500 pl-1">速度</span>
+          <input type="range" id="speed-slider" class="taste-slider" min="0.5" max="2" step="0.1" value="1" aria-label="播放速度">
+          <span id="speed-value" class="speed-readout">1.0x</span>
+        </div>
+        <div class="phase-box">
+          <span class="pulse-led-emerald" id="phase-led"></span>
+          <span id="phase-badge">阶段 1: 自底向上建堆</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 步骤进度指示条 -->
+    <div class="w-full bg-white rounded-lg p-2.5 border border-[#E5E4DC] flex flex-col gap-1.5 shadow-2xs">
+      <div class="flex items-center justify-between gap-3 text-xs font-mono text-stone-500">
+        <div class="flex items-center gap-2 min-w-0">
+          <span class="font-semibold text-stone-800 whitespace-nowrap" id="step-counter">步骤 0 / 0</span>
+          <span class="text-stone-300 hidden sm:inline">|</span>
+          <span id="step-description" class="text-stone-700 truncate">就绪：点击“前进”或“播放”观察建堆与出堆全过程</span>
+        </div>
+        <div class="text-[11px] text-stone-400 hidden lg:block whitespace-nowrap">Timeline Controller</div>
+      </div>
+      <div class="w-full bg-stone-100 h-2 rounded-full overflow-hidden relative cursor-pointer" id="progress-bar-container">
+        <div id="progress-bar-fill" class="progress-fill h-full w-0"></div>
+      </div>
+    </div>
+
+    <!-- ========================================================================= -->
+    <!-- 核心舞台：上视图（完全二叉树）+ 下视图（一维数组）                          -->
+    <!-- ========================================================================= -->
+    <section id="dashboard" class="card-panel overflow-hidden">
+
+      <!-- 仪表盘顶栏：状态 HUD -->
+      <div class="dash-head">
+        <div class="flex items-center gap-2 text-xs font-mono">
+          <span class="w-2.5 h-2.5 rounded-full bg-blue-600"></span>
+          <span class="font-bold text-stone-900 tracking-tight">双视角映射仪表盘 (Dual-View Mapping Console)</span>
+        </div>
+        <div class="grid grid-cols-3 sm:grid-cols-6 gap-2 w-full lg:w-auto">
+          <div class="hud-tile"><span class="hud-label">堆型模式</span><span class="hud-value" id="hud-mode">MAX</span></div>
+          <div class="hud-tile"><span class="hud-label">活动堆 h</span><span class="hud-value" id="hud-heap">7</span></div>
+          <div class="hud-tile"><span class="hud-label">已锁定</span><span class="hud-value" id="hud-locked">0</span></div>
+          <div class="hud-tile"><span class="hud-label">比较 Comp</span><span class="hud-value" id="hud-comp">0</span></div>
+          <div class="hud-tile"><span class="hud-label">交换 Swap</span><span class="hud-value" id="hud-swap">0</span></div>
+          <div class="hud-tile"><span class="hud-label">焦点下标</span><span class="hud-value" id="hud-focus">—</span></div>
+        </div>
+      </div>
+
+      <!-- ===== 上方视图：完全二叉树语义层 ===== -->
+      <div class="view-head">
+        <div class="flex items-center gap-2 min-w-0">
+          <span class="view-tag tag-tree">上视图</span>
+          <span class="font-semibold text-stone-900">完全二叉树语义层</span>
+          <span class="text-stone-400 hidden md:inline">节点 = 数值 · 右下角标 = 数组下标</span>
+        </div>
+        <div class="legend-row">
+          <span class="lg-item"><i class="lg-dot" style="background:#2563EB"></i>下滤连线</span>
+          <span class="lg-item"><i class="lg-dot" style="background:#D97706"></i>擂主 / 需交换</span>
+          <span class="lg-item"><i class="lg-dot" style="background:#059669"></i>满足堆性质</span>
+          <span class="lg-item"><i class="lg-dash"></i>非叶子 / 叶子分界</span>
+        </div>
+      </div>
+
+      <div id="tree-stage">
+        <svg id="tree-svg" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <marker id="arrow-head" markerWidth="9" markerHeight="9" refX="6.4" refY="3.2" orient="auto">
+              <path d="M0,0 L7,3.2 L0,6.4 z" fill="#D97706"></path>
+            </marker>
+            <marker id="arrow-head-rev" markerWidth="9" markerHeight="9" refX="1" refY="3.2" orient="auto">
+              <path d="M7,0 L0,3.2 L7,6.4 z" fill="#D97706"></path>
+            </marker>
+          </defs>
+          <g id="edges-group"></g>
+          <path id="boundary-path" class="boundary-path"></path>
+          <path id="guide-path" class="guide-path" marker-end="url(#arrow-head)"></path>
+        </svg>
+
+        <div id="vacant-root"><span>堆顶空缺</span></div>
+        <div id="tree-empty">完全二叉树已全部出堆 · 数值全部归位下方数组</div>
+        <div id="focus-ring"></div>
+        <div id="extrema-badge">MAX</div>
+        <div id="champ-badge">擂主</div>
+        <div id="judge-bubble"><span id="judge-text"></span><span id="judge-verdict"></span></div>
+        <div id="boundary-tag">非叶子 / 叶子分界 · 建堆起点 <b id="boundary-i">i = 2</b></div>
+        <div id="tree-nodes"></div>
+      </div>
+
+      <!-- ===== 下方视图：一维数组物理层 ===== -->
+      <div class="view-head border-t border-[#E5E4DC]">
+        <div class="flex items-center gap-2 min-w-0">
+          <span class="view-tag tag-array">下视图</span>
+          <span class="font-semibold text-stone-900">一维数组物理层</span>
+          <span class="text-stone-400 hidden md:inline">与树节点一一对应 · 悬停即双向联动高亮</span>
+        </div>
+        <div class="legend-row">
+          <span class="lg-item"><i class="lg-dot" style="background:#FDE68A;border:1px solid #D97706"></i>动态活动堆区</span>
+          <span class="lg-item"><i class="lg-dot" style="background:#D1FAE5;border:1px solid #059669"></i>已归位锁定区</span>
+        </div>
+      </div>
+
+      <div id="array-stage">
+        <div id="zone-active"><span class="zone-label">动态活动堆区</span></div>
+        <div id="zone-locked"><span class="zone-label">已归位锁定区</span></div>
+        <div id="zone-divider"></div>
+        <div id="array-slots"></div>
+        <div id="array-cells"></div>
+      </div>
+
+      <!-- 底部终端语义条 -->
+      <div id="terminal-strip">
+        <span class="pulse-led-amber" id="terminal-led"></span>
+        <span id="terminal-prompt">›</span>
+        <span id="terminal-text">初始化就绪：装载 7 元素测试序列。</span>
+      </div>
+    </section>
+
+    <!-- ========================================================================= -->
+    <!-- 底部：伪代码逐行跟踪 + 408 考点                                            -->
+    <!-- ========================================================================= -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+
+      <!-- 左侧：堆排序逐行伪代码跟踪 -->
+      <div class="card-panel p-4 flex flex-col gap-2">
+        <div class="flex items-center justify-between border-b border-[#E5E4DC] pb-2">
+          <div class="flex items-center gap-2">
+            <span class="w-2 h-2 rounded-full bg-blue-600"></span>
+            <h4 class="text-xs font-bold text-stone-900 tracking-tight font-mono">
+              堆排序逐行伪代码跟踪 (Heap Sort Trace)
+            </h4>
+          </div>
+          <span class="text-[10px] font-mono text-stone-400">三步曲 · 弧线互换</span>
+        </div>
+
+        <div class="bg-stone-900 text-stone-200 p-3 rounded-lg font-mono text-xs overflow-x-auto leading-5" id="code-block">
+          <div id="code-1" class="code-line"><span class="text-stone-500 select-none mr-2">01</span><span class="text-indigo-400">void</span> HeapSort(<span class="text-indigo-400">int</span> A[], <span class="text-indigo-400">int</span> n) {</div>
+          <div id="code-2" class="code-line"><span class="text-stone-500 select-none mr-2">02</span>    <span class="text-amber-400">for</span> (<span class="text-indigo-400">int</span> i = n/<span class="text-emerald-400">2</span> - <span class="text-emerald-400">1</span>; i &gt;= <span class="text-emerald-400">0</span>; i--)   <span class="text-stone-400">// 阶段1 自底向上</span></div>
+          <div id="code-3" class="code-line"><span class="text-stone-500 select-none mr-2">03</span>        siftDown(A, i, n);                  <span class="text-stone-400">// 叶子不主动下滤</span></div>
+          <div id="code-4" class="code-line"><span class="text-stone-500 select-none mr-2">04</span>    <span class="text-amber-400">for</span> (<span class="text-indigo-400">int</span> end = n - <span class="text-emerald-400">1</span>; end &gt; <span class="text-emerald-400">0</span>; end--) {  <span class="text-stone-400">// 阶段2</span></div>
+          <div id="code-5" class="code-line"><span class="text-stone-500 select-none mr-2">05</span>        swap(A[<span class="text-emerald-400">0</span>], A[end]);                <span class="text-stone-400">// 堆顶出列 + 末尾让位</span></div>
+          <div id="code-6" class="code-line"><span class="text-stone-500 select-none mr-2">06</span>        siftDown(A, <span class="text-emerald-400">0</span>, end);              <span class="text-stone-400">// 末端替补 + 重整下滤</span></div>
+          <div id="code-7" class="code-line"><span class="text-stone-500 select-none mr-2">07</span>    }</div>
+          <div id="code-8" class="code-line"><span class="text-stone-500 select-none mr-2">08</span>}</div>
+          <div id="code-9" class="code-line"><span class="text-stone-500 select-none mr-2">09</span><span class="text-indigo-400">void</span> siftDown(<span class="text-indigo-400">int</span> A[], <span class="text-indigo-400">int</span> i, <span class="text-indigo-400">int</span> size) {</div>
+          <div id="code-10" class="code-line"><span class="text-stone-500 select-none mr-2">10</span>    <span class="text-amber-400">while</span> (<span class="text-emerald-400">2</span>*i + <span class="text-emerald-400">1</span> &lt; size) {</div>
+          <div id="code-11" class="code-line"><span class="text-stone-500 select-none mr-2">11</span>        c = betterChild(A, i, size);      <span class="text-stone-400">// 第 1 拍 挑擂主</span></div>
+          <div id="code-12" class="code-line"><span class="text-stone-500 select-none mr-2">12</span>        <span class="text-amber-400">if</span> (!violates(A, i, c)) <span class="text-amber-400">break</span>;   <span class="text-stone-400">// 第 2 拍 判胜负</span></div>
+          <div id="code-13" class="code-line"><span class="text-stone-500 select-none mr-2">13</span>        swap(A[i], A[c]), i = c;          <span class="text-stone-400">// 第 3 拍 双轨对调</span></div>
+          <div id="code-14" class="code-line"><span class="text-stone-500 select-none mr-2">14</span>    }</div>
+          <div id="code-15" class="code-line"><span class="text-stone-500 select-none mr-2">15</span>}</div>
+        </div>
+      </div>
+
+      <!-- 右侧：408 考点 -->
+      <div class="card-panel p-4 flex flex-col gap-2.5">
+        <div class="flex items-center justify-between border-b border-[#E5E4DC] pb-2">
+          <div class="flex items-center gap-2">
+            <span class="w-2 h-2 rounded-full bg-amber-500"></span>
+            <h4 class="text-xs font-bold text-stone-900 tracking-tight font-mono">
+              408 考点速记 (Key Insights)
+            </h4>
+          </div>
+          <span class="text-[10px] font-mono text-stone-400">建堆起点 · 双轨映射 · 复杂度</span>
+        </div>
+
+        <div class="space-y-2">
+          <div class="callout co-tip">
+            <div class="callout-title">◆ 建堆起点：最后一个非叶子节点</div>
+            自底向上从 $i=\lfloor n/2\rfloor-1$ 逆序扫到根；分界线以下的叶子无孩子可比，不主动发起下滤，整棵树一次成堆。
+          </div>
+          <div class="callout co-note">
+            <div class="callout-title">◆ 一次 swap，两套视角</div>
+            树上的弧线互换与数组栏的水平滑移对调是<strong>同一物理交换</strong>的语义层 / 物理层映射，焦点随下沉节点逐层追踪。
+          </div>
+          <div class="callout co-warn">
+            <div class="callout-title">◆ 复杂度与稳定性</div>
+            建堆 $O(n)$，$n-1$ 次出堆各 $O(\log n)$ ⇒ 总体 $O(n\log n)$；原地交换、非稳定排序，大根堆得升序、小根堆得降序。
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </main>
+
+  <!-- ========================================================================= -->
+  <!-- 极简页脚 FOOTER                                                          -->
+  <!-- ========================================================================= -->
+  <footer class="border-t border-[#E5E4DC] bg-[#FAF9F5] py-3 text-center text-xs font-mono text-stone-400 mt-6">
+    LearningAnimation · 堆排序双视角映射与下滤三步曲 · 计算机考研 408 核心考点专题
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TCP 三次握手与四次挥手演示系统 · 计算机专业基础 408</title>
+
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['-apple-system', 'BlinkMacSystemFont', 'SF Pro Display', 'Segoe UI', 'Roboto', 'sans-serif'],
+            serif: ['Newsreader', 'Georgia', 'serif'],
+            mono: ['JetBrains Mono', 'Fira Code', 'SF Mono', 'monospace']
+          },
+          colors: {
+            stone: {
+              50: '#FAF9F5', 100: '#F4F3EE', 200: '#E5E4DC', 300: '#D6D3CD',
+              400: '#A8A29E', 500: '#78716C', 600: '#57534E', 700: '#44403C',
+              800: '#292524', 900: '#1C1917'
+            }
+          }
+        }
+      }
+    }
+  </script>
+
+  <!-- GSAP CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+
+  <!-- Custom Stylesheet -->
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="min-h-screen bg-[#FAF9F5] text-stone-900 flex flex-col antialiased">
+
+  <!-- ========================================================================= -->
+  <!-- 顶栏 (HEADER)                                                            -->
+  <!-- ========================================================================= -->
+  <header class="border-b border-[#E5E4DC] bg-[#FAF9F5]/90 backdrop-blur sticky top-0 z-40 px-4 lg:px-8 py-3">
+    <div class="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-3">
+      <div class="flex items-center gap-3">
+        <a href="../index.html#net" class="flex items-center gap-1.5 text-xs font-mono text-stone-500 hover:text-stone-900 transition-colors py-1 px-2.5 rounded-lg border border-stone-200 hover:border-stone-400 bg-white shadow-sm">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path></svg>
+          <span>返回学科展厅</span>
+        </a>
+        <div class="h-4 w-px bg-stone-300"></div>
+        <h1 class="text-base font-bold tracking-tight text-stone-900 whitespace-nowrap">
+          TCP 三次握手与四次挥手
+        </h1>
+        <span class="hidden sm:inline text-[11px] font-mono text-stone-400 border border-stone-200 rounded px-2 py-0.5 bg-white">
+          Space-Time Ladder · Packet Microscope
+        </span>
+      </div>
+
+      <!-- 模式切换胶囊 -->
+      <div class="mode-capsule" role="tablist" aria-label="演示模式切换">
+        <button class="mode-btn active" data-mode="handshake" role="tab" aria-selected="true">
+          <span class="mb-idx">01</span> 三次握手 <span class="mb-sub">建立连接</span>
+        </button>
+        <button class="mode-btn" data-mode="wave" role="tab" aria-selected="false">
+          <span class="mb-idx">02</span> 四次挥手 <span class="mb-sub">释放连接</span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- ========================================================================= -->
+  <!-- 顶部控制区 (CONTROL DECK)：播放控制 + 状态指示标签                        -->
+  <!-- ========================================================================= -->
+  <div class="border-b border-[#E5E4DC] bg-white/70">
+    <div class="max-w-7xl mx-auto px-4 lg:px-8 py-2.5 flex flex-wrap items-center justify-between gap-3">
+      <!-- 播放控制栏 -->
+      <div class="flex items-center gap-2">
+        <button id="btn-play" class="btn-key btn-primary" title="自动播放 / 暂停 (Space)">
+          <span class="key-icon" id="btn-play-icon">▶</span>
+          <span id="btn-play-text">播放</span>
+        </button>
+        <button id="btn-next" class="btn-key" title="单步前进 (→)">
+          <span class="key-icon">▸|</span><span>单步前进</span>
+        </button>
+        <button id="btn-prev" class="btn-key" title="单步后退 (←)">
+          <span class="key-icon">|◂</span><span>单步后退</span>
+        </button>
+        <button id="btn-restart" class="btn-key" title="重新开始 (R)">
+          <span class="key-icon">↺</span><span>重新开始</span>
+        </button>
+
+        <div class="speed-box">
+          <span class="text-[11px] font-mono text-stone-500">速度</span>
+          <input id="speed-slider" class="taste-slider" type="range" min="0.5" max="2" step="0.1" value="1">
+          <span id="speed-val" class="w-9 text-[11px] font-bold text-stone-800 font-mono">1.0x</span>
+        </div>
+      </div>
+
+      <!-- 快捷键提示 -->
+      <div class="hidden lg:flex items-center gap-3 text-[11px] font-mono text-stone-400">
+        <span class="kbd">Space</span> 播放/暂停
+        <span class="kbd">→</span> 前进
+        <span class="kbd">←</span> 后退
+        <span class="kbd">R</span> 重置
+      </div>
+    </div>
+
+    <!-- 状态指示标签 -->
+    <div class="border-t border-[#E5E4DC] bg-[#FAF9F5]">
+      <div class="max-w-7xl mx-auto px-4 lg:px-8 py-2 flex flex-wrap items-center gap-x-4 gap-y-1.5">
+        <div class="flex items-center gap-3 min-w-0">
+          <span id="status-tag" class="status-tag">初始</span>
+          <span id="status-title" class="text-sm font-bold text-stone-900">就绪</span>
+        </div>
+        <div id="progress-dots" class="ml-auto flex items-center gap-1.5"></div>
+        <span id="status-meaning" class="w-full text-xs text-stone-500 font-mono leading-relaxed">选择模式后点击「播放」或「单步前进」开始演进。</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========================================================================= -->
+  <!-- 主内容 (MAIN)                                                            -->
+  <!-- ========================================================================= -->
+  <main class="flex-1 max-w-7xl w-full mx-auto px-4 lg:px-8 py-5 flex flex-col gap-5">
+
+    <!-- ==================== 中央时空主舞台 ==================== -->
+    <section class="editorial-card p-4 lg:p-5">
+      <div class="flex flex-wrap items-center justify-between gap-3 pb-3 mb-4 border-b border-[#E5E4DC]">
+        <div class="flex items-center gap-2">
+          <span class="w-2.5 h-2.5 rounded-full bg-stone-700"></span>
+          <h2 class="text-sm font-bold text-stone-900">中央时空主舞台 · 双主机交互梯形图</h2>
+        </div>
+        <div class="flex flex-wrap items-center gap-3 text-[11px] font-mono text-stone-500">
+          <span class="legend-item"><i class="lg-dot" style="background:#2563EB"></i>SYN</span>
+          <span class="legend-item"><i class="lg-dot" style="background:#059669"></i>ACK</span>
+          <span class="legend-item"><i class="lg-dot" style="background:#D97706"></i>FIN</span>
+          <span class="legend-item"><i class="lg-dot" style="background:#57534E"></i>DATA</span>
+          <span class="text-stone-400">时间自上而下流逝 ↓</span>
+        </div>
+      </div>
+
+      <div class="stage-grid">
+        <!-- 左：客户端卡片 -->
+        <div class="host-col">
+          <div class="host-card host-client" id="host-client">
+            <div class="host-top">
+              <span class="host-badge badge-client">C</span>
+              <div class="min-w-0">
+                <div class="host-name">客户端 Client</div>
+                <div class="host-ip">10.0.0.2 : 51042</div>
+              </div>
+            </div>
+            <div class="state-row">
+              <span class="state-led" id="led-client"></span>
+              <span class="state-chip" id="state-client">CLOSED</span>
+            </div>
+            <div class="state-hint" id="hint-client">连接尚未建立</div>
+            <div class="seq-row">
+              <span class="seq-key">seq 计数器</span>
+              <span class="seq-val" id="seq-client">100</span>
+            </div>
+            <!-- 2MSL 倒计时沙漏 -->
+            <div class="hourglass" id="hourglass-client">
+              <svg viewBox="0 0 32 44" class="hg-svg">
+                <path class="hg-frame" d="M5 3 H27 M5 41 H27 M7 3 C7 15 16 19 16 22 C16 25 7 29 7 41 M25 3 C25 15 16 19 16 22 C16 25 25 29 25 41"/>
+                <clipPath id="hgClipTop"><path d="M8 5 H24 C24 15 17 18.5 16 21.4 C15 18.5 8 15 8 5 Z"/></clipPath>
+                <clipPath id="hgClipBot"><path d="M8 39 H24 C24 29 17 25.5 16 22.6 C15 25.5 8 29 8 39 Z"/></clipPath>
+                <rect id="hg-sand-top" class="hg-sand" x="8" y="5" width="16" height="17" clip-path="url(#hgClipTop)"/>
+                <rect id="hg-sand-bot" class="hg-sand" x="8" y="39" width="16" height="0" clip-path="url(#hgClipBot)"/>
+                <line class="hg-stream" x1="16" y1="21" x2="16" y2="39"/>
+              </svg>
+              <div class="hg-text">
+                <div class="hg-label">TIME_WAIT · 2MSL 等待</div>
+                <div class="hg-count"><span id="hg-count">2.5</span>s</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 中：垂直时间信道 -->
+        <div class="channel" id="channel">
+          <svg id="ch-svg" preserveAspectRatio="none"></svg>
+          <div id="link-beam">
+            <span class="beam-label">ESTABLISHED · 连通光带</span>
+          </div>
+          <div id="packet-layer"></div>
+        </div>
+
+        <!-- 右：服务端卡片 + 待发数据积压管 -->
+        <div class="host-col">
+          <div class="host-card host-server" id="host-server">
+            <div class="host-top">
+              <span class="host-badge badge-server">S</span>
+              <div class="min-w-0">
+                <div class="host-name">服务端 Server</div>
+                <div class="host-ip">10.0.0.1 : 80</div>
+              </div>
+            </div>
+            <div class="state-row">
+              <span class="state-led" id="led-server"></span>
+              <span class="state-chip" id="state-server">LISTEN</span>
+            </div>
+            <div class="state-hint" id="hint-server">被动打开 · 等待连接请求</div>
+            <div class="seq-row">
+              <span class="seq-key">seq 计数器</span>
+              <span class="seq-val" id="seq-server">300</span>
+            </div>
+            <div class="seq-row seq-row-sub" id="seq-jump-row" style="display:none">
+              <span class="seq-key">挥手阶段基准</span>
+              <span class="seq-val-sub" id="seq-jump">400 → 451</span>
+            </div>
+          </div>
+
+          <!-- 待发数据积压管 -->
+          <div class="buffer-pipe" id="buffer-pipe">
+            <div class="bp-title">
+              <span>待发数据积压管</span>
+              <span class="bp-en">Buffer</span>
+            </div>
+            <div class="bp-tube">
+              <div class="bp-fill" id="bp-fill">
+                <div class="bp-chunk" data-len="20"><span>20 B</span></div>
+                <div class="bp-chunk" data-len="30"><span>30 B</span></div>
+              </div>
+            </div>
+            <div class="bp-meta" id="bp-meta">残存 50 字节 · 未发送</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 序号暴涨对比高亮指示线 -->
+      <div id="compare-callout" class="compare-callout">
+        <span class="cc-badge">序号暴涨溯源</span>
+        <div class="cc-track">
+          <span class="cc-num">seq 400</span>
+          <span class="cc-seg seg-data">＋50 B 数据 (400→450)</span>
+          <span class="cc-seg seg-fin">＋1 FIN 序号</span>
+          <span class="cc-arrow">➜</span>
+          <span class="cc-num hot">seq 451</span>
+        </div>
+        <p class="cc-note">第 3 拍 FIN 报文的 seq 从 400 跳到 451，是因为中间补发了 50 字节应用层残存数据，再加 FIN 自身占用的 1 个序号。</p>
+      </div>
+
+      <!-- 当前步骤行为释义 -->
+      <div class="stage-note">
+        <span class="note-dot"></span>
+        <p id="explanation">就绪。选择上方模式，点击「播放」或「单步前进」逐拍观察报文飞行与状态机演进。</p>
+      </div>
+    </section>
+
+    <!-- ==================== 底部报文透视显微镜 ==================== -->
+    <section class="editorial-card p-4 lg:p-5" id="microscope">
+      <div class="flex flex-wrap items-center justify-between gap-3 pb-3 mb-4 border-b border-[#E5E4DC]">
+        <div class="flex items-center gap-2">
+          <span class="w-2.5 h-2.5 rounded-full bg-amber-500"></span>
+          <h2 class="text-sm font-bold text-stone-900">底部报文透视显微镜</h2>
+          <span class="text-[11px] font-mono text-stone-400">Packet Microscope · 特写槽</span>
+        </div>
+        <span id="msc-step-tag" class="msc-tag">待机 · 等待报文进入信道</span>
+      </div>
+
+      <div class="msc-body">
+        <!-- 方向指示 -->
+        <div class="msc-dir">
+          <div class="dir-node" id="dir-node-a">Client</div>
+          <svg class="dir-arrow" id="dir-arrow" viewBox="0 0 130 26">
+            <line class="dir-line" x1="6" y1="13" x2="112" y2="13"/>
+            <polygon class="dir-head" points="110,6 124,13 110,20"/>
+          </svg>
+          <div class="dir-node" id="dir-node-b">Server</div>
+        </div>
+
+        <!-- 字段解构 -->
+        <div class="msc-fields">
+          <div class="flag-row">
+            <span class="flag-chip f-syn" id="flag-syn">SYN</span>
+            <span class="flag-chip f-ack" id="flag-ack">ACK</span>
+            <span class="flag-chip f-fin" id="flag-fin">FIN</span>
+          </div>
+          <div class="num-row">
+            <div class="num-box">
+              <div class="num-label">seq · 报文序号</div>
+              <div class="num-value" id="msc-seq">—</div>
+              <div class="num-hint" id="msc-seq-hint">本条报文携带的起始序号</div>
+            </div>
+            <div class="num-box">
+              <div class="num-label">ack · 确认号</div>
+              <div class="num-value" id="msc-ack">—</div>
+              <div class="num-hint" id="msc-ack-hint">期望收到的下一个序号</div>
+            </div>
+            <div class="num-box num-box-len" id="msc-len-box">
+              <div class="num-label">len · 载荷长度</div>
+              <div class="num-value" id="msc-len">—</div>
+              <div class="num-hint">字节</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 行为释义 -->
+        <div class="msc-meaning">
+          <div class="mm-title">行为释义 <span>Plain reading</span></div>
+          <p id="msc-meaning">报文在信道中飞行时，此处同步放大其内部字段：控制标志位、序号与确认号的来龙去脉。</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ==================== 日志 + 408 考点 ==================== -->
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-5">
+      <section class="editorial-card p-4 lg:p-5 lg:col-span-7">
+        <div class="flex items-center justify-between pb-2 border-b border-stone-100 mb-3">
+          <span class="text-xs font-mono font-bold text-stone-700">状态机与信道事件日志</span>
+          <span class="text-[10px] font-mono text-stone-400">随节拍实时滚动 · 后退时同步回退</span>
+        </div>
+        <div id="event-logs" class="log-box"></div>
+      </section>
+
+      <section class="editorial-card p-4 lg:p-5 lg:col-span-5">
+        <div class="flex items-center justify-between pb-2 border-b border-stone-100 mb-3">
+          <span class="text-xs font-mono font-bold text-stone-700">408 核心考点速记</span>
+          <span class="text-[10px] font-mono text-stone-400">高频问答</span>
+        </div>
+        <div class="space-y-2.5">
+          <div class="point-box pti-blue">
+            <div class="pti-title">为什么是三次握手，不是两次？</div>
+            <p>两次握手无法确认「客户端的接收能力」。若旧的 SYN 重发导致服务端提前建立连接，三次握手能让双方都确认彼此的收发能力，并同步初始序号。</p>
+          </div>
+          <div class="point-box pti-amber">
+            <div class="pti-title">为什么挥手需要四次？</div>
+            <p>TCP 是全双工：服务端收到 FIN 后可能还有数据没发完，因此 ACK 与自己的 FIN 必须拆开——中间夹着「补发残存数据」的阶段（CLOSE-WAIT）。</p>
+          </div>
+          <div class="point-box pti-green">
+            <div class="pti-title">TIME_WAIT 与 2MSL</div>
+            <p>主动关闭方最后要等待 2MSL：① 保证最后的 ACK 能到达对方（丢失则对方会重传 FIN）；② 让本连接的残余报文在网络中消散，避免影响下一条连接。</p>
+          </div>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <footer class="border-t border-[#E5E4DC] py-4 px-6 text-center text-xs font-mono text-stone-400 bg-white/50">
+    可视化实验室 · TCP 三次握手与四次挥手演示系统
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>

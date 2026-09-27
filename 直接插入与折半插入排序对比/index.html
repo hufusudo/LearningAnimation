@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <meta name="description" content="逐步观察直接插入排序和折半插入排序如何寻找位置、移动元素并完成插入。">
+  <title>插入排序：一步步看懂它如何工作</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js" defer></script>
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <header class="site-header">
+    <div class="header-inner">
+      <a class="back-link" href="../index.html#ds" aria-label="返回数据结构展厅">
+        <span aria-hidden="true">←</span>
+        <span>数据结构展厅</span>
+      </a>
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
+        <span>可视化实验室</span>
+      </div>
+    </div>
+  </header>
+
+  <main class="page-shell">
+    <section class="intro">
+      <div class="intro-copy">
+        <p class="eyebrow">排序 · 插入排序</p>
+        <h1>像整理手牌一样，<br class="mobile-break">把数字插回正确的位置。</h1>
+        <p class="intro-text">每一轮取出一个数，在左侧有序区找到位置；比它大的数向右挪，空出来的位置就是它的归处。</p>
+      </div>
+      <aside class="rule-note">
+        <span class="rule-mark" aria-hidden="true">↳</span>
+        <div>
+          <strong>记住这一条</strong>
+          <p>只把<strong>比 temp 大</strong>的数右移。遇到相等的数就停下，原来的先后顺序因此保留。</p>
+        </div>
+      </aside>
+    </section>
+
+    <section class="process-strip" aria-label="插入排序的四个动作">
+      <div class="process-step">
+        <span class="process-index">1</span>
+        <div><strong>取出一个数</strong><span>暂存为 temp</span></div>
+      </div>
+      <span class="process-arrow" aria-hidden="true">›</span>
+      <div class="process-step">
+        <span class="process-index">2</span>
+        <div><strong>从左侧找位置</strong><span>从右往左比较</span></div>
+      </div>
+      <span class="process-arrow" aria-hidden="true">›</span>
+      <div class="process-step">
+        <span class="process-index">3</span>
+        <div><strong>大数向右挪</strong><span>空位随之左移</span></div>
+      </div>
+      <span class="process-arrow" aria-hidden="true">›</span>
+      <div class="process-step">
+        <span class="process-index">4</span>
+        <div><strong>放回 temp</strong><span>左侧有序区变大</span></div>
+      </div>
+    </section>
+
+    <section class="demo-card" aria-label="插入排序交互演示">
+      <div class="demo-head">
+        <div>
+          <p class="section-kicker">动手走一遍</p>
+          <h2>看空位怎样移动</h2>
+        </div>
+        <div class="mode-control">
+          <span class="mode-label">查找位置的方式</span>
+          <div class="mode-switch" role="tablist" aria-label="选择插入排序方式">
+            <button type="button" class="mode-button is-active" id="mode-direct" role="tab" aria-selected="true" data-mode="direct">直接插入</button>
+            <button type="button" class="mode-button" id="mode-binary" role="tab" aria-selected="false" data-mode="binary">折半插入</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="demo-summary" id="mode-summary"></div>
+
+      <div class="demo-layout">
+        <section class="stage-panel" aria-label="数组动态演示">
+          <div class="stage-heading">
+            <div>
+              <p class="round-label" id="round-label">准备开始</p>
+              <h3 id="stage-title">先把第一个数看作有序</h3>
+            </div>
+            <span class="step-counter" id="step-counter">步骤 1</span>
+          </div>
+
+          <div class="array-stage">
+            <div class="temp-row">
+              <div class="temp-explainer">
+                <span class="temp-dot" aria-hidden="true"></span>
+                <div><strong>暂存 temp</strong><span>本轮要插入的数</span></div>
+              </div>
+              <div class="temp-slot" id="temp-slot" aria-label="暂存的数">
+                <span class="temp-placeholder">等待取数</span>
+              </div>
+            </div>
+
+            <div class="sort-viewport">
+              <div class="pointer-grid" id="pointer-grid" aria-hidden="true"></div>
+              <div class="array-track" id="array-track" role="img" aria-label="当前数组"></div>
+              <div class="index-track" id="index-track" aria-hidden="true"></div>
+              <div class="region-track" id="region-track" aria-hidden="true"></div>
+              <div class="legend">
+                <span><i class="legend-swatch swatch-sorted"></i>已排好</span>
+                <span><i class="legend-swatch swatch-active"></i>正在比较</span>
+                <span><i class="legend-swatch swatch-hole"></i>空位</span>
+                <span><i class="legend-swatch swatch-temp"></i>暂存值</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="action-card" aria-live="polite" aria-atomic="true">
+            <div class="action-heading">
+              <span class="action-kind" id="action-kind">准备</span>
+              <span class="action-step" id="action-step"></span>
+            </div>
+            <h3 id="action-title">从第二个数开始</h3>
+            <p id="action-copy">第一个数自然有序。接下来，每一轮都把右边的一个数插进左侧。</p>
+            <div class="decision-note" id="decision-note" hidden></div>
+          </div>
+        </section>
+
+        <aside class="detail-panel">
+          <section class="metrics" aria-label="当前演示计数">
+            <div class="metric">
+              <span>关键字比较</span>
+              <strong id="comparison-count">0</strong>
+              <small>不含边界检查</small>
+            </div>
+            <div class="metric">
+              <span>元素右移</span>
+              <strong id="shift-count">0</strong>
+              <small>腾出插入空位</small>
+            </div>
+            <div class="metric">
+              <span>完成轮数</span>
+              <strong id="pass-count">0</strong>
+              <small>左侧有序区</small>
+            </div>
+          </section>
+
+          <section class="code-panel" aria-label="当前算法伪代码">
+            <div class="panel-heading">
+              <div><p class="section-kicker">对照步骤</p><h3>算法在做什么</h3></div>
+              <span class="code-language">伪代码</span>
+            </div>
+            <pre class="code-list" id="code-list"></pre>
+          </section>
+
+          <aside class="takeaway" id="takeaway">
+            <span class="takeaway-icon" aria-hidden="true">i</span>
+            <p id="takeaway-copy">直接插入会逐个向左比较；折半插入用二分法找位置。两种方法都要把较大的数右移。</p>
+          </aside>
+        </aside>
+      </div>
+
+      <div class="playback">
+        <div class="timeline-row">
+          <span class="timeline-label" id="timeline-label">第 1 步</span>
+          <input type="range" id="step-slider" min="0" max="1" value="0" step="1" aria-label="拖动查看排序步骤">
+          <span class="timeline-total" id="timeline-total">共 1 步</span>
+        </div>
+        <div class="control-row">
+          <div class="control-buttons">
+            <button type="button" class="control-button secondary" id="previous-button" aria-label="上一步">← <span>上一步</span></button>
+            <button type="button" class="control-button primary" id="play-button" aria-label="自动演示">▶ <span>自动演示</span></button>
+            <button type="button" class="control-button secondary" id="next-button" aria-label="下一步"><span>下一步</span> →</button>
+            <button type="button" class="reset-button" id="reset-button">重新开始</button>
+          </div>
+          <label class="speed-control">播放速度
+            <select id="speed-select" aria-label="自动播放速度">
+              <option value="1500">慢一点</option>
+              <option value="950" selected>正常</option>
+              <option value="520">快一点</option>
+            </select>
+          </label>
+        </div>
+        <p class="keyboard-hint">可以用键盘的 ← 和 → 单步查看；按空格开始或暂停。</p>
+      </div>
+    </section>
+
+    <footer class="page-foot">
+      <span>两种插入方式都会保持相同的移动顺序。</span>
+      <span>折半插入减少查找比较，整体时间仍是 O(n²)。</span>
+    </footer>
+  </main>
+</body>
+</html>
