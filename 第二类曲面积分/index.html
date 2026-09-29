@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#faf9f5">
+  <meta name="description" content="交互观察第二类曲面积分的有向通量、正交投影与闭曲面净流出。">
+  <title>第二类曲面积分 · 可视化实验室</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Newsreader:opsz,wght@6..72,400;6..72,500&family=Source+Sans+3:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+  <link rel="stylesheet" href="style.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="back-link" href="../index.html#math" aria-label="返回高等数学">← <span>高等数学</span></a>
+    <div class="topbar-title">
+      <span class="brand-mark" aria-hidden="true">∯</span>
+      <h1>第二类曲面积分</h1>
+    </div>
+    <div class="topbar-note"><span class="led led-blue"></span>有向通量实验</div>
+  </header>
+
+  <main class="page-shell">
+    <section class="control-deck" aria-label="流场与曲面控制">
+      <div class="control-row">
+        <div class="control-group">
+          <span class="control-label">曲面</span>
+          <div class="segmented" role="group" aria-label="选择曲面形态">
+            <button class="segment is-active" type="button" data-shape="open" aria-pressed="true">开曲面 <small>弯网</small></button>
+            <button class="segment" type="button" data-shape="closed" aria-pressed="false">闭曲面 <small>球壳</small></button>
+          </div>
+        </div>
+        <div class="control-group field-group">
+          <span class="control-label">流场</span>
+          <div class="field-options" role="group" aria-label="选择流场预设">
+            <button class="field-choice is-active" type="button" data-field="vertical" aria-pressed="true"><span class="field-glyph">↑z</span>均匀上涌</button>
+            <button class="field-choice" type="button" data-field="horizontal" aria-pressed="false"><span class="field-glyph">→x</span>横向穿堂风</button>
+            <button class="field-choice" type="button" data-field="source" aria-pressed="false"><span class="field-glyph">✳</span>内部源泉</button>
+          </div>
+        </div>
+        <div class="flux-badge" id="fluxBadge" data-sign="positive" aria-live="polite">
+          <span class="flux-badge-label"><span class="led led-positive"></span>总通量 Φ</span>
+          <strong id="fluxTop">+0.00</strong>
+          <span class="unit">m³/s</span>
+        </div>
+      </div>
+
+      <div class="control-row control-row-secondary">
+        <div class="action-group">
+          <button id="flipButton" class="control-button" type="button" aria-pressed="false" title="反转曲面的选定侧向">
+            <span class="button-icon" aria-hidden="true">↕</span><span id="flipLabel">法向朝外</span>
+          </button>
+          <button id="flowButton" class="control-button" type="button" aria-pressed="true">
+            <span class="flow-toggle-dot" aria-hidden="true"></span><span id="flowLabel">粒子流动中</span>
+          </button>
+          <button id="stepButton" class="control-button control-button-primary" type="button">
+            <span class="button-icon" aria-hidden="true">▸</span>单步剖析
+          </button>
+        </div>
+        <label class="speed-control" for="speedSlider">
+          <span>流速</span><strong id="speedValue">1.0</strong><span class="speed-unit">m/s</span>
+          <input id="speedSlider" class="taste-slider" type="range" min="0.2" max="2" step="0.1" value="1" aria-label="调整流速">
+        </label>
+      </div>
+    </section>
+
+    <section class="lesson-strip" aria-live="polite">
+      <span class="lesson-index" id="lessonCount">自由观察</span>
+      <div>
+        <h2 id="lessonTitle">流体穿过网面，才计入通量</h2>
+        <p id="lessonCopy">拖动视角观察曲面；试着翻转法向，或在右侧切换局部速度方向。</p>
+      </div>
+      <span class="lesson-hint">拖拽旋转 · 滚轮缩放</span>
+    </section>
+
+    <section class="workbench">
+      <article class="scene-panel panel">
+        <div class="panel-heading scene-heading">
+          <div>
+            <span class="panel-kicker">宏观流场</span>
+            <h2 id="sceneTitle">一张弯曲渔网</h2>
+          </div>
+          <div class="scene-state"><span class="led led-positive" id="sceneLed"></span><span id="sceneStatus">法向朝外</span></div>
+        </div>
+        <div class="scene-viewport" id="sceneViewport">
+          <canvas id="sceneCanvas" aria-label="三维曲面通量流场，可用拖拽旋转视角"></canvas>
+          <div class="scene-caption scene-caption-top"><span class="coordinate-key">x</span><span class="coordinate-key">y</span><span class="coordinate-key">z</span><span id="fieldCaption">v⃗ = (0, 0, v₀)</span></div>
+          <div class="scene-caption scene-caption-bottom"><span class="legend-item"><i class="legend-swatch legend-green"></i>正向穿出</span><span class="legend-item"><i class="legend-swatch legend-amber"></i>逆向灌入</span><span class="legend-item"><i class="legend-swatch legend-blue"></i>流场分量</span></div>
+          <div id="sceneFallback" class="scene-fallback" hidden>当前浏览器无法启动 WebGL。可继续查看右侧微元分解与通量关系。</div>
+          <div class="probe-tag"><span class="probe-ring"></span><span>局部微元探针</span></div>
+          <div class="gauss-banner" id="gaussBanner" hidden aria-live="polite">
+            <span class="gauss-icon" aria-hidden="true">∯</span>
+            <div><strong id="gaussTitle">闭曲面包围源泉：所有网眼都向外流出</strong><div id="gaussFormula" class="math-line">∯Σ v⃗ · n⃗ dS &gt; 0</div></div>
+            <span class="gauss-value" id="gaussValue">净流出</span>
+          </div>
+        </div>
+        <div class="scene-footnote"><span id="surfaceCaption">曲面网格 · 法向量 n⃗ · 流速场 v⃗</span><span id="triangleCount">离散微元求和</span></div>
+      </article>
+
+      <aside class="inspector-panel panel" aria-label="局部微元与正交投影">
+        <div class="panel-heading inspector-heading">
+          <div>
+            <span class="panel-kicker">局部放大</span>
+            <h2>斜面微元的三向投影</h2>
+          </div>
+          <span class="micro-tag">dS</span>
+        </div>
+        <div class="projection-wrap">
+          <svg id="projectionSvg" class="projection-svg" viewBox="0 0 360 276" role="img" aria-labelledby="projectionTitle projectionDesc">
+            <title id="projectionTitle">斜面微元及其三个坐标平面投影</title>
+            <desc id="projectionDesc">一块倾斜微元由法向量指示方向，并投影至 yz、zx、xy 坐标面。</desc>
+            <defs>
+              <marker id="arrowGraphite" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#57534e"/></marker>
+              <marker id="arrowBlue" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0 0L10 5L0 10z" fill="#2563eb"/></marker>
+              <marker id="arrowGreen" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0 0L10 5L0 10z" fill="#059669"/></marker>
+              <marker id="arrowAmber" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0 0L10 5L0 10z" fill="#d97706"/></marker>
+            </defs>
+            <g class="projection-planes">
+              <polygon id="planeXY" class="projection-plane plane-xy" points="65,226 205,226 273,182 133,182"/>
+              <polygon id="planeYZ" class="projection-plane plane-yz" points="65,226 133,182 133,74 65,118"/>
+              <polygon id="planeZX" class="projection-plane plane-zx" points="65,226 205,226 205,118 65,118"/>
+              <text class="plane-label" x="216" y="214">dx dy</text>
+              <text class="plane-label" x="135" y="96">dy dz</text>
+              <text class="plane-label" x="209" y="147">dz dx</text>
+            </g>
+            <g class="projected-patches" aria-hidden="true">
+              <polygon id="shadowYZ" class="projected-patch projected-p" points="82,126 82,166 119,181 119,140"/>
+              <polygon id="shadowZX" class="projected-patch projected-q" points="114,137 184,177 184,216 114,175"/>
+              <polygon id="shadowXY" class="projected-patch projected-r" points="131,215 201,215 238,191 168,191"/>
+            </g>
+            <g class="box-lines">
+              <path d="M65 226L205 226L273 182M65 226L133 182L273 182M65 226L65 118L133 74L273 74L273 182M65 118L205 118L273 74M205 226L205 118"/>
+            </g>
+            <g class="projection-guides" aria-hidden="true">
+              <path d="M131 126L82 126M201 166L82 166M238 181L119 181M168 140L119 140"/>
+              <path d="M131 126L114 137M201 166L184 177M238 181L184 216M168 140L114 175"/>
+              <path d="M131 126L131 215M201 166L201 215M238 181L238 191M168 140L168 191"/>
+            </g>
+            <g class="axes-lines">
+              <line x1="65" y1="226" x2="225" y2="226" marker-end="url(#arrowGraphite)"/>
+              <line x1="65" y1="226" x2="139" y2="178" marker-end="url(#arrowGraphite)"/>
+              <line x1="65" y1="226" x2="65" y2="91" marker-end="url(#arrowGraphite)"/>
+              <text x="232" y="231">x</text><text x="143" y="176">y</text><text x="60" y="84">z</text>
+            </g>
+            <g class="component-arrows">
+              <line id="arrowP" x1="64" y1="153" x2="133" y2="153" marker-end="url(#arrowBlue)"/>
+              <line id="arrowQ" x1="148" y1="210" x2="186" y2="185" marker-end="url(#arrowGreen)"/>
+              <line id="arrowR" x1="199" y1="226" x2="199" y2="148" marker-end="url(#arrowAmber)"/>
+              <text id="labelP" x="69" y="145">P</text><text id="labelQ" x="149" y="226">Q</text><text id="labelR" x="204" y="172">R</text>
+            </g>
+            <g id="projectionStreams" class="projection-streams" aria-hidden="true"></g>
+            <polygon class="slanted-element" points="131,126 201,166 238,181 168,140"/>
+            <text class="slanted-label" x="176" y="151">dS</text>
+            <line id="normalArrow" class="normal-arrow" x1="184" y1="153" x2="207" y2="115" marker-end="url(#arrowGraphite)"/>
+            <text id="normalLabel" class="normal-label" x="211" y="115">n⃗</text>
+            <line id="vectorArrow" class="vector-arrow" x1="184" y1="153" x2="234" y2="107" marker-end="url(#arrowBlue)"/>
+            <text class="vector-label" x="240" y="107">v⃗</text>
+            <circle class="origin-dot" cx="65" cy="226" r="3.5"/>
+          </svg>
+        </div>
+
+        <div class="probe-controls" role="group" aria-label="局部速度方向演示">
+          <span class="probe-control-label">局部示意速度</span>
+          <button type="button" data-probe="normal" class="probe-choice" aria-pressed="false">迎面穿透</button>
+          <button type="button" data-probe="tangent" class="probe-choice" aria-pressed="false">切向掠过</button>
+          <button type="button" data-probe="field" class="probe-choice is-active" aria-pressed="true">当前流场</button>
+          <span class="probe-flux" id="localFluxLabel">dΦ &gt; 0</span>
+        </div>
+
+        <div class="component-readout" aria-label="速度分量">
+          <div><span class="component-dot component-p"></span><span>P</span><strong id="componentP">0.00</strong><small id="areaP">dy dz = 0.00</small></div>
+          <div><span class="component-dot component-q"></span><span>Q</span><strong id="componentQ">0.00</strong><small id="areaQ">dz dx = 0.00</small></div>
+          <div><span class="component-dot component-r"></span><span>R</span><strong id="componentR">1.00</strong><small id="areaR">dx dy = 1.00</small></div>
+        </div>
+
+        <div class="equation-block">
+          <div class="equation-row"><span class="equation-label">法向穿透</span><div id="dotFormula" class="math-line">dΦ = (v⃗ · n⃗) dS</div></div>
+          <div class="equation-row equation-projection"><span class="equation-label">投影代数和</span><div id="projectionFormula" class="math-line">dΦ = P dy dz + Q dz dx + R dx dy</div></div>
+          <div class="equation-row equation-numeric"><span class="equation-label">单位微元</span><div id="numericFormula" class="math-line">dS = 1 m²</div></div>
+        </div>
+        <p class="insight-note" id="insightNote">只有穿过网面两侧的速度分量才形成通量；沿网面滑过的部分不计入。</p>
+      </aside>
+    </section>
+
+    <section class="meter-panel panel" aria-label="曲面总通量计量槽">
+      <div class="meter-heading">
+        <div><span class="panel-kicker">全曲面积分</span><h2>流量水池</h2></div>
+        <p id="meterExplanation">每块网眼的法向通量累加，得到穿过整张曲面的净体积流量。</p>
+      </div>
+      <div class="meter-readout" id="meterReadout" data-sign="positive">
+        <strong id="fluxBottom">+0.00</strong><span>m³/s</span>
+        <span class="meter-sign" id="meterSign">净流出</span>
+      </div>
+      <div class="flow-basins" role="group" aria-label="入流与出流分量">
+        <div class="flow-basin basin-in"><span class="basin-label">穿入 · 负贡献</span><strong id="inflowValue">0.00</strong><div class="basin-water" id="inflowWater"></div></div>
+        <div class="flow-basin basin-out"><span class="basin-label">穿出 · 正贡献</span><strong id="outflowValue">0.00</strong><div class="basin-water" id="outflowWater"></div></div>
+        <div class="basin-equation" id="balanceEquation">出流 0.00 − 入流 0.00 = 0.00 m³/s</div>
+      </div>
+      <div class="meter-track" role="img" aria-label="以零为中心的净通量计量槽">
+        <span class="meter-negative-label">灌入 −</span>
+        <div class="meter-scale">
+          <i class="meter-tick tick-25"></i><i class="meter-tick tick-50"></i><i class="meter-tick tick-75"></i>
+          <span class="meter-zero">0</span><div class="meter-fill" id="meterFill"></div>
+        </div>
+        <span class="meter-positive-label">+ 流出</span>
+      </div>
+      <div class="meter-foot"><span>代数相加 · 入流为负 · 出流为正</span><span id="meterBalance">有向曲面 Σ</span></div>
+    </section>
+
+    <footer class="page-footer"><span>第二类曲面积分</span><span>把法向速度投影到三个坐标平面，再沿曲面积分</span></footer>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>

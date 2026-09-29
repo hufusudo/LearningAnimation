@@ -1,0 +1,586 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DNS 查询全景：域与区的划分及迭代/递归查询机制 · 可视化实验室</title>
+
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- GSAP CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="min-h-screen bg-[#FAF9F5] text-stone-900 flex flex-col justify-between antialiased selection:bg-stone-200">
+
+  <!-- 顶部导航条 -->
+  <header class="border-b border-[#E5E4DC] bg-[#FAF9F5]/90 backdrop-blur sticky top-0 z-30 px-4 lg:px-8 py-2.5">
+    <div class="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-3">
+      <div class="flex items-center gap-3">
+        <a href="../index.html#net" class="tactile-btn text-xs font-mono text-stone-600 hover:text-stone-900 px-2.5 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors" title="返回计算机网络">
+          <span>&larr; 返回计算机网络</span>
+        </a>
+        <div class="h-4 w-[1px] bg-stone-300 hidden sm:block"></div>
+        <h1 class="text-sm sm:text-base font-semibold tracking-tight text-stone-900 flex items-center gap-2">
+          <span>DNS 查询全景：域与区的划分及迭代/递归查询机制</span>
+        </h1>
+      </div>
+      <div class="flex items-center gap-2 text-xs font-mono">
+        <span class="px-2 py-0.5 rounded border border-amber-200 bg-amber-50 text-amber-800">
+          域(Domain) vs 区(Zone)
+        </span>
+        <span class="px-2 py-0.5 rounded border border-blue-200 bg-blue-50 text-blue-800">
+          迭代 vs 递归
+        </span>
+        <span class="px-2 py-0.5 rounded border border-emerald-200 bg-emerald-50 text-emerald-800">
+          原位跳升计数
+        </span>
+      </div>
+    </div>
+  </header>
+
+  <!-- 主交互视窗与控制面板 -->
+  <main class="flex-1 max-w-7xl w-full mx-auto p-3 sm:p-4 lg:p-6 flex flex-col gap-4">
+
+    <!-- 考点精炼说明卡片 (Obsidian-Style Callout) -->
+    <div class="bg-white border border-[#E5E4DC] rounded-xl p-3 sm:p-4 shadow-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs text-stone-600 leading-relaxed">
+      <div class="flex items-start gap-2.5">
+        <div class="w-6 h-6 rounded-md bg-amber-100 text-amber-800 font-bold flex items-center justify-center shrink-0 text-xs">
+          💡
+        </div>
+        <div>
+          <span class="font-semibold text-stone-800">核心考点辨析：</span>
+          <span class="text-stone-700">「域 (Domain)」</span>是逻辑命名树上的子树；而<span class="text-stone-700">「区 (Zone)」</span>是实际管辖与配置的物理范围。当子域未被委派时，属于同一区；一旦子域（如 <code class="bg-stone-100 px-1 py-0.5 rounded text-amber-700 font-mono">y.abc.com</code>）被委派为独立区，本地 DNS 便需额外向其发起第 4 次查询！
+        </div>
+      </div>
+      <div class="flex items-center gap-2 shrink-0 self-end sm:self-center">
+        <span class="inline-flex items-center gap-1 text-[11px] font-mono text-stone-500">
+          <span class="w-2 h-2 rounded-full bg-emerald-500 inline-block pulse-led-emerald"></span>
+          系统就绪 (60fps)
+        </span>
+      </div>
+    </div>
+
+    <!-- 演示主画布容器：左右并排双重视角 -->
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-4">
+      
+      <!-- 左侧列：逻辑域名树与区划分视图 -->
+      <section class="lg:col-span-6 bg-white border border-[#E5E4DC] rounded-xl p-3 sm:p-4 shadow-sm flex flex-col">
+        <div class="flex items-center justify-between pb-2 mb-2 border-b border-stone-100">
+          <div class="flex items-center gap-2">
+            <span class="w-2.5 h-2.5 rounded-full bg-blue-600"></span>
+            <h2 class="text-xs sm:text-sm font-semibold text-stone-800">
+              左视图：逻辑域名树与区边界划分
+            </h2>
+          </div>
+          <div class="flex items-center gap-2 text-[11px] font-mono text-stone-500">
+            <span class="flex items-center gap-1">
+              <span class="w-2.5 h-2.5 rounded-full border border-dashed border-amber-600 bg-amber-50 inline-block"></span>
+              主区(abc.com)
+            </span>
+            <span id="legend-zone-y" class="flex items-center gap-1 transition-opacity duration-300 opacity-40">
+              <span class="w-2.5 h-2.5 rounded-full border border-dashed border-emerald-600 bg-emerald-50 inline-block"></span>
+              独立区(y.abc.com)
+            </span>
+          </div>
+        </div>
+
+        <!-- 域名树 SVG 画布 -->
+        <div class="w-full flex-1 min-h-[380px] sm:min-h-[420px] flex items-center justify-center relative select-none">
+          <svg id="svg-domain-tree" class="w-full h-full max-h-[480px]" viewBox="0 0 540 460" preserveAspectRatio="xMidYMid meet">
+            <defs>
+              <!-- 探针发光滤镜 -->
+              <filter id="probe-glow" x="-50%" y="-50%" width="200%" height="200%">
+                <feGaussianBlur in="SourceGraphic" stdDeviation="4" result="blur" />
+                <feMerge>
+                  <feMergeNode in="blur" />
+                  <feMergeNode in="SourceGraphic" />
+                </feMerge>
+              </filter>
+              <!-- 节点阴影 -->
+              <filter id="node-shadow" x="-20%" y="-20%" width="140%" height="140%">
+                <feDropShadow dx="0" dy="1.5" stdDeviation="1.5" flood-color="#000000" flood-opacity="0.08" />
+              </filter>
+            </defs>
+
+            <!-- 区边界气泡 (Zone Boundaries) -->
+            <!-- 气泡 1: abc.com (单区时包裹全部子域与主机；两区时收缩) -->
+            <g id="zone-group-abc">
+              <rect id="zone-bubble-abc" x="55" y="152" width="275" height="255" rx="20" ry="20"
+                    fill="#FEF3C7" fill-opacity="0.22" stroke="#D97706" stroke-width="1.8" stroke-dasharray="6,4"
+                    class="dash-flowing" />
+              <rect id="zone-tag-bg-abc" x="65" y="160" width="138" height="20" rx="4" fill="#D97706" />
+              <text id="zone-tag-text-abc" x="72" y="174" font-size="11" font-weight="600" fill="#FFFFFF" font-family="sans-serif">
+                区: abc.com (单区统管)
+              </text>
+            </g>
+
+            <!-- 气泡 2: y.abc.com (两区模式时分裂出独立虚线气泡) -->
+            <g id="zone-group-y" opacity="0" style="pointer-events: none; transition: opacity 0.4s ease;">
+              <rect id="zone-bubble-y" x="245" y="235" width="85" height="172" rx="16" ry="16"
+                    fill="#D1FAE5" fill-opacity="0.25" stroke="#059669" stroke-width="1.8" stroke-dasharray="5,4"
+                    class="dash-flowing" />
+              <rect id="zone-tag-bg-y" x="250" y="242" width="75" height="18" rx="4" fill="#059669" />
+              <text id="zone-tag-text-y" x="254" y="255" font-size="10" font-weight="600" fill="#FFFFFF" font-family="sans-serif">
+                区2: y.abc.com
+              </text>
+            </g>
+
+            <!-- 树连接线 (Tree Branches) -->
+            <g id="tree-branches" stroke="#D6D3CD" stroke-width="1.5" stroke-linecap="round" fill="none">
+              <!-- 根到 TLD -->
+              <path d="M 270 42 C 270 75, 90 75, 90 110" />
+              <path d="M 270 42 C 270 75, 270 75, 270 110" />
+              <path d="M 270 42 C 270 75, 450 75, 450 110" />
+              <!-- com 到 abc 与 xyz -->
+              <path d="M 270 110 C 270 145, 195 145, 195 185" />
+              <path d="M 270 110 C 270 145, 370 145, 370 185" stroke-dasharray="3,3" stroke="#CBD5E1" />
+              <!-- abc 到 x 与 y -->
+              <path d="M 195 185 C 195 225, 135 225, 135 265" />
+              <path d="M 195 185 C 195 225, 280 225, 280 265" />
+              <!-- x 到主机 u, v, w -->
+              <path d="M 135 265 C 135 305, 90 305, 90 350" />
+              <path d="M 135 265 C 135 305, 135 305, 135 350" />
+              <path d="M 135 265 C 135 305, 180 305, 180 350" />
+              <!-- y 到主机 t -->
+              <path d="M 280 265 C 280 305, 280 305, 280 350" />
+              <!-- xyz 到 dns 与 m (客户端分支) -->
+              <path d="M 370 185 C 370 225, 340 225, 340 265" stroke-dasharray="3,3" stroke="#CBD5E1" />
+              <path d="M 370 185 C 370 225, 410 225, 410 265" stroke-dasharray="3,3" stroke="#CBD5E1" />
+            </g>
+
+            <!-- 树节点 (Tree Nodes) -->
+            <g id="tree-nodes">
+              <!-- 根节点: . -->
+              <g id="node-root" class="tree-node cursor-pointer" transform="translate(270, 42)">
+                <circle r="18" fill="#FFFFFF" stroke="#44403C" stroke-width="2" filter="url(#node-shadow)" />
+                <text text-anchor="middle" dy="5" font-size="16" font-weight="700" fill="#1C1917" font-family="monospace">.</text>
+                <text text-anchor="middle" dy="-23" font-size="10" font-weight="500" fill="#78716C">根域</text>
+              </g>
+
+              <!-- 顶级域 TLDs -->
+              <g id="node-org" class="tree-node" transform="translate(90, 110)">
+                <circle r="16" fill="#FFFFFF" stroke="#D6D3CD" stroke-width="1.5" />
+                <text text-anchor="middle" dy="4" font-size="11" font-weight="600" fill="#78716C">org</text>
+              </g>
+              <g id="node-com" class="tree-node cursor-pointer" transform="translate(270, 110)">
+                <circle r="17" fill="#FFFFFF" stroke="#2563EB" stroke-width="2" filter="url(#node-shadow)" />
+                <text text-anchor="middle" dy="4" font-size="12" font-weight="700" fill="#1E40AF">com</text>
+                <text text-anchor="middle" dy="-21" font-size="9" font-weight="500" fill="#2563EB">TLD顶级域</text>
+              </g>
+              <g id="node-edu" class="tree-node" transform="translate(450, 110)">
+                <circle r="16" fill="#FFFFFF" stroke="#D6D3CD" stroke-width="1.5" />
+                <text text-anchor="middle" dy="4" font-size="11" font-weight="600" fill="#78716C">edu</text>
+              </g>
+
+              <!-- 二级域 (SLD) -->
+              <g id="node-abc" class="tree-node cursor-pointer" transform="translate(195, 185)">
+                <circle r="17" fill="#FFFFFF" stroke="#D97706" stroke-width="2" filter="url(#node-shadow)" />
+                <text text-anchor="middle" dy="4" font-size="12" font-weight="700" fill="#B45309">abc</text>
+                <text text-anchor="middle" dy="-21" font-size="9" font-weight="500" fill="#D97706">二级域</text>
+              </g>
+              <g id="node-xyz" class="tree-node" transform="translate(370, 185)">
+                <circle r="15" fill="#FAFAF9" stroke="#E5E4DC" stroke-width="1.5" />
+                <text text-anchor="middle" dy="4" font-size="10" font-weight="500" fill="#A8A29E">xyz</text>
+              </g>
+
+              <!-- 三级域 under abc -->
+              <g id="node-x" class="tree-node cursor-pointer" transform="translate(135, 265)">
+                <circle r="15" fill="#FFFFFF" stroke="#D97706" stroke-width="1.5" filter="url(#node-shadow)" />
+                <text text-anchor="middle" dy="4" font-size="11" font-weight="600" fill="#B45309">x</text>
+                <text text-anchor="middle" dy="-19" font-size="9" font-weight="500" fill="#78716C">三级域</text>
+              </g>
+              <g id="node-y" class="tree-node cursor-pointer" transform="translate(280, 265)">
+                <circle r="16" fill="#FFFFFF" stroke="#059669" stroke-width="2" filter="url(#node-shadow)" />
+                <text text-anchor="middle" dy="4" font-size="12" font-weight="700" fill="#047857">y</text>
+                <text id="node-y-subtext" text-anchor="middle" dy="-20" font-size="9" font-weight="500" fill="#059669">三级域</text>
+              </g>
+
+              <!-- 主机节点 under x -->
+              <g id="node-u" class="tree-node cursor-pointer" transform="translate(90, 350)">
+                <circle r="14" fill="#FFFFFF" stroke="#A8A29E" stroke-width="1.5" filter="url(#node-shadow)" />
+                <text text-anchor="middle" dy="4" font-size="11" font-weight="600" fill="#44403C">u</text>
+                <text text-anchor="middle" dy="24" font-size="8.5" fill="#78716C">主机</text>
+              </g>
+              <g id="node-v" class="tree-node" transform="translate(135, 350)">
+                <circle r="13" fill="#FAFAF9" stroke="#E5E4DC" stroke-width="1.2" />
+                <text text-anchor="middle" dy="4" font-size="10" font-weight="500" fill="#78716C">v</text>
+                <text text-anchor="middle" dy="23" font-size="8.5" fill="#A8A29E">主机</text>
+              </g>
+              <g id="node-w" class="tree-node" transform="translate(180, 350)">
+                <circle r="13" fill="#FAFAF9" stroke="#E5E4DC" stroke-width="1.2" />
+                <text text-anchor="middle" dy="4" font-size="10" font-weight="500" fill="#78716C">w</text>
+                <text text-anchor="middle" dy="23" font-size="8.5" fill="#A8A29E">主机</text>
+              </g>
+
+              <!-- 主机节点 under y: t -->
+              <g id="node-t" class="tree-node cursor-pointer" transform="translate(280, 350)">
+                <circle r="15" fill="#FFFFFF" stroke="#059669" stroke-width="2" filter="url(#node-shadow)" />
+                <text text-anchor="middle" dy="4" font-size="12" font-weight="700" fill="#065F46">t</text>
+                <text text-anchor="middle" dy="25" font-size="9" font-weight="600" fill="#059669">目标主机</text>
+              </g>
+
+              <!-- 客户端分支节点 under xyz -->
+              <g id="node-dns-xyz" class="tree-node" transform="translate(340, 265)">
+                <circle r="12" fill="#FAFAF9" stroke="#E5E4DC" stroke-width="1" />
+                <text text-anchor="middle" dy="3.5" font-size="9" fill="#78716C">dns</text>
+                <text text-anchor="middle" dy="21" font-size="8" fill="#A8A29E">本地DNS</text>
+              </g>
+              <g id="node-m-xyz" class="tree-node" transform="translate(410, 265)">
+                <circle r="12" fill="#FAFAF9" stroke="#E5E4DC" stroke-width="1" />
+                <text text-anchor="middle" dy="3.5" font-size="9" fill="#78716C">m</text>
+                <text text-anchor="middle" dy="21" font-size="8" fill="#A8A29E">客户机</text>
+              </g>
+            </g>
+
+            <!-- 寻址指示探针 (Search Pointer) -->
+            <g id="search-pointer" style="pointer-events: none;">
+              <!-- 发光晕圈 -->
+              <circle r="26" fill="#2563EB" fill-opacity="0.15" filter="url(#probe-glow)" />
+              <!-- 脉冲环 -->
+              <circle id="probe-pulse-ring" class="probe-ring-anim" r="18" fill="none" stroke="#2563EB" stroke-width="2" />
+              <!-- 中心瞄准信标 -->
+              <circle r="6" fill="#2563EB" stroke="#FFFFFF" stroke-width="2" />
+              <!-- 探针跟随悬浮标签 -->
+              <g id="probe-label-box" transform="translate(18, -14)">
+                <rect width="90" height="22" rx="5" fill="#1E293B" fill-opacity="0.9" filter="url(#node-shadow)" />
+                <text id="probe-label-text" x="45" y="15" text-anchor="middle" font-size="10" font-weight="600" fill="#FFFFFF" font-family="monospace">
+                  匹配: . (根)
+                </text>
+              </g>
+            </g>
+
+            <!-- 最终解析锁定光环 (翡翠绿达成) -->
+            <g id="target-resolved-badge" opacity="0" style="pointer-events: none;">
+              <circle r="22" fill="none" stroke="#059669" stroke-width="2.5" stroke-dasharray="4,2" />
+              <rect x="18" y="-12" width="86" height="22" rx="4" fill="#059669" />
+              <text x="61" y="2" text-anchor="middle" font-size="10" font-weight="700" fill="#FFFFFF">
+                IP: 192.0.2.88
+              </text>
+            </g>
+          </svg>
+        </div>
+
+        <div class="pt-2 border-t border-stone-100 flex items-center justify-between text-[11px] font-mono text-stone-500">
+          <span>层级深度: 根 &rarr; TLD &rarr; 二级域 &rarr; 三级域 &rarr; 主机</span>
+          <span id="zone-status-text" class="text-amber-800 font-sans font-medium">当前划分：单区模式 (abc.com)</span>
+        </div>
+      </section>
+
+      <!-- 右侧列：物理服务器交互拓扑与画布内原位计数 -->
+      <section class="lg:col-span-6 bg-white border border-[#E5E4DC] rounded-xl p-3 sm:p-4 shadow-sm flex flex-col">
+        <div class="flex items-center justify-between pb-2 mb-2 border-b border-stone-100">
+          <div class="flex items-center gap-2">
+            <span class="w-2.5 h-2.5 rounded-full bg-amber-600"></span>
+            <h2 class="text-xs sm:text-sm font-semibold text-stone-800">
+              右视图：物理服务器交互拓扑与原位对外计数
+            </h2>
+          </div>
+          <div class="flex items-center gap-2 text-[11px] font-mono">
+            <span id="active-query-mode-badge" class="px-2 py-0.5 rounded bg-stone-100 text-stone-700 font-semibold border border-stone-200">
+              迭代查询模式
+            </span>
+          </div>
+        </div>
+
+        <!-- 物理拓扑 SVG 画布 -->
+        <div class="w-full flex-1 min-h-[380px] sm:min-h-[420px] flex items-center justify-center relative select-none">
+          <svg id="svg-server-topo" class="w-full h-full max-h-[480px]" viewBox="0 0 540 460" preserveAspectRatio="xMidYMid meet">
+            <defs>
+              <filter id="badge-glow" x="-20%" y="-20%" width="140%" height="140%">
+                <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#D97706" flood-opacity="0.2" />
+              </filter>
+              <filter id="server-card-shadow" x="-15%" y="-15%" width="130%" height="130%">
+                <feDropShadow dx="0" dy="2" stdDeviation="2.5" flood-color="#000000" flood-opacity="0.07" />
+              </filter>
+            </defs>
+
+            <!-- 物理线缆 / 通信链路 (Cables) -->
+            <g id="topology-cables">
+              <!-- 客户端 <-> 本地 DNS (垂直下半段) -->
+              <path id="cable-client-local" class="link-cable" d="M 120 375 L 120 282" stroke="#CBD5E1" stroke-width="2" />
+              <!-- 本地 DNS <-> 根服务器 (垂直上半段) -->
+              <path id="cable-local-root" class="link-cable" d="M 120 238 L 120 97" stroke="#CBD5E1" stroke-width="2" />
+              <!-- 本地 DNS <-> 顶级 TLD (斜向右上) -->
+              <path id="cable-local-tld" class="link-cable" d="M 160 245 L 380 95" stroke="#CBD5E1" stroke-width="2" />
+              <!-- 本地 DNS <-> 权限 abc (横向右) -->
+              <path id="cable-local-auth" class="link-cable" d="M 165 260 L 365 260" stroke="#CBD5E1" stroke-width="2" />
+              <!-- 本地 DNS <-> 独立区权限 y (斜向右下，两区模式使用) -->
+              <path id="cable-local-authy" class="link-cable" d="M 160 275 L 365 395" stroke="#CBD5E1" stroke-width="2" stroke-dasharray="4,4" opacity="0.08" />
+              
+              <!-- 独立区委派授权连线 (权限 abc <-> 独立区 y 之间，两区模式常驻展示) -->
+              <g id="delegation-link-group" opacity="0" style="pointer-events: none;">
+                <line x1="420" y1="282" x2="420" y2="373" stroke="#059669" stroke-width="1.8" stroke-dasharray="3,3" />
+                <rect x="396" y="318" width="48" height="18" rx="4" fill="#ECFDF5" stroke="#A7F3D0" />
+                <text x="420" y="331" text-anchor="middle" font-size="8.5" font-weight="600" fill="#047857">委派(NS)</text>
+              </g>
+
+              <!-- 递归查询专用链缆 (点对点链式传花) -->
+              <g id="recursive-cables" opacity="0.2">
+                <!-- 根 <-> 顶级 TLD (顶部横线) -->
+                <path id="cable-root-tld" class="link-cable" d="M 165 75 L 365 75" stroke="#CBD5E1" stroke-width="1.8" stroke-dasharray="4,3" />
+                <!-- 顶级 TLD <-> 权限 abc (右侧垂直线) -->
+                <path id="cable-tld-auth" class="link-cable" d="M 420 97 L 420 238" stroke="#CBD5E1" stroke-width="1.8" stroke-dasharray="4,3" />
+                <!-- 权限 abc <-> 独立区 y (递归跨区链路) -->
+                <path id="cable-auth-authy" class="link-cable" d="M 420 282 L 420 373" stroke="#CBD5E1" stroke-width="1.8" stroke-dasharray="4,3" />
+              </g>
+            </g>
+
+            <!-- 序号标记历史轨线 (Numbered Badges on paths) -->
+            <g id="cable-seq-badges"></g>
+
+            <!-- 服务器节点卡片 (5 台服务器 + 1 客户机) -->
+            <!-- 1. 客户端主机 m.xyz.com (Bottom Left) -->
+            <g id="node-client" class="server-node" transform="translate(120, 395)" filter="url(#server-card-shadow)">
+              <rect x="-48" y="-18" width="96" height="36" rx="8" fill="#FFFFFF" stroke="#E5E4DC" stroke-width="1.5" />
+              <circle cx="-32" cy="0" r="4" fill="#059669" class="pulse-led-emerald" />
+              <text x="-22" y="-3" font-size="10.5" font-weight="700" fill="#1C1917" font-family="sans-serif">客户端主机</text>
+              <text x="-22" y="11" font-size="9" font-family="monospace" fill="#78716C">m.xyz.com</text>
+            </g>
+
+            <!-- 2. 本地域名服务器 dns.xyz.com (Mid Left) -->
+            <g id="node-local-dns" class="server-node cursor-pointer" transform="translate(120, 260)" filter="url(#server-card-shadow)">
+              <rect id="rect-local-dns" x="-58" y="-22" width="116" height="44" rx="9" fill="#FFFFFF" stroke="#2563EB" stroke-width="2" />
+              <!-- 伺服器插槽与指示灯 -->
+              <rect x="-48" y="-14" width="96" height="12" rx="3" fill="#F8FAFC" stroke="#E2E8F0" />
+              <circle cx="-38" cy="-8" r="3" fill="#2563EB" class="pulse-led-blue" />
+              <text x="-28" y="-4" font-size="9" font-weight="600" fill="#1E40AF">Local DNS Cache</text>
+              <text x="0" y="13" text-anchor="middle" font-size="11" font-weight="700" fill="#1C1917">本地域名服务器</text>
+              <text x="0" y="27" text-anchor="middle" font-size="8.5" font-family="monospace" fill="#64748B">dns.xyz.com</text>
+            </g>
+
+            <!-- 【关键核心】画布内原位计数指示徽标 (位于本地域名服务器正上方) -->
+            <g id="badge-counter-group" transform="translate(120, 202)">
+              <!-- 徽标背景卡片 -->
+              <rect id="badge-counter-card" x="-62" y="-17" width="124" height="34" rx="17" ry="17"
+                    fill="#FFFFFF" stroke="#D97706" stroke-width="1.8" filter="url(#badge-glow)" />
+              <!-- 雷达/计数指示标 -->
+              <circle cx="-42" cy="0" r="4.5" fill="#D97706" class="pulse-led-amber" />
+              <text x="-30" y="4" font-size="10.5" font-weight="600" fill="#78716C" font-family="sans-serif">对外查询:</text>
+              <!-- 动态弹性数字 -->
+              <text id="counter-val" x="30" y="5" font-size="16" font-weight="800" fill="#D97706" font-family="sans-serif">0</text>
+              <text x="44" y="4" font-size="10.5" font-weight="600" fill="#78716C" font-family="sans-serif">次</text>
+            </g>
+
+            <!-- 3. 根域名服务器 (Top Left) -->
+            <g id="node-root-dns" class="server-node" transform="translate(120, 75)" filter="url(#server-card-shadow)">
+              <rect id="rect-root-dns" x="-54" y="-22" width="108" height="44" rx="8" fill="#FFFFFF" stroke="#44403C" stroke-width="1.8" />
+              <circle cx="-40" cy="-6" r="3.5" fill="#44403C" />
+              <text x="-30" y="-3" font-size="10" font-weight="700" fill="#1C1917">根域名服务器</text>
+              <text x="-30" y="11" font-size="9" font-family="monospace" fill="#78716C">. (Root Server)</text>
+              <rect x="-42" y="16" width="84" height="3" rx="1.5" fill="#E7E5E4" />
+            </g>
+
+            <!-- 4. 顶级域名服务器 (Top Right) -->
+            <g id="node-tld-dns" class="server-node" transform="translate(420, 75)" filter="url(#server-card-shadow)">
+              <rect id="rect-tld-dns" x="-56" y="-22" width="112" height="44" rx="8" fill="#FFFFFF" stroke="#2563EB" stroke-width="1.8" />
+              <circle cx="-42" cy="-6" r="3.5" fill="#2563EB" />
+              <text x="-32" y="-3" font-size="10" font-weight="700" fill="#1C1917">顶级域名服务器</text>
+              <text x="-32" y="11" font-size="9" font-family="monospace" fill="#2563EB">dns.com (.com TLD)</text>
+              <rect x="-44" y="16" width="88" height="3" rx="1.5" fill="#DBEAFE" />
+            </g>
+
+            <!-- 5. 权限域名服务器 (Mid Right: dns.abc.com) -->
+            <g id="node-auth-dns" class="server-node" transform="translate(420, 260)" filter="url(#server-card-shadow)">
+              <rect id="rect-auth-dns" x="-58" y="-22" width="116" height="44" rx="8" fill="#FFFFFF" stroke="#D97706" stroke-width="1.8" />
+              <circle cx="-44" cy="-6" r="3.5" fill="#D97706" />
+              <text x="-34" y="-3" font-size="10" font-weight="700" fill="#1C1917">权限域名服务器</text>
+              <text x="-34" y="11" font-size="9" font-family="monospace" fill="#D97706">dns.abc.com</text>
+              <rect x="-46" y="16" width="92" height="3" rx="1.5" fill="#FEF3C7" />
+            </g>
+
+            <!-- 6. 扩展位：独立区权限服务器 (Bottom Right: dns.y.abc.com) 采用双层锚点架构，彻底根绝 transform 漂移 -->
+            <g id="server-y-anchor" transform="translate(420, 395)">
+              <g id="server-y-group" class="server-node" opacity="0" style="pointer-events: none;">
+                <rect id="rect-authy-dns" x="-60" y="-22" width="120" height="44" rx="8" fill="#FFFFFF" stroke="#059669" stroke-width="1.8" filter="url(#server-card-shadow)" />
+                <circle cx="-46" cy="-6" r="3.5" fill="#059669" class="pulse-led-emerald" />
+                <text x="-36" y="-3" font-size="9.5" font-weight="700" fill="#065F46">独立区权限服务器</text>
+                <text x="-36" y="11" font-size="8.5" font-family="monospace" fill="#059669">dns.y.abc.com</text>
+                <rect x="-48" y="16" width="96" height="3" rx="1.5" fill="#D1FAE5" />
+              </g>
+            </g>
+
+            <!-- 动态飞行报文实体 (GSAP 驱动平滑飞行) -->
+            <g id="flight-packet" opacity="0" style="pointer-events: none;">
+              <!-- 报文信封外框 -->
+              <rect x="-28" y="-12" width="56" height="24" rx="6" fill="#1E293B" stroke="#F8FAFC" stroke-width="1.5" filter="url(#server-card-shadow)" />
+              <!-- 信封折线 -->
+              <path d="M -24 -9 L 0 4 L 24 -9" stroke="#94A3B8" stroke-width="1.2" fill="none" />
+              <!-- 报文类型标签 -->
+              <text id="flight-packet-label" x="0" y="6" text-anchor="middle" font-size="8.5" font-weight="700" fill="#F8FAFC" font-family="monospace">
+                QUERY
+              </text>
+              <!-- 伴随光球粒子 -->
+              <circle cx="0" cy="0" r="16" fill="#38BDF8" fill-opacity="0.25" />
+            </g>
+          </svg>
+        </div>
+
+        <div class="pt-2 border-t border-stone-100 flex items-center justify-between text-[11px] font-mono text-stone-500">
+          <span>拓扑：标准四角拓扑 + 独立区扩展位</span>
+          <span id="outbound-hint-text" class="text-stone-700 font-sans">
+            本地 DNS 对外计数反映其实际网络发包开销
+          </span>
+        </div>
+      </section>
+
+    </div>
+
+    <!-- 底部通栏控制台与 HUD 解说 -->
+    <section class="bg-white border border-[#E5E4DC] rounded-xl p-3 sm:p-4 shadow-sm flex flex-col gap-3">
+      
+      <!-- 控制行 1：模式切换胶囊按钮组 -->
+      <div class="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-stone-100">
+        
+        <!-- 划分选择：单区 vs 两区 -->
+        <div class="flex items-center gap-1.5 text-xs">
+          <span class="text-stone-500 font-medium mr-1 text-[11px] font-mono">【1. 区划模式】:</span>
+          <button id="btn-mode-single" class="tactile-btn active-mode px-3 py-1.5 rounded-lg text-xs font-medium transition-all" title="abc.com 统管全部子域与主机">
+            单区模式 (abc统管)
+          </button>
+          <button id="btn-mode-two" class="tactile-btn px-3 py-1.5 rounded-lg text-xs font-medium transition-all" title="y.abc.com 独立分裂为委派区">
+            两区模式 (y独立委派)
+          </button>
+        </div>
+
+        <!-- 查询方式：迭代 vs 递归 -->
+        <div class="flex items-center gap-1.5 text-xs">
+          <span class="text-stone-500 font-medium mr-1 text-[11px] font-mono">【2. 查询机制】:</span>
+          <button id="btn-query-iter" class="tactile-btn active-mode px-3 py-1.5 rounded-lg text-xs font-medium transition-all" title="本地域名服务器向外逐级询问">
+            迭代查询 (逐级跑腿)
+          </button>
+          <button id="btn-query-recur" class="tactile-btn px-3 py-1.5 rounded-lg text-xs font-medium transition-all" title="各级服务器击鼓传花">
+            递归查询 (链式传递)
+          </button>
+        </div>
+
+        <!-- 目标主机切换：t.y.abc.com vs u.x.abc.com -->
+        <div class="flex items-center gap-1.5 text-xs">
+          <span class="text-stone-500 font-medium mr-1 text-[11px] font-mono">【3. 目标主机】:</span>
+          <button id="btn-target-t" class="tactile-btn active-mode px-2.5 py-1.5 rounded-lg text-xs font-mono font-medium transition-all" title="默认目标：位于 y 子域下">
+            t.y.abc.com (跨区目标)
+          </button>
+          <button id="btn-target-u" class="tactile-btn px-2.5 py-1.5 rounded-lg text-xs font-mono font-medium transition-all" title="对照目标：位于 x 子域下，仍在 abc 主区">
+            u.x.abc.com (同区对照)
+          </button>
+        </div>
+
+      </div>
+
+      <!-- 控制行 2：播放控制器与速率滑块 -->
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        
+        <!-- 播放控制按键 -->
+        <div class="flex items-center gap-2">
+          <button id="btn-prev" class="tactile-btn px-3 py-1.5 rounded-lg text-xs font-medium text-stone-700 hover:bg-stone-50 flex items-center gap-1">
+            <span>⏮</span> 上一步
+          </button>
+          <button id="btn-play-toggle" class="tactile-btn px-4 py-1.5 rounded-lg text-xs font-semibold bg-stone-900 text-white hover:bg-stone-800 flex items-center gap-1.5 shadow-sm">
+            <span id="play-icon">▶</span>
+            <span id="play-text">自动演进</span>
+          </button>
+          <button id="btn-next" class="tactile-btn px-3 py-1.5 rounded-lg text-xs font-medium text-stone-700 hover:bg-stone-50 flex items-center gap-1">
+            下一步 <span>⏭</span>
+          </button>
+          <button id="btn-reset" class="tactile-btn px-3 py-1.5 rounded-lg text-xs font-medium text-stone-500 hover:text-stone-800 hover:bg-stone-50 flex items-center gap-1 ml-1">
+            <span>↺</span> 复位
+          </button>
+        </div>
+
+        <!-- 步骤进度指示胶囊 -->
+        <div id="step-progress-pills" class="flex items-center gap-1.5 overflow-x-auto py-1">
+          <!-- 动态注入 Step 1, Step 2... -->
+        </div>
+
+        <!-- 速率调节滑块 -->
+        <div class="flex items-center gap-2 text-xs">
+          <span class="text-stone-500 font-mono text-[11px]">速率:</span>
+          <input id="slider-speed" type="range" min="0.5" max="2.5" step="0.5" value="1.0" class="taste-slider w-20 sm:w-24">
+          <span id="speed-label" class="font-mono text-stone-700 w-8 text-right font-medium">1.0x</span>
+        </div>
+
+      </div>
+
+      <!-- 控制行 3：实时 HUD 解说条 (随动画节拍同步更新因果说明) -->
+      <div class="bg-stone-50 border border-[#E5E4DC] rounded-lg p-3 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 transition-colors">
+        <div class="flex items-start sm:items-center gap-3">
+          <div id="hud-step-pill" class="px-2.5 py-1 rounded bg-stone-800 text-white text-xs font-mono font-bold shrink-0 shadow-sm">
+            步骤 0 / 4
+          </div>
+          <div>
+            <div id="hud-step-title" class="text-xs sm:text-sm font-bold text-stone-900 mb-0.5">
+              准备就绪 · 点击「自动演进」或「下一步」
+            </div>
+            <div id="hud-step-desc" class="text-xs text-stone-600 leading-relaxed font-sans">
+              解析流程尚未启动。客户端主机准备发起域名解析请求。
+            </div>
+          </div>
+        </div>
+
+        <!-- 实时状态指标小卡片 -->
+        <div class="flex items-center gap-2 text-xs shrink-0 self-end sm:self-center font-mono">
+          <div class="bg-white border border-[#E5E4DC] px-2.5 py-1 rounded shadow-xs flex items-center gap-1.5">
+            <span class="text-stone-500 text-[10px]">探针吸附:</span>
+            <span id="hud-probe-node" class="font-bold text-blue-700">就绪</span>
+          </div>
+          <div class="bg-white border border-[#E5E4DC] px-2.5 py-1 rounded shadow-xs flex items-center gap-1.5">
+            <span class="text-stone-500 text-[10px]">原位计数:</span>
+            <span id="hud-outbound-num" class="font-bold text-amber-700">0 次</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 报文细节显微镜 (Packet Inspector / Protocol Detail Tray) -->
+      <details id="packet-inspector" class="bg-white border border-[#E5E4DC] rounded-lg overflow-hidden group">
+        <summary class="px-3 py-2 text-xs font-semibold text-stone-700 bg-stone-50/60 hover:bg-stone-100/60 cursor-pointer flex items-center justify-between select-none">
+          <span class="flex items-center gap-2">
+            <span>🔬 报文显微镜：当前 DNS 报文字段速查 (考研 408 核心透视)</span>
+            <span id="inspector-tag" class="px-1.5 py-0.2 rounded text-[10px] font-mono bg-blue-50 text-blue-700 border border-blue-200">
+              等待发包
+            </span>
+          </span>
+          <span class="text-stone-400 group-open:rotate-180 transition-transform">&darr;</span>
+        </summary>
+        <div class="p-3 text-xs grid grid-cols-1 md:grid-cols-3 gap-3 border-t border-stone-100 bg-[#FAF9F5]/40 font-mono">
+          <div class="space-y-1">
+            <div class="text-[10px] text-stone-500 uppercase font-bold tracking-wider">首部标志位 (Flags)</div>
+            <div class="bg-white p-2 rounded border border-stone-200 space-y-1 text-[11px]">
+              <div>QR (报文类型): <span id="dns-flag-qr" class="font-bold text-stone-800">0 (查询)</span></div>
+              <div>Opcode: <span id="dns-flag-op" class="font-bold text-stone-800">0 (标准查询)</span></div>
+              <div>AA (权威应答): <span id="dns-flag-aa" class="font-bold text-stone-800">0 (否)</span></div>
+              <div>RD (期望递归): <span id="dns-flag-rd" class="font-bold text-stone-800">1 (是)</span></div>
+            </div>
+          </div>
+          <div class="space-y-1">
+            <div class="text-[10px] text-stone-500 uppercase font-bold tracking-wider">问题区域 (Questions)</div>
+            <div class="bg-white p-2 rounded border border-stone-200 space-y-1 text-[11px]">
+              <div>查询名称: <span id="dns-qname" class="font-bold text-stone-800 font-mono">t.y.abc.com</span></div>
+              <div>查询类型: <span id="dns-qtype" class="font-bold text-stone-800 font-mono">A (IPv4 地址)</span></div>
+              <div>查询类: <span class="font-bold text-stone-800 font-mono">IN (Internet)</span></div>
+            </div>
+          </div>
+          <div class="space-y-1">
+            <div class="text-[10px] text-stone-500 uppercase font-bold tracking-wider">权威/回答记录 (RR Sections)</div>
+            <div class="bg-white p-2 rounded border border-stone-200 space-y-1 text-[11px]">
+              <div>应答记录(ANCOUNT): <span id="dns-ancount" class="font-bold text-stone-800">0</span></div>
+              <div>权威记录(NSCOUNT): <span id="dns-nscount" class="font-bold text-stone-800">0</span></div>
+              <div>附加记录(ARCOUNT): <span id="dns-arcount" class="font-bold text-stone-800">0</span></div>
+              <div class="text-[10px] text-stone-500 truncate" id="dns-rr-detail">尚未捕获到报文数据</div>
+            </div>
+          </div>
+        </div>
+      </details>
+
+    </section>
+
+  </main>
+
+  <footer class="border-t border-[#E5E4DC] py-3 text-center text-xs font-mono text-stone-400">
+    DNS 查询全景实验室 · 60fps 缓动驱动 · 域与区划分 · 迭代与递归机制
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>

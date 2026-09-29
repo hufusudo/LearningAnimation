@@ -1,0 +1,435 @@
+/* ══════════════════════════════════════════════════════════════
+   Prim 算法：帝国领土扩张与最小生成树
+   专属样式 (Taste-Skill Light Editorial & Cyber-Paper)
+   ══════════════════════════════════════════════════════════════ */
+
+:root {
+  --bg-page: #FAF9F5;
+  --border-main: #E5E4DC;
+  --border-strong: #D6D3CD;
+  --accent-blue: #2563EB;
+  --accent-amber: #D97706;
+  --accent-emerald: #059669;
+  --node-radius: 21;
+}
+
+/* 旋转光束动效 */
+@keyframes beam-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* 纸质质感滑块 */
+.taste-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 3px;
+  background: #E5E4DC;
+  border-radius: 9999px;
+  outline: none;
+}
+.taste-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #FFFFFF;
+  border: 2px solid #1C1917;
+  cursor: pointer;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+  transition: transform 0.15s ease;
+}
+.taste-slider::-webkit-slider-thumb:hover { transform: scale(1.15); }
+.taste-slider::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #FFFFFF;
+  border: 2px solid #1C1917;
+  cursor: pointer;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   §1 道路 (Edge) 四态视觉
+   境外普通路 / 前线候选虚线脉冲 / 皇家骨干发光路 / 境内闭环冗余路
+   ══════════════════════════════════════════════════════════════ */
+
+.edge { pointer-events: none; }
+
+.edge-base,
+.edge-glow,
+.edge-flow {
+  fill: none;
+  stroke-linecap: round;
+  transition: stroke 0.42s ease, stroke-width 0.42s ease,
+              opacity 0.42s ease, stroke-dasharray 0.42s ease;
+}
+
+/* — 态 1：境外普通路（浅灰细线） — */
+.edge-base { stroke: var(--border-strong); stroke-width: 2; opacity: 0.9; }
+.edge-glow { stroke: transparent; stroke-width: 8; opacity: 0; }
+.edge-flow { stroke: transparent; stroke-width: 2; opacity: 0; }
+
+/* — 态 2：前线候选边（虚线脉冲流动光效） — */
+.edge[data-state="frontier"] .edge-base {
+  stroke: #D97706;
+  stroke-width: 2.4;
+  stroke-dasharray: 0.5 7;
+  opacity: 0.5;
+}
+.edge[data-state="frontier"] .edge-flow {
+  stroke: #F59E0B;
+  stroke-width: 2.6;
+  stroke-dasharray: 7 13;
+  opacity: 0.95;
+  animation: edge-flow 1.15s linear infinite;
+}
+@keyframes edge-flow {
+  from { stroke-dashoffset: 0; }
+  to { stroke-dashoffset: -20; }
+}
+
+/* — 态 3：皇家骨干路（纳入 MST 的加粗发光实线） — */
+.edge[data-state="royal"] .edge-base {
+  stroke: var(--accent-blue);
+  stroke-width: 5;
+  stroke-dasharray: none;
+  opacity: 1;
+}
+.edge[data-state="royal"] .edge-glow {
+  stroke: #60A5FA;
+  stroke-width: 9;
+  opacity: 0.55;
+  filter: url(#fEdgeGlow);
+}
+
+/* — 态 4：境内闭环冗余路（半透明灰化 + ✕ 废弃标记） —
+   该态必然出现在领土气泡（浅蓝底）之上，故取比纸白底更深的暖灰以保证对比 */
+.edge[data-state="dead"] .edge-base {
+  stroke: #8C8880;
+  stroke-width: 1.6;
+  stroke-dasharray: 4 5;
+  opacity: 0.55;
+}
+
+/* ✕ 废弃标记 */
+.edge-dead-mark { opacity: 0; transition: opacity 0.4s ease 0.15s; }
+.edge[data-state="dead"] .edge-dead-mark { opacity: 1; }
+.edge-dead-mark line {
+  stroke: #57534E;
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+
+/* 权值标签：普通路隐藏，前线微浮动，骨干路强高亮 */
+.edge-label-bg {
+  fill: #FFFFFF;
+  stroke: var(--border-main);
+  stroke-width: 1;
+  rx: 6;
+  transition: fill 0.4s ease, stroke 0.4s ease, opacity 0.4s ease;
+}
+.edge-label-text {
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  font-weight: 600;
+  text-anchor: middle;
+  dominant-baseline: central;
+  fill: #57534E;
+  transition: fill 0.4s ease;
+}
+.edge[data-state="idle"] .edge-label-bg,
+.edge[data-state="dead"] .edge-label-bg { opacity: 0.8; }
+.edge[data-state="idle"] .edge-label-text { fill: #A8A29E; }
+.edge[data-state="dead"] .edge-label-bg { fill: #F5F5F4; stroke: #D6D3CD; }
+.edge[data-state="dead"] .edge-label-text { fill: #78716C; }
+
+.edge[data-state="frontier"] .edge-label-bg { fill: #FFFBEB; stroke: #FCD34D; }
+.edge[data-state="frontier"] .edge-label-text { fill: #B45309; }
+.edge[data-state="frontier"] .edge-label {
+  animation: label-bob 1.5s ease-in-out infinite;
+}
+@keyframes label-bob {
+  0%, 100% { transform: translateY(-1.6px); }
+  50% { transform: translateY(1.6px); }
+}
+
+.edge[data-state="royal"] .edge-label-bg { fill: #EFF6FF; stroke: #93C5FD; }
+.edge[data-state="royal"] .edge-label-text { fill: #1D4ED8; }
+.edge[data-state="royal"] .edge-dead-mark { opacity: 0; }
+
+/* — 贪心裁决阶段：被选中的边聚焦脉冲，其余候选边变暗避让 —
+   注：裁决态需同时作用于左侧画布与右侧清单，故挂在 <body> 上 */
+body.is-arbitration .edge[data-state="frontier"] { opacity: 0.22; transition: opacity 0.35s ease; }
+body.is-arbitration .edge[data-state="frontier"].is-target { opacity: 1; }
+body.is-arbitration .edge.is-target .edge-base {
+  stroke: #D97706;
+  stroke-width: 3.4;
+  stroke-dasharray: none;
+  opacity: 1;
+  animation: target-pulse 0.85s ease-in-out infinite;
+}
+body.is-arbitration .edge.is-target .edge-glow {
+  stroke: #FBBF24;
+  stroke-width: 12;
+  opacity: 0.6;
+  animation: target-glow 0.85s ease-in-out infinite;
+}
+body.is-arbitration .edge.is-target .edge-flow { opacity: 0; }
+@keyframes target-pulse {
+  0%, 100% { stroke-width: 3.2; }
+  50% { stroke-width: 4.4; }
+}
+@keyframes target-glow {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 0.8; }
+}
+
+/* ══════════════════════════════════════════════════════════════
+   §2 国家节点 (Node) 双态：未占领国 / 帝国领土
+   ══════════════════════════════════════════════════════════════ */
+
+.node { cursor: default; }
+.stage.selecting .node[data-owned="0"] { cursor: pointer; }
+.stage.selecting .node[data-owned="0"] .node-ring {
+  stroke: #93C5FD;
+  stroke-dasharray: 3 4;
+  animation: ring-hunt 1.6s linear infinite;
+}
+@keyframes ring-hunt {
+  from { stroke-dashoffset: 0; }
+  to { stroke-dashoffset: -14; }
+}
+
+.node-ring,
+.node-core {
+  transition: fill 0.45s ease, stroke 0.45s ease, r 0.45s ease;
+}
+
+/* 未占领国：中性灰底 */
+.node-core { fill: #FFFFFF; stroke: #A8A29E; stroke-width: 1.8; }
+.node-ring { fill: none; stroke: #D6D3CD; stroke-width: 1; }
+.node-halo { fill: #2563EB; opacity: 0; transition: opacity 0.5s ease; }
+
+.node-label {
+  font-family: 'Newsreader', Georgia, serif;
+  font-size: 17px;
+  font-weight: 600;
+  text-anchor: middle;
+  dominant-baseline: central;
+  fill: #57534E;
+  transition: fill 0.45s ease;
+  pointer-events: none;
+}
+.node-cap {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-anchor: middle;
+  dominant-baseline: central;
+  fill: #B45309;
+  stroke: #FAF9F5;
+  stroke-width: 3px;
+  paint-order: stroke fill;          /* 跨在骨干路上仍清晰可读 */
+  opacity: 0;
+  transition: opacity 0.4s ease;
+  pointer-events: none;
+}
+
+/* 帝国领土：统一主色高亮 + 微发光呼吸 */
+.node[data-owned="1"] .node-core { fill: var(--accent-blue); stroke: #1D4ED8; }
+.node[data-owned="1"] .node-ring { fill: none; stroke: #BFDBFE; stroke-width: 1.6; }
+.node[data-owned="1"] .node-label { fill: #FFFFFF; }
+.node[data-owned="1"] .node-halo {
+  opacity: 0.2;
+  animation: halo-breathe 2.4s ease-in-out infinite;
+}
+@keyframes halo-breathe {
+  0%, 100% { opacity: 0.12; r: 27; }
+  50% { opacity: 0.26; r: 31; }
+}
+
+/* 首都：加戴王冠环 */
+.node[data-capital="1"] .node-ring {
+  stroke: #D97706;
+  stroke-width: 2.2;
+  stroke-dasharray: none;
+}
+.node[data-capital="1"] .node-cap { opacity: 1; }
+
+/* 目标待吞并国：聚焦待命 */
+.node.is-incoming .node-core { stroke: #F59E0B; stroke-width: 2.6; }
+.node.is-incoming .node-halo { opacity: 0.3; animation: halo-breathe 0.9s ease-in-out infinite; }
+
+/* ══════════════════════════════════════════════════════════════
+   §3 能量脉冲 (沿道路滑向目标新国家)
+   ══════════════════════════════════════════════════════════════ */
+
+.pulse-dot { fill: #60A5FA; filter: url(#fEdgeGlow); }
+.pulse-trail { stroke: #93C5FD; stroke-width: 2.5; stroke-linecap: round; fill: none; }
+
+/* 吞并瞬间的新国闪环 */
+.absorb-ring {
+  fill: none;
+  stroke: #2563EB;
+  stroke-width: 2.4;
+  stroke-linecap: round;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   §7 领土气泡：缓慢巡游的虚线国界
+   ══════════════════════════════════════════════════════════════ */
+
+#blob-stroke { animation: blob-march 26s linear infinite; }
+@keyframes blob-march {
+  from { stroke-dashoffset: 0; }
+  to { stroke-dashoffset: -120; }
+}
+
+/* ══════════════════════════════════════════════════════════════
+   §4 右侧：版图集合胶囊 & 前线清单行
+   ══════════════════════════════════════════════════════════════ */
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 9999px;
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 18px;
+  border: 1px solid var(--border-main);
+  background: #FFFFFF;
+  color: #57534E;
+  transition: background 0.35s ease, color 0.35s ease, border-color 0.35s ease;
+}
+.chip-owned { background: #EFF6FF; border-color: #93C5FD; color: #1D4ED8; }
+.chip-capital { background: var(--accent-amber); border-color: #B45309; color: #FFFFFF; }
+.chip-pending { background: #FAFAF9; border-color: #E7E5E4; color: #A8A29E; }
+
+.frontier-row {
+  display: grid;
+  grid-template-columns: 22px 1fr auto auto;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 10px;
+  border: 1px solid #F5F5F4;
+  background: #FFFFFF;
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  color: #57534E;
+  transition: background 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease, opacity 0.3s ease;
+}
+.frontier-row .fr-rank { color: #A8A29E; font-size: 10px; }
+.frontier-row .fr-route { letter-spacing: 0.02em; }
+.frontier-row .fr-route b { font-weight: 700; color: #1C1917; }
+.frontier-row .fr-weight {
+  font-weight: 700;
+  font-size: 12px;
+  color: #B45309;
+  min-width: 22px;
+  text-align: right;
+}
+.frontier-row .fr-state {
+  font-size: 9px;
+  padding: 1px 5px;
+  border-radius: 9999px;
+  border: 1px solid #E7E5E4;
+  background: #FAFAF9;
+  color: #A8A29E;
+  white-space: nowrap;
+}
+
+/* 权值最小者：常态推荐高亮 */
+.frontier-row.is-candidate {
+  background: #FFFBEB;
+  border-color: #FCD34D;
+  box-shadow: inset 0 0 0 1px rgba(251, 191, 36, 0.18);
+}
+.frontier-row.is-candidate .fr-state {
+  border-color: #FCD34D;
+  background: #FEF3C7;
+  color: #B45309;
+}
+
+/* 裁决瞬间：锁定框 + 其余等待比价 */
+body.is-arbitration .frontier-row { opacity: 0.4; }
+body.is-arbitration .frontier-row.is-locked {
+  opacity: 1;
+  background: #FEF3C7;
+  border-color: #D97706;
+  box-shadow: 0 0 0 2px rgba(217, 119, 6, 0.22), 0 4px 14px -6px rgba(217, 119, 6, 0.4);
+  animation: lock-frame 0.85s ease-in-out infinite;
+}
+body.is-arbitration .frontier-row.is-locked .fr-state {
+  background: #D97706;
+  border-color: #B45309;
+  color: #FFFFFF;
+}
+@keyframes lock-frame {
+  0%, 100% { box-shadow: 0 0 0 2px rgba(217, 119, 6, 0.18), 0 4px 14px -6px rgba(217, 119, 6, 0.3); }
+  50% { box-shadow: 0 0 0 4px rgba(217, 119, 6, 0.32), 0 6px 18px -6px rgba(217, 119, 6, 0.5); }
+}
+
+.frontier-empty {
+  padding: 14px 8px;
+  text-align: center;
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+  color: #A8A29E;
+  border: 1px dashed #E7E5E4;
+  border-radius: 10px;
+  background: #FAFAF9;
+}
+
+/* 轮次进度圆点 */
+.round-dot {
+  width: 20px;
+  height: 20px;
+  border-radius: 9999px;
+  border: 1px solid #E7E5E4;
+  background: #FFFFFF;
+  color: #A8A29E;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.35s ease, color 0.35s ease, border-color 0.35s ease;
+}
+.round-dot.is-done { background: #DBEAFE; border-color: #93C5FD; color: #1D4ED8; }
+.round-dot.is-current { background: #2563EB; border-color: #1D4ED8; color: #FFFFFF; }
+
+/* 预设为激活态 */
+.preset-btn { font-weight: 500; }
+.preset-btn.active-preset { font-weight: 600; }
+
+/* 滚动条：极细纸质 */
+#frontier-list::-webkit-scrollbar { width: 4px; }
+#frontier-list::-webkit-scrollbar-track { background: transparent; }
+#frontier-list::-webkit-scrollbar-thumb { background: #E5E4DC; border-radius: 9999px; }
+#frontier-list::-webkit-scrollbar-thumb:hover { background: #D6D3CD; }
+
+/* 公式容器禁止断行溢出 */
+#cost-formula .katex { font-size: 1.02em; }
+
+/* 降低动态偏好 */
+@media (prefers-reduced-motion: reduce) {
+  #blob-stroke,
+  .edge[data-state="frontier"] .edge-flow,
+  .edge[data-state="frontier"] .edge-label,
+  body.is-arbitration .edge.is-target .edge-base,
+  body.is-arbitration .edge.is-target .edge-glow,
+  body.is-arbitration .frontier-row.is-locked,
+  .node[data-owned="1"] .node-halo,
+  .node.is-incoming .node-halo,
+  .stage.selecting .node[data-owned="0"] .node-ring {
+    animation: none;
+  }
+}

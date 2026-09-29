@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>基数排序 (Radix Sort)：LSD 最低位优先与队列分配收集机制 · 可视化实验室</title>
+
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- GSAP 动画引擎 -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+
+  <!-- KaTeX 公式渲染 -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="min-h-screen bg-[#FAF9F5] text-stone-900 flex flex-col justify-between antialiased selection:bg-stone-200 overflow-x-hidden">
+
+  <!-- ══════════ 顶部导航条 ══════════ -->
+  <header class="border-b border-[#E5E4DC] bg-[#FAF9F5]/90 backdrop-blur sticky top-0 z-40 px-4 lg:px-8 py-3">
+    <div class="max-w-7xl mx-auto flex items-center justify-between gap-4">
+      <div class="flex items-center gap-3">
+        <a href="../index.html#ds" class="text-xs font-mono text-stone-600 hover:text-stone-900 border border-[#E5E4DC] bg-white px-2.5 py-1.5 rounded-lg flex items-center gap-1 transition-colors shadow-sm" title="返回数据结构">
+          <span>&larr; 返回数据结构</span>
+        </a>
+        <div class="h-4 w-[1px] bg-stone-300 hidden sm:block"></div>
+        <h1 class="text-base font-semibold tracking-tight text-stone-900 truncate">
+          基数排序 (Radix Sort)：LSD 最低位优先与队列分配收集
+        </h1>
+      </div>
+      <div class="flex items-center gap-2">
+        <span class="text-xs font-mono px-2 py-0.5 rounded border border-blue-200 bg-blue-50 text-blue-700 font-medium">
+          LSD · 10桶FIFO队列
+        </span>
+        <span class="hidden sm:inline text-xs font-mono px-2 py-0.5 rounded border border-[#E5E4DC] bg-white text-stone-600">
+          考研 408 核心考点
+        </span>
+      </div>
+    </div>
+  </header>
+
+  <!-- ══════════ 主交互视窗与控制面板 ══════════ -->
+  <main class="flex-1 max-w-7xl w-full mx-auto p-4 lg:p-6 flex flex-col gap-5">
+    
+    <!-- 顶部非对称几何圆角与点阵微光卡片 (算法本质直观导引) -->
+    <section class="relative overflow-hidden rounded-2xl rounded-tl-3xl rounded-br-3xl border border-[#E5E4DC] bg-white p-4 lg:p-5 shadow-[0_4px_20px_-4px_rgba(0,0,0,0.04)] ring-1 ring-black/[0.03]">
+      <div class="pointer-events-none absolute inset-0 bg-[radial-gradient(#CBD5E1_1.2px,transparent_1.2px)] bg-[size:14px_14px] [mask-image:radial-gradient(ellipse_70%_60%_at_50%_50%,#000_60%,transparent_100%)]"></div>
+      <div class="relative z-10 flex flex-wrap items-center justify-between gap-2 pb-2.5 border-b border-stone-100">
+        <div class="flex items-center gap-2">
+          <span class="w-2 h-2 rounded-full bg-blue-600 animate-pulse"></span>
+          <h2 class="text-xs font-semibold tracking-wider text-stone-800 uppercase">算法直觉与数位显微镜机制</h2>
+        </div>
+        <div class="flex items-center gap-2 text-[11px] font-mono text-stone-500">
+          <span>关键字位: <strong class="text-stone-800">d = 3</strong></span>
+          <span>基数: <strong class="text-stone-800">r = 10 (0~9)</strong></span>
+          <span>规模: <strong class="text-stone-800">n = 8</strong></span>
+        </div>
+      </div>
+      <div class="relative z-10 pt-3 text-xs text-stone-600 leading-relaxed font-sans grid grid-cols-1 md:grid-cols-3 gap-3">
+        <div class="flex items-start gap-2">
+          <span class="text-blue-600 font-bold shrink-0">①</span>
+          <p><strong>最低位优先 (LSD)</strong>：从个位(10⁰)开始分配并收集，再依次进阶至十位(10¹)、百位(10²)。无需任何元素间比较，仅靠数位桶分配。</p>
+        </div>
+        <div class="flex items-start gap-2">
+          <span class="text-emerald-600 font-bold shrink-0">②</span>
+          <p><strong>严格 FIFO 物理队列</strong>：10 个基数桶均为垂直物理队列，顶部投递、底部开闸出列。最先进桶的元素最先滑出，确立<strong>算法绝对稳定性</strong>。</p>
+        </div>
+        <div class="flex items-start gap-2">
+          <span class="text-amber-600 font-bold shrink-0">③</span>
+          <p><strong>时空复杂度核心考点</strong>：总时间严格为 <span class="font-mono text-stone-800 font-semibold">O(d·(n + r))</span>，额外空间仅需 10 个队列头尾指针 <span class="font-mono text-stone-800 font-semibold">O(r)</span>。</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══════════ 核心演示大舞台 (三层垂直流式) ══════════ -->
+    <div id="stage-container" class="relative w-full rounded-2xl border border-[#E5E4DC] bg-[#FAF9F5] overflow-hidden shadow-sm flex flex-col justify-between p-4 lg:p-6 min-h-[560px]">
+      
+      <!-- 背景光影装饰：天青柔光 + 琥珀柔光 + 18px 工程图纸微网格 -->
+      <div class="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_700px_at_50%_0px,rgba(56,189,248,0.08),transparent)]"></div>
+      <div class="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_500px_at_90%_80%,rgba(245,158,11,0.06),transparent)]"></div>
+      <div class="pointer-events-none absolute inset-0 bg-[linear-gradient(to_right,rgba(0,0,0,0.035)_1px,transparent_1px),linear-gradient(to_bottom,rgba(0,0,0,0.035)_1px,transparent_1px)] bg-[size:18px_18px]"></div>
+
+      <!-- 飞行卡片挂载层 (高层级物理弹道投影) -->
+      <div id="flight-layer" class="pointer-events-none absolute inset-0 z-30 overflow-hidden"></div>
+
+      <!-- ────────────────── 顶层：主序列传送带 (主数组视图) ────────────────── -->
+      <section class="relative z-10 w-full mb-6">
+        <div class="flex items-center justify-between mb-2">
+          <div class="flex items-center gap-2">
+            <span class="text-xs font-semibold text-stone-700 tracking-tight flex items-center gap-1.5">
+              <span class="w-1.5 h-3 bg-blue-600 rounded-full"></span>
+              顶层：主序列传送带 (Main Array Slots)
+            </span>
+            <span id="belt-status-badge" class="text-[10px] font-mono px-2 py-0.5 rounded-full border border-stone-200 bg-white text-stone-600">
+              待命状态
+            </span>
+          </div>
+
+          <!-- 数位显微镜指示图例 -->
+          <div class="flex items-center gap-3 text-[11px] font-mono text-stone-500 bg-white/70 backdrop-blur-sm px-2.5 py-1 rounded-lg border border-[#E5E4DC]">
+            <span class="text-stone-400">数位显微镜:</span>
+            <span class="flex items-center gap-1">
+              <span class="px-1 py-0.5 bg-blue-600 text-white rounded font-bold text-[10px]">百</span>
+              <span class="px-1 py-0.5 bg-blue-600 text-white rounded font-bold text-[10px]">十</span>
+              <span class="px-1 py-0.5 bg-blue-600 text-white rounded font-bold text-[10px]">个</span>
+              <span class="text-stone-600 font-sans ml-1">高亮当前激活位</span>
+            </span>
+          </div>
+        </div>
+
+        <!-- 传送带卡片槽位群 -->
+        <div class="relative bg-white/80 backdrop-blur-sm rounded-xl border border-[#E5E4DC] p-3 lg:p-4 shadow-sm">
+          
+          <!-- 读取扫描探针 (平滑水平滑移) -->
+          <div id="read-probe" class="absolute -top-3 left-0 z-20 flex flex-col items-center transition-all duration-200 pointer-events-none opacity-0" style="transform: translateX(0px);">
+            <div class="bg-blue-600 text-white text-[10px] font-mono font-medium px-2 py-0.5 rounded-full shadow-md flex items-center gap-1">
+              <span>SCAN</span>
+              <span id="probe-val" class="font-bold">#0</span>
+            </div>
+            <div class="w-0 h-0 border-l-[4px] border-l-transparent border-r-[4px] border-r-transparent border-t-[5px] border-t-blue-600"></div>
+          </div>
+
+          <!-- 8 个槽位栅格 -->
+          <div id="conveyor-slots" class="grid grid-cols-4 sm:grid-cols-8 gap-2.5 lg:gap-3">
+            <!-- 由 app.js 动态渲染 8 个卡片槽位 -->
+          </div>
+        </div>
+      </section>
+
+      <!-- ────────────────── 中层：基数桶队列矩阵 (0 ~ 9 号垂直物理管道) ────────────────── -->
+      <section class="relative z-10 w-full flex-1 flex flex-col">
+        <div class="flex items-center justify-between mb-2">
+          <div class="flex items-center gap-2">
+            <span class="text-xs font-semibold text-stone-700 tracking-tight flex items-center gap-1.5">
+              <span class="w-1.5 h-3 bg-emerald-600 rounded-full"></span>
+              中层：基数桶队列矩阵 (0 ~ 9 号垂直 FIFO 管道)
+            </span>
+            <span class="text-[11px] font-mono text-stone-400">顶端漏斗投递 · 底端闸门出列</span>
+          </div>
+
+          <!-- 收集扫描光标指示 -->
+          <div id="collect-scanner-label" class="hidden text-[11px] font-mono text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200 items-center gap-1 animate-pulse">
+            <span>⚡ 收集开闸扫描线运行中</span>
+          </div>
+        </div>
+
+        <!-- 10 桶并排容器 (严格先进先出垂直管道) -->
+        <div class="relative bg-white/70 backdrop-blur-sm rounded-xl border border-[#E5E4DC] p-3 shadow-sm flex-1 flex flex-col justify-between">
+          
+          <!-- 底部出闸引导横向光标 (在收集阶段平滑滑动) -->
+          <div id="collect-scanner-beam" class="absolute left-0 bottom-1 w-full h-[2px] bg-gradient-to-r from-transparent via-emerald-500 to-transparent pointer-events-none opacity-0 z-20"></div>
+
+          <!-- 10 个物理队列桶栅格 -->
+          <div id="bucket-matrix" class="grid grid-cols-5 sm:grid-cols-10 gap-1.5 lg:gap-2 h-full min-h-[260px]">
+            <!-- 由 app.js 动态渲染 0~9 号队列桶 -->
+          </div>
+        </div>
+      </section>
+
+      <!-- ────────────────── 实时 HUD 解说条 ────────────────── -->
+      <section class="relative z-10 w-full mt-4">
+        <div id="hud-bar" class="border border-stone-200/80 bg-white/90 backdrop-blur-md rounded-xl p-3 shadow-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs">
+          <div class="flex items-center gap-2.5 min-w-0">
+            <span id="hud-step-badge" class="px-2 py-0.5 rounded-full text-[10px] font-mono font-semibold bg-stone-100 text-stone-700 border border-stone-200 shrink-0">
+              INIT
+            </span>
+            <p id="hud-text" class="text-stone-700 font-sans leading-snug">
+              准备就绪。点击【启动连续演进】或【单步步进】开始第 1 轮（个位 LSD）基数分配。
+            </p>
+          </div>
+          <div id="hud-metrics" class="flex items-center gap-3 shrink-0 text-[11px] font-mono text-stone-500">
+            <span>当前数位: <strong id="metric-digit" class="text-blue-600">个位 (10⁰)</strong></span>
+            <span>阶段: <strong id="metric-phase" class="text-stone-800">就绪</strong></span>
+          </div>
+        </div>
+      </section>
+
+    </div>
+
+    <!-- ══════════ 底层：交互控制台与轮次状态栏 ══════════ -->
+    <div class="bg-white border border-[#E5E4DC] rounded-2xl p-4 shadow-sm flex flex-col gap-4">
+      
+      <!-- 轮次阶段进度条与状态指示器 -->
+      <div class="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-stone-100 text-xs">
+        
+        <!-- 3 轮指示器 -->
+        <div class="flex items-center gap-2">
+          <span class="text-stone-400 font-mono text-xs">演进轮次:</span>
+          <div class="flex items-center gap-1.5">
+            <div id="round-pill-0" class="round-pill active-pill px-2.5 py-1 rounded-lg border border-blue-200 bg-blue-50 text-blue-800 font-mono text-xs font-medium flex items-center gap-1">
+              <span>第 1 轮</span>
+              <span class="font-sans font-normal text-[11px]">(个位 LSD)</span>
+            </div>
+            <span class="text-stone-300">&rarr;</span>
+            <div id="round-pill-1" class="round-pill px-2.5 py-1 rounded-lg border border-stone-200 bg-stone-50 text-stone-500 font-mono text-xs font-medium flex items-center gap-1">
+              <span>第 2 轮</span>
+              <span class="font-sans font-normal text-[11px]">(十位)</span>
+            </div>
+            <span class="text-stone-300">&rarr;</span>
+            <div id="round-pill-2" class="round-pill px-2.5 py-1 rounded-lg border border-stone-200 bg-stone-50 text-stone-500 font-mono text-xs font-medium flex items-center gap-1">
+              <span>第 3 轮</span>
+              <span class="font-sans font-normal text-[11px]">(百位 MSD)</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 细分子阶段 -->
+        <div class="flex items-center gap-2">
+          <div id="phase-pill-distribute" class="px-2.5 py-1 rounded-lg border border-stone-200 bg-stone-50 text-stone-600 font-mono text-xs flex items-center gap-1.5">
+            <span class="w-1.5 h-1.5 rounded-full bg-stone-400"></span>
+            <span>阶段 1: 队列分配</span>
+          </div>
+          <div id="phase-pill-collect" class="px-2.5 py-1 rounded-lg border border-stone-200 bg-stone-50 text-stone-600 font-mono text-xs flex items-center gap-1.5">
+            <span class="w-1.5 h-1.5 rounded-full bg-stone-400"></span>
+            <span>阶段 2: FIFO收集</span>
+          </div>
+          <span id="step-counter" class="text-xs font-mono text-stone-400 ml-2">步骤: 0 / 48</span>
+        </div>
+
+      </div>
+
+      <!-- 控制按键集群与预设 -->
+      <div class="flex flex-wrap items-center justify-between gap-4">
+        
+        <!-- 核心控制键组 -->
+        <div class="flex flex-wrap items-center gap-2.5">
+          <!-- 旋转光束流光 CTA (播放/暂停) -->
+          <button id="btn-play" class="group relative inline-flex items-center gap-2 px-5 py-2.5 rounded-full overflow-hidden text-xs font-medium text-stone-800 bg-white/80 backdrop-blur-md shadow-[0_2px_12px_rgba(37,99,235,0.12)] hover:shadow-[0_4px_20px_rgba(37,99,235,0.22)] hover:scale-[1.02] active:scale-[0.98] transition-all">
+            <div class="absolute inset-[-150%] w-[400%] h-[400%] pointer-events-none [animation:beam-spin_4s_linear_infinite]">
+              <div class="w-full h-full [background:conic-gradient(from_0deg,transparent_0_300deg,rgba(37,99,235,0.45)_340deg,transparent_360deg)]"></div>
+            </div>
+            <div class="absolute inset-[1px] rounded-full bg-white/90 backdrop-blur-sm pointer-events-none"></div>
+            <span id="btn-play-icon" class="relative z-10 text-blue-600 text-xs">▶</span>
+            <span id="btn-play-text" class="relative z-10 font-sans tracking-wide">启动连续演进</span>
+          </button>
+
+          <!-- 陶瓷质感双层物理触感微按键 -->
+          <button id="btn-step-prev" class="tactile-btn inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-[#E5E4DC] bg-gradient-to-b from-white to-[#F7F6F0] text-xs font-mono font-medium text-stone-700 shadow-[0_1.5px_0_#D6D3CD] hover:bg-stone-50 hover:text-stone-900 active:shadow-none active:translate-y-[1.5px] transition-all select-none" title="回退到上一个原子状态">
+            <span>⏮ 单步后退</span>
+          </button>
+
+          <button id="btn-step-next" class="tactile-btn inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-[#E5E4DC] bg-gradient-to-b from-white to-[#F7F6F0] text-xs font-mono font-medium text-stone-700 shadow-[0_1.5px_0_#D6D3CD] hover:bg-stone-50 hover:text-stone-900 active:shadow-none active:translate-y-[1.5px] transition-all select-none" title="执行下一个原子步骤">
+            <span>⏭ 单步步进</span>
+          </button>
+
+          <button id="btn-reset" class="tactile-btn inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-[#E5E4DC] bg-gradient-to-b from-white to-[#F7F6F0] text-xs font-mono font-medium text-stone-600 shadow-[0_1.5px_0_#D6D3CD] hover:bg-stone-50 hover:text-stone-900 active:shadow-none active:translate-y-[1.5px] transition-all select-none" title="复位到当前轮次初始状态">
+            <span>↺ 重置</span>
+          </button>
+
+          <!-- 速率调节器 -->
+          <div class="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-[#E5E4DC] bg-[#FAF9F5] text-xs font-mono text-stone-600">
+            <span>速度:</span>
+            <input id="slider-speed" type="range" min="0.5" max="2" step="0.5" value="1" class="taste-slider w-16" title="动画速率调节">
+            <span id="label-speed" class="font-bold text-stone-800 w-8">1.0x</span>
+          </div>
+        </div>
+
+        <!-- 数据集预设组 -->
+        <div class="flex flex-wrap items-center gap-1.5 text-xs font-mono">
+          <span class="text-stone-400 font-sans mr-1">预设:</span>
+          <button class="preset-btn active-preset px-2.5 py-1.5 rounded-lg border border-blue-200 bg-blue-50 text-blue-800 hover:bg-blue-100 transition-colors" data-preset="classic">
+            经典乱序
+          </button>
+          <button class="preset-btn px-2.5 py-1.5 rounded-lg border border-[#E5E4DC] bg-white text-stone-600 hover:bg-stone-50 transition-colors" data-preset="reverse">
+            逆序数据
+          </button>
+          <button class="preset-btn px-2.5 py-1.5 rounded-lg border border-[#E5E4DC] bg-white text-stone-600 hover:bg-stone-50 transition-colors" data-preset="conflict">
+            同数位对抗 (验稳定性)
+          </button>
+          <button id="btn-custom-toggle" class="px-2.5 py-1.5 rounded-lg border border-[#E5E4DC] bg-white text-stone-600 hover:bg-stone-50 transition-colors">
+            自定义数据 ✎
+          </button>
+        </div>
+
+      </div>
+
+      <!-- 自定义数据输入折叠面板 -->
+      <div id="custom-panel" class="hidden pt-3 border-t border-stone-100 flex flex-wrap items-center gap-2 text-xs">
+        <span class="text-stone-500 font-sans">输入 8 个三位数 (以逗号分隔，范围 000~999):</span>
+        <input id="input-custom" type="text" class="flex-1 min-w-[240px] px-3 py-1.5 rounded-lg border border-stone-300 font-mono text-xs focus:outline-none focus:ring-1 focus:ring-blue-500" value="278, 109, 063, 930, 589, 184, 505, 269">
+        <button id="btn-custom-apply" class="px-3 py-1.5 rounded-lg bg-blue-600 text-white font-medium hover:bg-blue-700 transition-colors">
+          应用并重新发车
+        </button>
+      </div>
+
+    </div>
+
+    <!-- ══════════ 考点解析与复杂度小卡片 ══════════ -->
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+      <div class="border border-emerald-200 bg-emerald-50/50 rounded-xl p-3.5 leading-relaxed text-emerald-900 flex items-start gap-2.5">
+        <span class="text-emerald-600 font-bold shrink-0 text-sm">💡</span>
+        <div>
+          <strong class="font-semibold">为什么基数排序必须用先进先出 (FIFO) 队列？</strong><br>
+          <span class="text-emerald-800/90">
+            若采用后进先出 (LIFO/栈)，在第二轮收集时，前一轮已排好的相对次序就会被完全颠倒，导致高位排序破坏低位排序成果。只有 FIFO 队列才能保证相同关键字元素的相对次序保持不变，从而维系算法的<strong>稳定性</strong>。
+          </span>
+        </div>
+      </div>
+
+      <div class="border border-sky-200 bg-sky-50/50 rounded-xl p-3.5 leading-relaxed text-sky-900 flex items-start gap-2.5">
+        <span class="text-sky-600 font-bold shrink-0 text-sm">📐</span>
+        <div>
+          <strong class="font-semibold">考研 408 重点：链式基数排序的时间与空间</strong><br>
+          <span class="text-sky-800/90">
+            每轮分配需要扫描 <span class="font-mono font-medium">n</span> 个元素挂入对应队列，收集需要遍历 <span class="font-mono font-medium">r</span> 个队列的头尾指针首尾相接，因此每轮耗时 <span class="font-mono font-medium">O(n + r)</span>。共进行 <span class="font-mono font-medium">d</span> 轮，总时间复杂度为 <span class="font-mono font-medium">O(d·(n + r))</span>。
+          </span>
+        </div>
+      </div>
+    </div>
+
+  </main>
+
+  <!-- ══════════ 底部署名 ══════════ -->
+  <footer class="border-t border-[#E5E4DC] py-4 text-center text-xs font-mono text-stone-400">
+    LearningAnimation · 基数排序 LSD 队列分配与收集可视化 · 严格 FIFO 物理时序
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>

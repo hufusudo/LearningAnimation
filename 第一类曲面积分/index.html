@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="从非均匀密度的铁皮曲面出发，用微元切片、法向量夹角 cos γ 与投影还原直观理解第一类曲面积分。">
+  <title>第一类曲面积分 · 可视化实验室</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+  <script defer src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+  <script defer src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+  <script defer src="model.js"></script>
+  <script defer src="app.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="back-link" href="../index.html#math">← 返回高等数学</a>
+    <span class="header-divider"></span>
+    <h1>第一类曲面积分</h1>
+    <span class="header-note">曲面称重 &rarr; 微元放大 &rarr; 投影还原成二重积分</span>
+  </header>
+
+  <main>
+    <!-- ============ 顶部 HUD 控制区 ============ -->
+    <section class="hud" aria-label="演示控制台">
+      <div class="hud-block hud-stages">
+        <span class="hud-label">认知阶段</span>
+        <div class="stage-pills" role="group" aria-label="切换认知阶段">
+          <button type="button" class="stage-pill is-active" data-capsule="1" aria-pressed="true">1. 铁皮与非均匀密度场</button>
+          <button type="button" class="stage-pill" data-capsule="2" aria-pressed="false">2. 微元切片与称重</button>
+          <button type="button" class="stage-pill" data-capsule="3" aria-pressed="false">3. 投影还原与二重积分转化</button>
+        </div>
+        <div class="step-track" id="step-track" aria-hidden="true"></div>
+      </div>
+
+      <div class="hud-block hud-controls">
+        <label class="control-slider" for="n-slider">
+          <span class="control-name">曲面细分</span>
+          <input id="n-slider" class="paper" type="range" min="0" max="12" step="1" value="4" aria-label="曲面网格细分数量 N">
+          <output id="n-label" for="n-slider">N = 16 · 256 块</output>
+        </label>
+
+        <div class="seg" role="group" aria-label="面密度分布">
+          <button type="button" data-rho="uniform" aria-pressed="false">均匀 ρ = 1</button>
+          <button type="button" data-rho="gradient" class="is-active" aria-pressed="true">渐变 · 高处重</button>
+        </div>
+
+        <div class="transport" role="group" aria-label="播放控制">
+          <button type="button" id="restart" class="icon-btn" title="回到开头" aria-label="回到开头">↺</button>
+          <button type="button" id="prev" class="icon-btn" title="上一步" aria-label="上一步">‹</button>
+          <button type="button" id="play" class="play-btn" aria-label="播放演示">▶ 播放</button>
+          <button type="button" id="next" class="icon-btn" title="下一步" aria-label="下一步">›</button>
+          <select id="speed" aria-label="播放速度">
+            <option value="0.5">0.5×</option>
+            <option value="1" selected>1×</option>
+            <option value="1.5">1.5×</option>
+            <option value="2">2×</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="hud-block meters" aria-label="物理量计量牌">
+        <div class="meter">
+          <span class="meter-name">总质量 <i>M</i></span>
+          <strong id="meter-mass">0.0000</strong>
+          <small>g &nbsp;·&nbsp; 精确 <b id="mass-exact">43.9466</b></small>
+          <i class="meter-track"><b id="mass-track"></b></i>
+        </div>
+        <div class="meter">
+          <span class="meter-name">总表面积 <i>S</i></span>
+          <strong id="meter-area">0.0000</strong>
+          <small>cm² &nbsp;·&nbsp; 精确 <b id="area-exact">18.1416</b></small>
+          <i class="meter-track"><b id="area-track"></b></i>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ 主舞台 + 特写工作台 ============ -->
+    <section class="workspace">
+      <div class="stage-panel">
+        <div class="panel-head">
+          <span class="panel-title">主舞台 · 空间铁皮 <span class="tex" data-tex="\Sigma"></span></span>
+          <span class="panel-eq tex" data-tex="\Sigma:\ z=z(x,\,y),\quad (x,y)\in D_{xy}:[-2,2]^2"></span>
+          <span class="mouse-hint">拖动旋转 · 滚轮缩放 · 悬停读密度 · 点击换微元</span>
+        </div>
+
+        <div id="scene" tabindex="0" aria-label="可旋转的三维曲面，颜色深浅表示面密度；下方是投影底板">
+          <div id="labels" aria-hidden="true"></div>
+          <div id="scene-error" class="scene-error" role="alert" hidden></div>
+
+          <div id="probe" class="probe" role="status" hidden></div>
+
+          <div id="balance" class="balance" data-show="3" hidden>
+            <div class="balance-head">微元称重</div>
+            <svg class="balance-svg" viewBox="0 0 150 78" aria-hidden="true">
+              <path class="stand" d="M75 34 V66 M58 68 H92"></path>
+              <g class="beam-g" transform="rotate(0 75 32)">
+                <line class="beam" x1="34" y1="32" x2="116" y2="32"></line>
+                <line class="rope" x1="40" y1="32" x2="40" y2="44"></line>
+                <line class="rope" x1="110" y1="32" x2="110" y2="44"></line>
+                <path class="pan" d="M28 44 h24 l-5 10 h-14 z"></path>
+                <path class="pan" d="M98 44 h24 l-5 10 h-14 z"></path>
+                <circle class="chip" cx="40" cy="37" r="6"></circle>
+              </g>
+            </svg>
+            <p class="balance-eq tex" data-tex="\Delta M_i \approx \rho_i \cdot \Delta S_i"></p>
+            <p class="balance-nums" id="balance-nums">ΔSᵢ = — · ρᵢ = —</p>
+          </div>
+
+          <div class="stage-note" data-show="9" hidden>
+            <h4>每块碎片的质量</h4>
+            <p class="tex" data-display="1" data-tex="\Delta M_i=\rho(x_i,y_i,z_i)\sqrt{1+z_x^2+z_y^2}\,\Delta x_i\Delta y_i"></p>
+          </div>
+
+          <div id="counter" class="counter" data-show="10,11" hidden>
+            <span class="counter-name">已汇入 D<sub>xy</sub> 的质量</span>
+            <strong id="counter-value">0.0000</strong><span class="counter-unit" id="counter-unit">g / 43.9466 g</span>
+            <i class="counter-track"><b id="counter-fill"></b></i>
+          </div>
+
+          <div class="stage-note stage-final" data-show="11" hidden>
+            <h4>曲面碎片 &rarr; 底面二重积分</h4>
+            <p class="tex" data-display="1" data-tex="M=\iint_{D_{xy}}\rho\big(x,y,z(x,y)\big)\sqrt{1+z_x^{2}+z_y^{2}}\;\mathrm{d}x\mathrm{d}y"></p>
+          </div>
+        </div>
+
+        <div class="panel-foot">
+          <div class="legend" aria-label="颜色越深表示面密度越大">
+            <span>面密度 <span class="tex" data-tex="\rho"></span> <small>g/cm²</small></span>
+            <i class="color-scale" id="color-scale"></i>
+            <div class="legend-ticks"><span id="tick-min">0.8</span><span id="tick-mid">2.2</span><span id="tick-max">3.6</span></div>
+          </div>
+          <div class="foot-eq tex" data-tex="\rho(x,y,z)=\textstyle\begin{cases}1 & \text{均匀}\\[2pt] 0.8+2.8\cdot\dfrac{z-z_{\min}}{z_{\max}-z_{\min}} & \text{高处重低处轻}\end{cases}"></div>
+        </div>
+      </div>
+
+      <aside class="micro-panel" aria-label="空间微元法向量与投影显微镜">
+        <div class="panel-head">
+          <span class="panel-title">特写工作台 · 微元显微镜</span>
+          <span class="badge" id="micro-badge">镜头待命</span>
+        </div>
+
+        <div id="micro-scene" aria-label="放大的曲面微元及其在底面的影子">
+          <div id="micro-labels" aria-hidden="true"></div>
+
+          <div class="callout" data-show="5" hidden>
+            <h4>面与面的夹角 = 法向量的夹角</h4>
+            <p>投影底面在 <span class="tex" data-tex="xOy"></span> 上，法向量为 <span class="tex" data-tex="\vec{k}=(0,0,1)"></span>；空间曲面倾斜后法向量为 <span class="tex" data-tex="\vec{n}"></span>，两者的二面角等于法向量夹角 <span class="tex" data-tex="\gamma"></span>。</p>
+          </div>
+
+          <div class="callout" data-show="6" hidden>
+            <h4>点积求余弦：</h4>
+            <p class="display tex" data-display="1" data-tex="\cos\gamma=\frac{\vec{n}\cdot\vec{k}}{\vert\vec{n}\vert\vert\vec{k}\vert}=\frac{1}{\sqrt{1+z_x^{2}+z_y^{2}}}"></p>
+            <p class="numbers" id="dot-nums">n = (−0.775, −0.139, 1)，n·k = 1，|n| = 1.2725</p>
+          </div>
+
+          <div class="callout" data-show="7,8" hidden>
+            <h4>斜面必定比影子大：</h4>
+            <p class="line" data-focus="7"><span>影子面积</span><span class="tex" data-display="1" data-tex="\mathrm{d}x\mathrm{d}y=\mathrm{d}S\cdot\cos\gamma"></span></p>
+            <p class="line" data-focus="8"><span>还原斜面面积：</span><span class="tex" data-display="1" data-tex="\mathrm{d}S=\frac{\mathrm{d}x\mathrm{d}y}{\cos\gamma}=\sqrt{1+z_x^{2}+z_y^{2}}\,\mathrm{d}x\mathrm{d}y"></span></p>
+            <p class="numbers" id="press-nums">dS = 0.5905 cm² · dx dy = 0.4624 cm² · dx dy / dS = 0.783 = cos γ</p>
+          </div>
+        </div>
+
+        <div class="micro-foot">
+          <p class="tex" data-display="1" data-tex="\mathrm{d}S=\sqrt{1+z_x^{2}+z_y^{2}}\;\mathrm{d}x\mathrm{d}y"></p>
+          <span id="micro-nums">γ = 38.2° · cos γ = 0.786 · 1/cos γ = 1.273</span>
+        </div>
+      </aside>
+    </section>
+
+    <!-- ============ 解说条 ============ -->
+    <section class="lesson-log" aria-live="polite" aria-atomic="true">
+      <div class="log-head">
+        <span class="log-mark" id="log-step">步骤 1 / 12</span>
+        <h2 id="log-title">一张还没上色的铁皮</h2>
+      </div>
+      <p id="log-note">先看看这张弯曲的空间铁皮 Σ：z = z(x, y)。</p>
+      <div class="integral-chain" aria-label="第一类曲面积分的三步走">
+        <span class="chain-part" data-part="1" data-display="1" data-tex="M=\iint_{\Sigma}\rho\,\mathrm{d}S"></span>
+        <span class="chain-part" data-part="2" data-display="1" data-tex="=\iint_{D_{xy}}\rho\big(x,y,z(x,y)\big)\sqrt{1+z_x^{2}+z_y^{2}}\;\mathrm{d}x\mathrm{d}y"></span>
+        <span class="chain-part" data-part="3" data-display="1" data-tex="=\sum_i \rho_i\sqrt{1+z_{x,i}^{2}+z_{y,i}^{2}}\;\Delta x_i\Delta y_i"></span>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

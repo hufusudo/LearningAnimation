@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>文件索引寻道与缓冲写回 · 可视化实验室</title>
+
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- GSAP 动画引擎 -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="min-h-screen bg-[#FAF9F5] text-stone-900 flex flex-col antialiased selection:bg-stone-200">
+
+  <!-- 顶部导航条 -->
+  <header class="border-b border-[#E5E4DC] bg-[#FAF9F5]/90 backdrop-blur sticky top-0 z-40 px-4 lg:px-8 py-3">
+    <div class="max-w-[1680px] mx-auto flex items-center justify-between gap-4">
+      <div class="flex items-center gap-3 min-w-0">
+        <a href="../index.html#os" class="text-xs font-mono text-stone-600 hover:text-stone-900 border border-[#E5E4DC] bg-white px-2.5 py-1.5 rounded-lg flex items-center gap-1 transition-colors shadow-sm shrink-0" title="返回计算机操作系统">
+          <span>&larr; 返回计算机操作系统</span>
+        </a>
+        <div class="h-4 w-[1px] bg-stone-300 hidden sm:block"></div>
+        <h1 class="text-base font-semibold tracking-tight text-stone-900 truncate">文件索引寻道与缓冲写回</h1>
+        <span class="hidden md:inline text-[10px] font-mono text-stone-500 border border-[#E5E4DC] bg-white px-2 py-0.5 rounded">fd → 系统表 → inode → 磁盘块</span>
+      </div>
+      <div class="flex items-center gap-2 shrink-0">
+        <span class="text-xs font-mono px-2 py-0.5 rounded border border-[#E5E4DC] bg-white text-stone-600">计算机操作系统</span>
+      </div>
+    </div>
+  </header>
+
+  <main class="flex-1 w-full max-w-[1680px] mx-auto p-3 lg:p-5 flex flex-col gap-4">
+
+    <!-- ══════════ 顶部 HUD 控制栏 ══════════ -->
+    <section id="hud" class="bg-white border border-[#E5E4DC] rounded-xl shadow-sm p-3 flex flex-col gap-3">
+      <!-- 第一行：路径目标 / 进度指示 / 速度 / 复位 -->
+      <div class="flex flex-wrap items-center gap-x-4 gap-y-2">
+        <div class="flex items-center gap-2">
+          <span class="text-[11px] font-mono text-stone-500 shrink-0">路径目标</span>
+          <input id="path-input" spellcheck="false" value="/users/docs/test.txt"
+                 class="font-mono text-xs bg-[#FAF9F5] border border-[#E5E4DC] rounded-lg px-2.5 py-1.5 w-[196px] focus:outline-none focus:ring-2 focus:ring-blue-200 transition-shadow">
+        </div>
+
+        <div class="flex items-center gap-2 min-w-[260px] flex-1">
+          <span id="op-led" class="led led-stone"></span>
+          <span id="op-stage" class="text-[11px] font-mono px-2 py-0.5 rounded border border-[#E5E4DC] bg-[#FAF9F5] text-stone-500 shrink-0">阶段 0 / 4</span>
+          <span id="op-label" class="text-xs text-stone-700 truncate">待机 · 点击下方按钮开始寻道演示</span>
+        </div>
+
+        <div class="flex items-center gap-3">
+          <div class="flex items-center gap-2">
+            <span class="text-[11px] text-stone-500 font-mono">速度</span>
+            <input id="speed" type="range" min="0.5" max="2" step="0.5" value="1" class="taste-slider w-20">
+            <span id="speed-val" class="text-[11px] font-mono text-stone-700 w-8">1.0x</span>
+          </div>
+          <button id="btn-reset" class="btn">↺ 复位</button>
+        </div>
+      </div>
+
+      <!-- 第二行：三大操作动作 + 阶段进度胶囊 -->
+      <div class="flex flex-wrap items-center gap-2 relative">
+        <button id="btn-seek"    class="btn btn-primary">▶ 完整寻道读取</button>
+        <button id="btn-modify"  class="btn" disabled>✏️ 修改 test.txt 并验证 link.txt</button>
+        <button id="btn-flush"   class="btn" disabled>💾 缓冲区刷盘写回</button>
+        <div id="toast" class="toast" aria-live="polite"></div>
+
+        <div class="ml-auto flex items-center gap-1.5" id="stage-chips">
+          <span class="chip" data-chip="1">① 目录逐级定位</span>
+          <span class="chip" data-chip="2">② 双进程打开</span>
+          <span class="chip" data-chip="3">③ 多级索引寻道</span>
+          <span class="chip" data-chip="4">④ 修改 · 验证 · 刷盘</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══════════ 横向四栏贯通工作台 ══════════ -->
+    <section id="workspace"
+             class="relative grid gap-3 grid-cols-1 lg:grid-cols-2 xl:grid-cols-[236px_220px_minmax(0,1.08fr)_minmax(0,1.24fr)] items-start">
+
+      <!-- 叠加特效层：探针 / 引线 / 光束 -->
+      <svg id="fx" class="absolute inset-0 w-full h-full pointer-events-none z-20"></svg>
+
+      <!-- ─────── 栏 1：目录树视图（用户态视窗） ─────── -->
+      <section class="panel">
+        <div class="panel-head">
+          <h2>栏 1 · 目录树视图</h2>
+          <span class="panel-sub">用户态视窗</span>
+        </div>
+
+        <ul class="tree">
+          <li>
+            <div class="tnode" id="n-root" data-node="root">
+              <span class="t-toggle">▾</span><span class="t-ico">📁</span>
+              <span class="t-name">/</span><span class="t-ino">inode #1</span>
+            </div>
+            <ul>
+              <li>
+                <div class="tnode" id="n-users" data-node="users">
+                  <span class="t-toggle">▾</span><span class="t-ico">📁</span>
+                  <span class="t-name">users</span><span class="t-ino">#2</span>
+                </div>
+                <ul>
+                  <li>
+                    <div class="tnode" id="n-docs" data-node="docs">
+                      <span class="t-toggle">▾</span><span class="t-ico">📁</span>
+                      <span class="t-name">docs</span><span class="t-ino">#5</span>
+                    </div>
+                    <ul>
+                      <li>
+                        <div class="tnode t-file" id="n-test" data-node="test">
+                          <span class="t-toggle ghost">&nbsp;</span><span class="t-ico">📄</span>
+                          <span class="t-name">test.txt</span><span class="t-ino">#8</span>
+                          <span class="t-lock" id="lock-test">已锁定</span>
+                        </div>
+                      </li>
+                    </ul>
+                  </li>
+                  <li>
+                    <div class="tnode" id="n-backup" data-node="backup">
+                      <span class="t-toggle">▾</span><span class="t-ico">📁</span>
+                      <span class="t-name">backup</span><span class="t-ino">#6</span>
+                    </div>
+                    <ul>
+                      <li>
+                        <div class="tnode t-file" id="n-link" data-node="link">
+                          <span class="t-toggle ghost">&nbsp;</span><span class="t-ico">📄</span>
+                          <span class="t-name">link.txt</span><span class="t-ino">#8</span>
+                          <span class="t-link-badge" id="badge-link">🔗 硬链接</span>
+                        </div>
+                      </li>
+                    </ul>
+                  </li>
+                </ul>
+              </li>
+            </ul>
+          </li>
+        </ul>
+
+        <div class="note note-tip">
+          <span class="note-tag">[!tip]</span>
+          <code class="font-mono">docs/test.txt</code> 与 <code class="font-mono">backup/link.txt</code>
+          是<strong>两个目录项</strong>，却指向<strong>同一个 inode #8</strong> —— 这就是硬链接。
+        </div>
+      </section>
+
+      <!-- ─────── 栏 2：进程打开文件表（PCB 视角） ─────── -->
+      <section class="panel">
+        <div class="panel-head">
+          <h2>栏 2 · 进程打开文件表</h2>
+          <span class="panel-sub">PCB 视角</span>
+        </div>
+
+        <div class="proc" id="proc-a">
+          <div class="proc-head">
+            <span class="proc-name">进程 A · PID 1024</span>
+            <span class="led led-stone" id="led-a"></span>
+          </div>
+          <div class="proc-cmd font-mono">open("/users/docs/test.txt")</div>
+          <table class="fdtable">
+            <thead><tr><th>fd</th><th>指向</th></tr></thead>
+            <tbody id="fd-a">
+              <tr class="fd-std"><td>0</td><td>stdin</td></tr>
+              <tr class="fd-std"><td>1</td><td>stdout</td></tr>
+              <tr class="fd-std"><td>2</td><td>stderr</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="proc" id="proc-b">
+          <div class="proc-head">
+            <span class="proc-name">进程 B · PID 2048</span>
+            <span class="led led-stone" id="led-b"></span>
+          </div>
+          <div class="proc-cmd font-mono">open("/users/backup/link.txt")</div>
+          <table class="fdtable">
+            <thead><tr><th>fd</th><th>指向</th></tr></thead>
+            <tbody id="fd-b">
+              <tr class="fd-std"><td>0</td><td>stdin</td></tr>
+              <tr class="fd-std"><td>1</td><td>stdout</td></tr>
+              <tr class="fd-std"><td>2</td><td>stderr</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="note note-note">
+          <span class="note-tag">[!note]</span>
+          fd 是<strong>进程局部</strong>的：A 的 <code class="font-mono">fd=3</code> 与 B 的
+          <code class="font-mono">fd=4</code> 互不相干，但引线的<strong>终点相同</strong>。
+        </div>
+      </section>
+
+      <!-- ─────── 栏 3：内核工作区 ─────── -->
+      <section class="panel">
+        <div class="panel-head">
+          <h2>栏 3 · 内核工作区</h2>
+          <span class="panel-sub">常驻区 · 系统表 · Buffer Pool</span>
+        </div>
+
+        <!-- 常驻内存区 -->
+        <div class="kcard" id="resident">
+          <div class="kcard-head">
+            <span>常驻内存区 · Root Cache</span>
+            <span class="tag tag-stone">不可淘汰</span>
+          </div>
+          <div class="dirtab">
+            <div class="dirrow"><span class="dn">.</span><span class="di">➜ inode #1</span></div>
+            <div class="dirrow"><span class="dn">..</span><span class="di">➜ inode #1</span></div>
+            <div class="dirrow" id="row-users"><span class="dn">users</span><span class="di">➜ inode #2</span></div>
+          </div>
+        </div>
+
+        <!-- 系统打开文件表 -->
+        <div class="kcard">
+          <div class="kcard-head">
+            <span>系统打开文件表</span>
+            <span class="tag tag-stone">全局</span>
+          </div>
+          <table class="systab">
+            <thead>
+              <tr><th>表项</th><th>inode</th><th>offset</th><th>Open Count</th></tr>
+            </thead>
+            <tbody>
+              <tr class="sy-idle"><td>（空闲）</td><td>—</td><td>—</td><td>—</td></tr>
+              <tr id="sysrow" class="sy-off">
+                <td id="sys-name">test.txt / link.txt</td>
+                <td class="font-mono">#8</td>
+                <td class="font-mono" id="sys-offset">0</td>
+                <td>
+                  <span class="oc-wrap">
+                    <span class="led led-stone" id="led-oc"></span>
+                    <span class="oc-num" id="oc-num">0</span>
+                  </span>
+                </td>
+              </tr>
+              <tr class="sy-idle"><td>（空闲）</td><td>—</td><td>—</td><td>—</td></tr>
+            </tbody>
+          </table>
+          <div class="mini-note">引用计数 = 指向该表项的 fd 数量；为 0 时才允许回收。</div>
+          <div class="share-flag" id="share-flag" hidden>
+            🔗 进程 A 的 fd=3 与进程 B 的 fd=4 <strong>汇聚到同一表项</strong>：共享 inode #8（硬链接）
+          </div>
+        </div>
+
+        <!-- inode #8 索引结构 -->
+        <div class="kcard" id="ino-card">
+          <div class="kcard-head clickable" id="ino-toggle">
+            <span>inode #8 · test.txt <span class="text-stone-400 font-normal">（普通文件 · 引用计数 <span id="ino-count">0</span>）</span></span>
+            <span class="tag tag-stone" id="ino-toggle-tag">▸ 展开索引</span>
+          </div>
+          <div class="ino-body" id="ino-body">
+            <div class="ino-grid">
+              <div class="ino-cell" id="ino-direct">
+                <div class="ino-lab">直接索引 [0]</div>
+                <div class="ino-val">➜ Block 4</div>
+              </div>
+              <div class="ino-cell" id="ino-indirect">
+                <div class="ino-lab">一级间接索引</div>
+                <div class="ino-val">➜ Block 3</div>
+              </div>
+            </div>
+            <div class="ino-sub" id="ino-sub">
+              <div class="ino-lab mb-1">Block 3 间接表内容</div>
+              <div class="ind-row" data-ind="0"><span>ind[0]</span><b>➜ Block 5</b></div>
+              <div class="ind-row" data-ind="1"><span>ind[1]</span><b>➜ Block 6</b></div>
+              <div class="ind-row" data-ind="2"><span>ind[2]</span><b class="text-stone-400">空</b></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 内存缓冲区 Buffer Pool -->
+        <div class="kcard">
+          <div class="kcard-head">
+            <span>内存缓冲区 · Buffer Pool</span>
+            <span class="tag tag-stone">6 槽位</span>
+          </div>
+          <div class="pool" id="pool">
+
+            <div class="slot slot-empty" id="buf-users">
+              <div class="slot-head"><span class="slot-id">buf #0</span><span class="led led-stone slot-led"></span></div>
+              <div class="slot-src">源：Block 1 · users 目录</div>
+              <div class="slot-status"><span class="st-pill">未载入</span></div>
+              <div class="slot-body">
+                <div class="slot-placeholder">— 空 —</div>
+                <div class="dirtab hidden">
+                  <div class="dirrow"><span class="dn">.</span><span class="di">➜ #2</span></div>
+                  <div class="dirrow"><span class="dn">..</span><span class="di">➜ #1</span></div>
+                  <div class="dirrow" data-match="docs"><span class="dn">docs</span><span class="di">➜ inode #5</span></div>
+                  <div class="dirrow" data-match="backup"><span class="dn">backup</span><span class="di">➜ inode #6</span></div>
+                </div>
+              </div>
+            </div>
+
+            <div class="slot slot-empty" id="buf-docs">
+              <div class="slot-head"><span class="slot-id">buf #1</span><span class="led led-stone slot-led"></span></div>
+              <div class="slot-src">源：Block 2 · docs 目录</div>
+              <div class="slot-status"><span class="st-pill">未载入</span></div>
+              <div class="slot-body">
+                <div class="slot-placeholder">— 空 —</div>
+                <div class="dirtab hidden">
+                  <div class="dirrow"><span class="dn">.</span><span class="di">➜ #5</span></div>
+                  <div class="dirrow"><span class="dn">..</span><span class="di">➜ #2</span></div>
+                  <div class="dirrow" data-match="test.txt"><span class="dn">test.txt</span><span class="di">➜ inode #8</span></div>
+                </div>
+              </div>
+            </div>
+
+            <div class="slot slot-empty" id="buf-backup">
+              <div class="slot-head"><span class="slot-id">buf #2</span><span class="led led-stone slot-led"></span></div>
+              <div class="slot-src">源：Block 7 · backup 目录</div>
+              <div class="slot-status"><span class="st-pill">未载入</span></div>
+              <div class="slot-body">
+                <div class="slot-placeholder">— 空 —</div>
+                <div class="dirtab hidden">
+                  <div class="dirrow"><span class="dn">.</span><span class="di">➜ #6</span></div>
+                  <div class="dirrow"><span class="dn">..</span><span class="di">➜ #2</span></div>
+                  <div class="dirrow" data-match="link.txt"><span class="dn">link.txt</span><span class="di">➜ inode #8</span></div>
+                </div>
+              </div>
+            </div>
+
+            <div class="slot slot-empty slot-wide" id="buf-idx">
+              <div class="slot-head"><span class="slot-id">buf #3</span><span class="led led-stone slot-led"></span></div>
+              <div class="slot-src">源：Block 3 · 一级间接索引块</div>
+              <div class="slot-status"><span class="st-pill">未载入</span></div>
+              <div class="slot-body">
+                <div class="slot-placeholder">— 空 —</div>
+                <div class="dirtab hidden">
+                  <div class="dirrow ind" data-match="ind0"><span class="dn">ind[0]</span><span class="di">➜ Block 5</span></div>
+                  <div class="dirrow ind" data-match="ind1"><span class="dn">ind[1]</span><span class="di">➜ Block 6</span></div>
+                </div>
+              </div>
+            </div>
+
+            <div class="slot slot-empty slot-wide" id="buf-data">
+              <div class="slot-head"><span class="slot-id">buf #4 · 数据</span><span class="led led-stone slot-led"></span></div>
+              <div class="slot-src">源：Block 4 · test.txt 首块（直接索引）</div>
+              <div class="slot-status"><span class="st-pill">未载入</span></div>
+              <div class="slot-body">
+                <div class="slot-placeholder">— 空 —</div>
+                <div class="datacell hidden"><span id="data-text"></span><span class="caret" id="data-caret"></span></div>
+              </div>
+            </div>
+
+            <div class="slot slot-empty slot-wide" id="buf-data2">
+              <div class="slot-head"><span class="slot-id">buf #5 · 数据</span><span class="led led-stone slot-led"></span></div>
+              <div class="slot-src">源：Block 5 · test.txt 后续块（间接索引）</div>
+              <div class="slot-status"><span class="st-pill">未载入</span></div>
+              <div class="slot-body">
+                <div class="slot-placeholder">— 空 —</div>
+                <div class="datacell hidden"><span id="data2-text"></span></div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      </section>
+
+      <!-- ─────── 栏 4：外存物理磁盘阵列 ─────── -->
+      <section class="panel">
+        <div class="panel-head">
+          <h2>栏 4 · 外存物理磁盘阵列</h2>
+          <span class="panel-sub">Disk Blocks 0 ~ 31</span>
+        </div>
+
+        <div class="legend">
+          <span class="lg lg-super">超级块</span>
+          <span class="lg lg-dir">目录文件块</span>
+          <span class="lg lg-idx">索引块</span>
+          <span class="lg lg-data">真实数据块</span>
+          <span class="lg lg-free">空闲块</span>
+        </div>
+
+        <div class="disk" id="disk"><!-- 由 app.js 生成 Block 0 ~ 31 --></div>
+
+        <div class="io-bar">
+          <span class="led led-stone" id="led-io"></span>
+          <span id="io-status" class="font-mono text-[11px] text-stone-500">I/O 空闲 · 探针待命</span>
+        </div>
+
+        <div class="note note-important">
+          <span class="note-tag">[!important]</span>
+          内存与外存之间靠<strong>探针 + 轨迹</strong>寻址：读操作把磁盘块<strong>复制</strong>进 Buffer Pool，
+          写操作（刷盘）才会<strong>真正改写</strong>磁盘。
+        </div>
+      </section>
+    </section>
+  </main>
+
+  <!-- ══════════ 「改一变二」并列对比窗 ══════════ -->
+  <div id="cmp-backdrop" class="cmp-backdrop">
+    <div id="cmp-modal" class="cmp-modal" role="dialog" aria-modal="true" aria-labelledby="cmp-title">
+      <div class="flex items-center justify-between gap-4 mb-3">
+        <h3 id="cmp-title" class="text-sm font-semibold">✏️ 验证「改一变二」：两个文件读到的内容</h3>
+        <button id="cmp-close" class="btn text-[11px] px-2 py-1">✕ 关闭</button>
+      </div>
+      <div class="cmp-grid">
+        <div class="cmp-card">
+          <div class="cmp-head"><span>📄 test.txt</span><span class="cmp-path font-mono">/users/docs/test.txt</span></div>
+          <div class="cmp-meta font-mono">fd = 3 &nbsp;·&nbsp; inode #8 &nbsp;·&nbsp; buf #4</div>
+          <div class="cmp-body font-mono" id="cmp-a">Hello OS! Modified!</div>
+        </div>
+        <div class="cmp-card">
+          <div class="cmp-head"><span>📄 link.txt</span><span class="cmp-path font-mono">/users/backup/link.txt</span></div>
+          <div class="cmp-meta font-mono">fd = 4 &nbsp;·&nbsp; inode #8 &nbsp;·&nbsp; buf #4</div>
+          <div class="cmp-body font-mono" id="cmp-b">Hello OS! Modified!</div>
+        </div>
+      </div>
+      <div class="cmp-foot">
+        <span class="tag tag-amber">共享 inode #8</span>
+        <span class="tag tag-amber">共享同一内存块 buf #4</span>
+        <span class="text-[11px] text-stone-600">进程 B 根根不用碰磁盘 —— 它读的是进程 A 已改好、却<strong>尚未刷盘</strong>的那份脏数据。</span>
+      </div>
+    </div>
+  </div>
+
+  <footer class="border-t border-[#E5E4DC] py-4 text-center text-xs font-mono text-stone-400">
+    LearningAnimation · 文件索引寻道与缓冲写回 · 60fps 缓动与物理连续性
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>

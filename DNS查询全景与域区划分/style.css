@@ -1,0 +1,168 @@
+/* DNS 查询全景：域与区的划分及迭代/递归查询机制 专属样式 */
+:root {
+  --bg-page: #FAF9F5;
+  --bg-card: #FFFFFF;
+  --border-main: #E5E4DC;
+  --border-focus: #D6D3CD;
+  --text-main: #1C1917;
+  --text-muted: #78716C;
+  --amber-primary: #D97706;
+  --emerald-primary: #059669;
+  --blue-primary: #2563EB;
+}
+
+body {
+  background-color: var(--bg-page);
+  color: var(--text-main);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  overflow-x: hidden;
+}
+
+/* 纸质质感滑块 */
+.taste-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  background: #E5E4DC;
+  border-radius: 9999px;
+  outline: none;
+  transition: background 0.15s ease;
+}
+.taste-slider:hover {
+  background: #D6D3CD;
+}
+.taste-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #FFFFFF;
+  border: 2px solid #292524;
+  cursor: pointer;
+  box-shadow: 0 1.5px 3px rgba(0,0,0,0.12);
+  transition: transform 0.15s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.taste-slider::-webkit-slider-thumb:hover {
+  transform: scale(1.2);
+}
+.taste-slider::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #FFFFFF;
+  border: 2px solid #292524;
+  cursor: pointer;
+  box-shadow: 0 1.5px 3px rgba(0,0,0,0.12);
+  transition: transform 0.15s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* 机械触感按键 */
+.tactile-btn {
+  border: 1px solid #E5E4DC;
+  background-color: #FFFFFF;
+  box-shadow: 0 1.5px 0 #D6D3CD;
+  transition: all 0.15s ease;
+  user-select: none;
+}
+.tactile-btn:hover {
+  background-color: #FBFBFA;
+  border-color: #D6D3CD;
+}
+.tactile-btn:active {
+  box-shadow: none !important;
+  transform: translateY(1.5px);
+}
+.tactile-btn.active-mode {
+  background-color: #1C1917;
+  color: #FFFFFF;
+  border-color: #1C1917;
+  box-shadow: 0 1.5px 0 #000000;
+}
+
+/* 呼吸脉冲指示灯 */
+@keyframes pulseGlow {
+  0%, 100% { opacity: 0.95; transform: scale(1); }
+  50% { opacity: 0.45; transform: scale(1.25); }
+}
+
+.pulse-led-amber {
+  box-shadow: 0 0 8px rgba(217, 119, 6, 0.6);
+  animation: pulseGlow 1.8s infinite ease-in-out;
+}
+.pulse-led-emerald {
+  box-shadow: 0 0 8px rgba(5, 150, 105, 0.6);
+  animation: pulseGlow 1.8s infinite ease-in-out;
+}
+.pulse-led-blue {
+  box-shadow: 0 0 8px rgba(37, 99, 235, 0.6);
+  animation: pulseGlow 1.8s infinite ease-in-out;
+}
+
+/* 探针光圈脉冲 */
+@keyframes probeRingPulse {
+  0% { r: 14; opacity: 0.8; stroke-width: 2; }
+  50% { r: 24; opacity: 0.2; stroke-width: 1; }
+  100% { r: 14; opacity: 0.8; stroke-width: 2; }
+}
+.probe-ring-anim {
+  animation: probeRingPulse 2s infinite ease-in-out;
+}
+
+/* 虚线流动动画 (区边界) */
+@keyframes dashFlow {
+  to {
+    stroke-dashoffset: -20;
+  }
+}
+.dash-flowing {
+  animation: dashFlow 2s linear infinite;
+}
+
+/* 考点/说明 Callout 卡片 */
+.callout-tip {
+  background-color: #ECFDF5;
+  border: 1px solid #A7F3D0;
+  color: #064E3B;
+}
+.callout-note {
+  background-color: #EFF6FF;
+  border: 1px solid #BFDBFE;
+  color: #1E3A8A;
+}
+.callout-warning {
+  background-color: #FFFBEB;
+  border: 1px solid #FDE68A;
+  color: #78350F;
+}
+
+/* 拓扑连接线光效 */
+.link-cable {
+  transition: stroke 0.3s ease, stroke-width 0.3s ease, opacity 0.3s ease;
+}
+.link-cable.active-link {
+  stroke: #2563EB !important;
+  stroke-width: 2.5px !important;
+}
+
+/* 报文标签卡片动画 */
+.seq-badge {
+  filter: drop-shadow(0 1px 2px rgba(0,0,0,0.1));
+  transition: all 0.2s ease;
+}
+
+/* 优雅滚动条 */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #E5E4DC;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #D6D3CD;
+}

@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>高斯公式与散度物理直观 · 可视化实验室</title>
+
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- GSAP 动画引擎 -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+
+  <!-- KaTeX 公式渲染 -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+
+  <!-- Three.js 3D 场景 -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+
+  <link rel="stylesheet" href="style.css">
+</head>
+
+<body class="min-h-screen bg-[#FAF9F5] text-stone-900 overflow-x-hidden antialiased selection:bg-stone-200">
+
+  <!-- ══════════ 顶部导航条 ══════════ -->
+  <header class="border-b border-[#E5E4DC] bg-[#FAF9F5]/90 backdrop-blur sticky top-0 z-30 px-3 lg:px-6 py-2.5">
+    <div class="max-w-[1500px] mx-auto flex items-center justify-between gap-3">
+      <div class="flex items-center gap-3 min-w-0">
+        <a href="../index.html#math"
+           class="shrink-0 text-xs font-mono text-stone-600 hover:text-stone-900 border border-[#E5E4DC] bg-white px-2.5 py-1.5 rounded-lg flex items-center gap-1 transition-colors shadow-sm">
+          <span>&larr; 返回高等数学</span>
+        </a>
+        <div class="h-4 w-[1px] bg-stone-300 hidden sm:block"></div>
+        <h1 class="text-sm lg:text-base font-semibold tracking-tight truncate">高斯公式与散度物理本质 · 源汇对消 / 微元拼合 / 挖洞法</h1>
+      </div>
+      <span class="hidden sm:inline text-xs font-mono px-2 py-0.5 rounded border border-[#E5E4DC] bg-white text-stone-600 shrink-0">高等数学</span>
+    </div>
+  </header>
+
+  <!-- ══════════ 主交互区：左 70% 视口 + 右 30% 侧栏 ══════════ -->
+  <main class="w-full max-w-[1500px] mx-auto px-3 lg:px-6 py-3 flex flex-col lg:flex-row gap-3 lg:gap-4 items-start">
+
+    <!-- ─────────── 主视口 (70%) ─────────── -->
+    <section id="viewport"
+      class="relative w-full min-w-0 lg:flex-[7] h-[54vh] min-h-[360px] lg:h-[calc(100vh-140px)] bg-white border border-[#E5E4DC] rounded-2xl overflow-hidden shadow-sm">
+      <div id="canvas-host" class="absolute inset-0"></div>
+
+      <!-- 红灯报警遮罩（模式 3） -->
+      <div id="alarm" class="pointer-events-none absolute inset-x-0 top-0 px-3 pt-3 opacity-0">
+        <div class="flex items-center gap-2 border border-rose-300 bg-rose-50/95 text-rose-700 rounded-xl px-3 py-2 shadow-sm backdrop-blur">
+          <span class="led led-rose"></span>
+          <span class="text-[11px] font-semibold tracking-wide">直接套用高斯公式失败：积分体内含未定义奇异点，体积分发散</span>
+        </div>
+      </div>
+
+      <!-- 图例 -->
+      <div id="legend" class="pointer-events-none absolute left-3 top-3 flex flex-wrap gap-x-3 gap-y-1 bg-white/85 backdrop-blur border border-[#E5E4DC] rounded-lg px-2.5 py-1.5 text-[10px] font-mono text-stone-600"></div>
+
+      <!-- 浮动 HUD 解释条 -->
+      <div id="hud" class="pointer-events-none absolute left-3 right-3 bottom-3 bg-white/92 backdrop-blur border border-[#E5E4DC] rounded-xl px-3.5 py-2.5 shadow-sm">
+        <div class="flex items-start gap-2.5">
+          <span id="hud-tag" class="shrink-0 mt-[2px] text-[10px] font-mono px-1.5 py-0.5 rounded bg-stone-100 border border-[#E5E4DC] text-stone-600">节拍 1/3</span>
+          <p id="hud-text" class="text-[12.5px] leading-relaxed text-stone-800 font-sans">准备就绪…</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ─────────── 交互与量化侧边栏 (30%) ─────────── -->
+    <aside class="w-full min-w-0 lg:flex-[3] flex flex-col gap-3 lg:max-h-[calc(100vh-140px)] lg:overflow-y-auto lg:pr-1">
+
+      <!-- 1. 模式 Tab -->
+      <div class="grid grid-cols-3 gap-2">
+        <button data-tab="0" class="tab-btn active">
+          <span class="tab-idx">1</span><span class="tab-name">源汇对消</span>
+        </button>
+        <button data-tab="1" class="tab-btn">
+          <span class="tab-idx">2</span><span class="tab-name">微元拼合</span>
+        </button>
+        <button data-tab="2" class="tab-btn">
+          <span class="tab-idx">3</span><span class="tab-name">挖洞法</span>
+        </button>
+      </div>
+
+      <!-- 2. 控制台 -->
+      <div class="bg-white border border-[#E5E4DC] rounded-xl p-3 shadow-sm">
+        <div class="flex items-center gap-1.5">
+          <button id="btn-prev" class="tactile flex-1" title="单步后退">⏮ 步退</button>
+          <button id="btn-play" class="tactile flex-[1.4] font-semibold text-stone-900" title="自动播放">▶ 自动播放</button>
+          <button id="btn-next" class="tactile flex-1" title="单步前进">⏭ 步进</button>
+          <button id="btn-reset" class="tactile w-14" title="复位">↺ 复位</button>
+        </div>
+
+        <div class="mt-2.5 flex items-center justify-between gap-2">
+          <span class="text-[10px] font-mono text-stone-500">速率</span>
+          <div class="flex gap-1">
+            <button class="speed-chip" data-speed="0.5">0.5x</button>
+            <button class="speed-chip active" data-speed="1">1x</button>
+            <button class="speed-chip" data-speed="2">2x</button>
+          </div>
+        </div>
+
+        <div class="mt-3 border-t border-dashed border-[#E5E4DC] pt-2.5">
+          <div class="flex items-baseline justify-between gap-2">
+            <span id="progress-label" class="text-[11px] font-medium text-stone-700 truncate">① 分离观察</span>
+            <span id="progress-val" class="text-[10px] font-mono text-stone-500">0%</span>
+          </div>
+          <input id="progress" type="range" min="0" max="1000" value="0" class="taste-slider w-full mt-2" aria-label="连续进度滑块">
+          <div class="flex justify-between text-[9.5px] font-mono text-stone-400 mt-1">
+            <span id="p-start">分离</span><span id="p-end">贴合</span>
+          </div>
+        </div>
+
+        <!-- 模式专属控制 -->
+        <div id="extra-1" class="extra-block mt-3 border-t border-dashed border-[#E5E4DC] pt-2.5">
+          <div class="text-[10px] font-mono text-stone-500 mb-1.5">对比预设</div>
+          <div class="flex gap-1.5">
+            <button class="preset-chip active" data-preset="sink">源 + 汇</button>
+            <button class="preset-chip" data-preset="source">源 + 源</button>
+            <button class="preset-chip" data-preset="none">源 + 无源</button>
+          </div>
+        </div>
+
+        <div id="extra-2" class="extra-block hidden mt-3 border-t border-dashed border-[#E5E4DC] pt-2.5">
+          <div class="flex items-baseline justify-between">
+            <span class="text-[10px] font-mono text-stone-500">连续剖分 N</span>
+            <span id="sub-read" class="text-[10px] font-mono text-stone-700">8 微元 · 外表面 24</span>
+          </div>
+          <input id="sub" type="range" min="0" max="1000" value="300" class="taste-slider w-full mt-2" aria-label="剖分滑块">
+          <div class="flex justify-between text-[9.5px] font-mono text-stone-400 mt-1">
+            <span>N=1</span><span>N=8</span><span>N=64</span><span>连续体</span>
+          </div>
+        </div>
+
+        <div id="extra-3" class="extra-block hidden mt-3 border-t border-dashed border-[#E5E4DC] pt-2.5">
+          <button id="btn-singular" class="tactile w-full !text-rose-700 border-rose-200 bg-rose-50 active:bg-rose-100">⚠ 直接套用高斯公式</button>
+          <div id="m3-status" class="mt-2 text-[10.5px] font-mono text-stone-500">状态：原点奇点未处理</div>
+        </div>
+      </div>
+
+      <!-- 3. 节拍列表 -->
+      <div class="bg-white border border-[#E5E4DC] rounded-xl p-3 shadow-sm">
+        <div class="text-[10px] font-mono text-stone-500 mb-1.5">演进节拍（点击跳转）</div>
+        <ol id="beat-list" class="flex flex-col gap-1"></ol>
+      </div>
+
+      <!-- 4. 动态天平 / 收支账本 -->
+      <div class="bg-white border border-[#E5E4DC] rounded-xl p-3 shadow-sm">
+        <div class="flex items-center justify-between mb-2">
+          <span class="text-[10px] font-mono text-stone-500">收支账本 · 动态天平</span>
+          <span class="flex items-center gap-1.5 text-[10px] font-mono text-stone-600">
+            <span id="bal-led" class="led led-emerald"></span><span id="bal-text">平衡</span>
+          </span>
+        </div>
+
+        <!-- 上栏：体内散度 -->
+        <div class="rounded-lg border border-[#E5E4DC] bg-stone-50/70 px-2.5 py-2">
+          <div class="text-[10px] font-mono text-stone-500 mb-1">体内散度（微元代数和）</div>
+          <div id="fx-top" class="fx-box overflow-x-auto"></div>
+        </div>
+
+        <!-- 天平 -->
+        <div class="my-2.5">
+          <div class="relative h-[54px]">
+            <div id="beam" class="beam">
+              <div class="pan pan-l"><span id="bal-left" class="pan-val">0</span></div>
+              <div class="pan pan-r"><span id="bal-right" class="pan-val">0</span></div>
+            </div>
+            <div class="pivot"></div>
+            <div class="pivot-label">Σdiv = Φ</div>
+          </div>
+        </div>
+
+        <!-- 下栏：外表面通量 -->
+        <div class="rounded-lg border border-[#E5E4DC] bg-stone-50/70 px-2.5 py-2">
+          <div class="text-[10px] font-mono text-stone-500 mb-1">宏观外表面净通量</div>
+          <div id="fx-bottom" class="fx-box overflow-x-auto"></div>
+        </div>
+
+        <div id="fx-note" class="mt-2 px-1 overflow-x-auto"></div>
+
+        <div id="chips" class="flex flex-wrap gap-1.5 mt-2"></div>
+      </div>
+
+      <!-- 5. 笔记式引用 -->
+      <div id="callout" class="rounded-lg px-3 py-2.5 text-[11.5px] leading-relaxed">
+        <span id="callout-title" class="block font-semibold mb-0.5"></span>
+        <span id="callout-body" class="block"></span>
+      </div>
+
+      <div class="text-[10px] font-mono text-stone-400 pb-2 text-center">拖动滑块 / 单步 / 自动播放 均会先清场补间，杜绝计时器叠加</div>
+    </aside>
+  </main>
+
+  <footer class="border-t border-[#E5E4DC] py-3 text-center text-[11px] font-mono text-stone-400">
+    LearningAnimation · 高等数学 · 60fps GSAP 缓动与防呆状态机
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>

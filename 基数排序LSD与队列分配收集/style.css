@@ -1,0 +1,183 @@
+/* 基数排序 (Radix Sort) LSD 专属样式 (Taste-Skill Light Editorial & Cyber-Paper) */
+
+:root {
+  --bg-page: #FAF9F5;
+  --bg-card: #FFFFFF;
+  --border-subtle: #E5E4DC;
+  --border-strong: #D6D3CD;
+  --accent-blue: #2563EB;
+  --accent-emerald: #059669;
+  --accent-amber: #D97706;
+}
+
+/* 旋转光束动效 */
+@keyframes beam-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* 纸质质感滑块 */
+.taste-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 3px;
+  background: #E5E4DC;
+  border-radius: 9999px;
+  outline: none;
+}
+.taste-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #FFFFFF;
+  border: 2px solid #1C1917;
+  cursor: pointer;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+  transition: transform 0.15s ease;
+}
+.taste-slider::-webkit-slider-thumb:hover {
+  transform: scale(1.15);
+}
+
+/* 传送带卡片槽位与待命卡片 */
+.conveyor-slot {
+  position: relative;
+  min-height: 82px;
+  border-radius: 12px;
+  border: 1.5px dashed #E5E4DC;
+  background: rgba(250, 249, 245, 0.6);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  transition: border-color 0.2s ease;
+}
+.conveyor-slot.slot-highlight {
+  border-color: #2563EB;
+  background: rgba(37, 99, 235, 0.04);
+}
+
+/* 数值卡片实体 */
+.num-card {
+  width: 100%;
+  max-width: 110px;
+  border-radius: 10px;
+  border: 1px solid #E5E4DC;
+  background: #FFFFFF;
+  box-shadow: 0 2px 6px -1px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04);
+  padding: 6px 4px;
+  user-select: none;
+  transition: box-shadow 0.2s ease, transform 0.2s ease, border-color 0.2s ease;
+}
+.num-card.card-active {
+  border-color: #2563EB;
+  box-shadow: 0 6px 16px -2px rgba(37, 99, 235, 0.22);
+  transform: translateY(-2px);
+}
+.num-card.card-sorted {
+  border-color: #059669;
+  background: #F0FDF4;
+  box-shadow: 0 4px 14px -2px rgba(5, 150, 105, 0.2);
+}
+
+/* 数位显微镜方格 */
+.digit-cell {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 26px;
+  border-radius: 6px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 13px;
+  font-weight: 600;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.digit-cell.active-digit {
+  background: #2563EB;
+  color: #FFFFFF;
+  transform: scale(1.12);
+  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.35);
+  z-index: 2;
+}
+.digit-cell.dim-digit {
+  color: #A8A29E;
+  opacity: 0.45;
+}
+
+/* 基数桶管道 (垂直队列) */
+.bucket-pipe {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  border-radius: 12px;
+  border: 1px solid #E5E4DC;
+  background: rgba(255, 255, 255, 0.85);
+  box-shadow: 0 1px 4px rgba(0,0,0,0.02);
+  transition: all 0.25s ease;
+  overflow: hidden;
+}
+.bucket-pipe.pipe-target {
+  border-color: #2563EB;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15), 0 4px 16px rgba(37, 99, 235, 0.12);
+  background: #FFFFFF;
+}
+.bucket-pipe.pipe-discharging {
+  border-color: #059669;
+  box-shadow: 0 0 0 2px rgba(5, 150, 105, 0.2), 0 4px 16px rgba(5, 150, 105, 0.12);
+  background: #FFFFFF;
+}
+
+/* 桶内队列卡片堆叠栈道 */
+.bucket-stack {
+  flex: 1;
+  display: flex;
+  flex-direction: column-reverse; /* 从底部自下而上堆叠 */
+  gap: 4px;
+  padding: 6px 4px;
+  align-items: center;
+  justify-content: flex-start;
+  min-height: 180px;
+}
+
+/* 桶底开闸指示器 */
+.bucket-gate {
+  border-top: 1px dashed #E5E4DC;
+  padding: 4px;
+  text-align: center;
+  font-size: 9px;
+  font-family: monospace;
+  color: #A8A29E;
+  background: #FAF9F5;
+  transition: all 0.2s ease;
+}
+.bucket-pipe.pipe-discharging .bucket-gate {
+  background: #ECFDF5;
+  border-top-color: #059669;
+  color: #059669;
+  font-weight: bold;
+}
+
+/* 飞行中的卡片克隆体 */
+.flying-card-entity {
+  position: absolute;
+  z-index: 50;
+  pointer-events: none;
+  will-change: transform, opacity;
+  box-shadow: 0 12px 28px -4px rgba(37, 99, 235, 0.25), 0 4px 10px rgba(0,0,0,0.08);
+}
+
+/* 轮次药丸与高亮 */
+.round-pill {
+  transition: all 0.2s ease;
+}
+.round-pill.active-pill {
+  border-color: #2563EB;
+  background: #EFF6FF;
+  color: #1D4ED8;
+  font-weight: 600;
+  box-shadow: 0 1px 3px rgba(37, 99, 235, 0.15);
+}

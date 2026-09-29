@@ -1,0 +1,221 @@
+/* 高斯公式与散度物理直观 · 专属样式（暖白纸质美学） */
+
+:root {
+  --bg-page: #FAF9F5;
+  --card: #FFFFFF;
+  --border-main: #E5E4DC;
+  --amber: #D97706;
+  --emerald: #059669;
+  --blue: #2563EB;
+  --stone: #57534E;
+}
+
+html, body { overflow-x: hidden; }
+body { font-family: -apple-system, "SF Pro Display", "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif; }
+
+/* ─────────── 纸质滑块（2~3px 细线轨道 + 白底黑边圆点手柄） ─────────── */
+.taste-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 3px;
+  background: linear-gradient(90deg, #E5E4DC, #D6D3CD);
+  border-radius: 9999px;
+  outline: none;
+  cursor: pointer;
+}
+.taste-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  background: #FFFFFF;
+  border: 2px solid #1C1917;
+  cursor: grab;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, .18);
+  transition: transform .15s ease;
+}
+.taste-slider::-webkit-slider-thumb:hover { transform: scale(1.18); }
+.taste-slider::-webkit-slider-thumb:active { cursor: grabbing; transform: scale(1.05); }
+.taste-slider::-moz-range-thumb {
+  width: 13px; height: 13px; border-radius: 50%;
+  background: #FFFFFF; border: 2px solid #1C1917;
+  cursor: grab; box-shadow: 0 1px 3px rgba(0, 0, 0, .18);
+}
+.taste-slider::-moz-range-track { height: 3px; background: #E5E4DC; border-radius: 9999px; }
+
+/* ─────────── 物理触感微按键 ─────────── */
+.tactile {
+  border: 1px solid #E5E4DC;
+  background: #FFFFFF;
+  color: #44403C;
+  font-size: 11.5px;
+  padding: 7px 8px;
+  border-radius: 9px;
+  box-shadow: 0 1.5px 0 #D6D3CD;
+  transition: all .15s ease;
+  white-space: nowrap;
+}
+.tactile:hover { background: #FAFAF9; color: #1C1917; }
+.tactile:active { box-shadow: none; transform: translateY(1.5px); }
+
+/* ─────────── 模式 Tab ─────────── */
+.tab-btn {
+  display: flex; flex-direction: column; align-items: center; gap: 1px;
+  border: 1px solid var(--border-main);
+  background: #FFFFFF;
+  border-radius: 10px;
+  padding: 7px 4px;
+  box-shadow: 0 1.5px 0 #D6D3CD;
+  transition: all .18s ease;
+}
+.tab-btn:active { box-shadow: none; transform: translateY(1.5px); }
+.tab-btn .tab-idx {
+  font-family: "JetBrains Mono", monospace; font-size: 9.5px; color: #A8A29E;
+}
+.tab-btn .tab-name { font-size: 11.5px; font-weight: 600; color: #57534E; }
+.tab-btn.active {
+  background: #FFFBEB; border-color: #FDE68A; box-shadow: 0 1.5px 0 #F0E0B0;
+}
+.tab-btn.active .tab-name { color: #B45309; }
+.tab-btn.active .tab-idx { color: #D97706; }
+
+/* ─────────── 速率 / 预设 chips ─────────── */
+.speed-chip, .preset-chip {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 10.5px;
+  padding: 4px 9px;
+  border-radius: 8px;
+  border: 1px solid var(--border-main);
+  background: #FFF;
+  color: #78716C;
+  box-shadow: 0 1.5px 0 #D6D3CD;
+  transition: all .15s ease;
+}
+.speed-chip:active, .preset-chip:active { box-shadow: none; transform: translateY(1.5px); }
+.speed-chip.active { background: #EFF6FF; border-color: #BFDBFE; color: #1D4ED8; }
+.preset-chip.active { background: #ECFDF5; border-color: #A7F3D0; color: #047857; }
+
+/* ─────────── 节拍列表 ─────────── */
+#beat-list li {
+  display: flex; align-items: flex-start; gap: 7px;
+  font-size: 11.5px; line-height: 1.45;
+  color: #78716C;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  padding: 5px 7px;
+  cursor: pointer;
+  transition: all .2s ease;
+}
+#beat-list li:hover { background: #FAFAF9; border-color: #E5E4DC; }
+#beat-list li .bl-idx {
+  font-family: "JetBrains Mono", monospace; font-size: 9.5px;
+  color: #A8A29E; background: #F5F5F4; border: 1px solid #E5E4DC;
+  border-radius: 5px; padding: 1px 4px; margin-top: 1px; flex: none;
+}
+#beat-list li.active { background: #FFFBEB; border-color: #FDE68A; color: #92400E; font-weight: 600; }
+#beat-list li.active .bl-idx { background: #FEF3C7; border-color: #FDE68A; color: #B45309; }
+#beat-list li.done .bl-idx { background: #ECFDF5; border-color: #A7F3D0; color: #047857; }
+
+/* ─────────── 公式盒 ─────────── */
+.fx-box { font-size: 13px; color: #1C1917; min-height: 22px; }
+.fx-box .katex { font-size: 1.02em; }
+#fx-note { font-size: 12px; color: #57534E; min-height: 6px; }
+#fx-note .katex { font-size: .94em; }
+
+/* ─────────── 动态天平 ─────────── */
+.beam {
+  position: absolute;
+  left: 8%; right: 8%; top: 18px;
+  height: 3px;
+  background: #44403C;
+  border-radius: 3px;
+  transform-origin: 50% 50%;
+  transition: transform .75s cubic-bezier(.34, 1.56, .64, 1);
+}
+.pan {
+  position: absolute; top: -13px;
+  min-width: 34px; padding: 2px 5px;
+  background: #FFF; border: 1px solid var(--border-main);
+  border-radius: 7px;
+  font-family: "JetBrains Mono", monospace; font-size: 11px;
+  text-align: center; color: #1C1917;
+  box-shadow: 0 1px 0 #D6D3CD;
+}
+.pan::after {
+  content: ""; position: absolute; left: 50%; top: 100%;
+  width: 1px; height: 10px; background: #A8A29E; transform: translateX(-50%);
+}
+.pan-l { left: -17px; }
+.pan-r { right: -17px; }
+.pan-val { display: inline-block; }
+.pivot {
+  position: absolute; left: 50%; top: 21px;
+  width: 0; height: 0;
+  border-left: 7px solid transparent;
+  border-right: 7px solid transparent;
+  border-bottom: 16px solid #D6D3CD;
+  transform: translateX(-50%);
+}
+.pivot-label {
+  position: absolute; left: 50%; top: 40px; transform: translateX(-50%);
+  font-family: "JetBrains Mono", monospace; font-size: 9px; color: #A8A29E;
+  white-space: nowrap;
+}
+
+/* ─────────── 状态呼吸脉冲指示灯 ─────────── */
+.led {
+  display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+  border: 1px solid rgba(0, 0, 0, .12);
+}
+.led-emerald { background: #10B981; animation: breathe 1.9s ease-in-out infinite; }
+.led-amber   { background: #F59E0B; animation: breathe 1.3s ease-in-out infinite; }
+.led-rose    { background: #F43F5E; animation: breathe .75s ease-in-out infinite; }
+@keyframes breathe {
+  0%, 100% { opacity: .45; transform: scale(.88); box-shadow: 0 0 0 0 rgba(0,0,0,0); }
+  50%      { opacity: 1;   transform: scale(1.1);  box-shadow: 0 0 7px 1px currentColor; }
+}
+
+/* ─────────── HUD ─────────── */
+#hud { border-left: 3px solid #D97706; }
+
+/* ─────────── 红灯报警（视口内描边脉冲） ─────────── */
+#viewport.alarm-on { animation: alarmRing 1.1s ease-in-out infinite; }
+@keyframes alarmRing {
+  0%, 100% { box-shadow: inset 0 0 0 2px rgba(244, 63, 94, .30); }
+  50%      { box-shadow: inset 0 0 0 4px rgba(244, 63, 94, .70); }
+}
+
+/* ─────────── 数值 chips ─────────── */
+.chip {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 10px;
+  padding: 3px 7px;
+  border-radius: 9999px;
+  border: 1px solid var(--border-main);
+  background: #FAFAF9;
+  color: #57534E;
+  transition: all .25s ease;
+}
+.chip.hot { background: #FFFBEB; border-color: #FDE68A; color: #B45309; }
+.chip.good { background: #ECFDF5; border-color: #A7F3D0; color: #047857; }
+.chip.bad { background: #FFF1F2; border-color: #FECDD3; color: #BE123C; }
+@keyframes chipPop { from { transform: scale(1.08); } to { transform: scale(1); } }
+.chip.pop { animation: chipPop .34s ease-out; }
+
+/* ─────────── 笔记式 Callout ─────────── */
+.callout-tip      { background: #ECFDF5; color: #064E3B; border: 1px solid #A7F3D0; }
+.callout-note     { background: #F0F9FF; color: #0C4A6E; border: 1px solid #BAE6FD; }
+.callout-important{ background: #FAF5FF; color: #581C87; border: 1px solid #E9D5FF; }
+.callout-warning  { background: #FFFBEB; color: #78350F; border: 1px solid #FDE68A; }
+
+/* ─────────── 侧边栏滚动条 ─────────── */
+aside::-webkit-scrollbar { width: 6px; }
+aside::-webkit-scrollbar-thumb { background: #E5E4DC; border-radius: 99px; }
+aside::-webkit-scrollbar-track { background: transparent; }
+
+/* ─────────── 无障碍：减少动效 ─────────── */
+@media (prefers-reduced-motion: reduce) {
+  .led-emerald, .led-amber, .led-rose, #viewport.alarm-on { animation: none; }
+}
