@@ -23,7 +23,3 @@ yarn-debug.log*
 yarn-error.log*
 tmp/
 temp/
-
-# 讨论阶段临时文件（不入库）
-# AI讨论.md 仅用于前期设计讨论，其结论会落盘到各模块目录的 设计方案.md
-AI讨论.md
