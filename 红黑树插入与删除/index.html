@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0E1117">
+  <title>红黑树 · 插入与删除</title>
+  <link rel="stylesheet" href="style.css">
+  <script defer src="model.js"></script>
+  <script defer src="renderer.js"></script>
+  <script defer src="app.js"></script>
+</head>
+<body>
+  <main id="stage" aria-label="红黑树交互演示舞台">
+    <canvas id="tree-canvas" aria-label="红黑树动画，可点选节点" role="img"></canvas>
+    <div class="edge-fade" aria-hidden="true"></div>
+    <header class="masthead" id="masthead">
+      <a class="back-link" href="../index.html#ds" aria-label="返回数据结构展厅" title="返回数据结构展厅">←</a>
+      <div class="identity"><h1>红黑树</h1><p>插入与删除的平衡之舞</p></div>
+    </header>
+    <div class="view-actions">
+      <button class="quiet-button" id="load-toggle" aria-pressed="false" title="沿每条根至空叶路径查看黑色承重">承重脉冲</button>
+      <button class="icon-button" id="immersive" aria-pressed="false" aria-label="隐藏操作控件" title="沉浸模式 · H">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5"/></svg>
+      </button>
+    </div>
+    <div id="node-note" class="node-note" role="status" aria-live="polite"></div>
+    <div id="empty-message" class="empty-message" hidden><span class="empty-ring"></span><p>空树，等待第一束红色能量</p><button id="empty-insert" class="quiet-button">插入一个节点</button></div>
+    <div id="welcome" class="welcome" aria-hidden="true"><span class="welcome-line"></span><p>点选节点，或播放一次自愈</p></div>
+
+    <section class="controls" id="controls" aria-label="演示操作">
+      <div class="operation-row">
+        <div class="operation-tabs" role="group" aria-label="操作类型">
+          <button class="operation-tab active" id="mode-insert" aria-pressed="true">插入</button>
+          <button class="operation-tab" id="mode-delete" aria-pressed="false">删除</button>
+        </div>
+        <form id="operation-form" class="value-form" novalidate>
+          <label class="sr-only" for="value-input">节点数值，-999 至 999 的整数</label>
+          <input id="value-input" type="text" inputmode="numeric" autocomplete="off" maxlength="5" value="5" aria-describedby="input-help">
+          <button id="run-operation" class="action-button" type="submit"><span id="run-label">插入节点</span><span aria-hidden="true">↵</span></button>
+        </form>
+        <span class="control-divider" aria-hidden="true"></span>
+        <label class="sr-only" for="scenario">精选案例</label>
+        <select id="scenario" title="选择一个典型修复案例" aria-label="精选案例">
+          <optgroup label="插入 · 释放红色应力">
+            <option value="rotate">双红与单旋</option>
+            <option value="zigzag">折线与双旋</option>
+            <option value="recolor">叔红与颜色上推</option>
+          </optgroup>
+          <optgroup label="删除 · 补足黑色承重">
+            <option value="borrow">外侧红借位</option>
+            <option value="near">近侧红转向</option>
+            <option value="sibling">红兄弟换位</option>
+            <option value="push">双黑向上传递</option>
+            <option value="successor">后继虚影代偿</option>
+          </optgroup>
+          <optgroup label="自由探索"><option value="empty">从空树开始</option></optgroup>
+        </select>
+      </div>
+      <div class="playback-row">
+        <div class="transport">
+          <button class="icon-button" id="restart" aria-label="从头重播" title="从头重播 · R"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9a8 8 0 1 1 1 9M4 4v5h5"/></svg></button>
+          <button class="icon-button" id="previous" aria-label="上一步" title="上一步 · ←"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14 6-6 6 6 6M6 6v12"/></svg></button>
+          <button class="play-button" id="play" aria-label="播放演示" title="播放 / 暂停 · 空格"><span id="play-symbol" aria-hidden="true">▶</span></button>
+          <button class="icon-button" id="next" aria-label="下一步" title="下一步 · →"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m10 6 6 6-6 6m8-12v12"/></svg></button>
+        </div>
+        <label class="sr-only" for="progress">演示步骤</label>
+        <input type="range" id="progress" min="0" max="1" value="0" step="1" aria-label="演示步骤">
+        <button class="speed-button" id="speed" title="切换播放速度" aria-label="播放速度 1 倍">1×</button>
+      </div>
+      <span id="input-help" class="sr-only">输入整数后回车。空格播放或暂停，左右方向键单步，R 重播，H 隐藏控件。</span>
+    </section>
+    <button id="show-controls" class="show-controls icon-button" hidden aria-label="显示操作控件" title="显示控件 · H"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 8h14M5 16h14M9 5v6m6 2v6"/></svg></button>
+    <p id="a11y-state" class="sr-only" aria-live="polite"></p>
+    <ul id="a11y-tree" class="sr-only" aria-label="当前树节点"></ul>
+  </main>
+</body>
+</html>
