@@ -1,0 +1,15 @@
+{
+  "name": "learning-animation",
+  "version": "1.0.0",
+  "private": true,
+  "description": "计算机与数学核心知识可视化实验室 — 零编译、免安装、纯原生静态站点（本文件仅作为开发期脚本入口，不含任何运行时依赖）",
+  "license": "MIT",
+  "type": "commonjs",
+  "scripts": {
+    "verify": "node verify.js",
+    "test": "node --test",
+    "check": "npm run verify && npm test",
+    "new": "node new.js",
+    "serve": "python3 -m http.server 8000"
+  }
+}

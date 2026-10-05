@@ -312,7 +312,32 @@ test('手机窄屏为字段落表阶段提供固定报文样式', () => {
   assert.match(css, /\.packet-capsule\.is-transfer-docked/);
 });
 
-test('首页将 DHCP 演示收录到计算机网络展厅', () => {
+// 门厅 index.html 已重构为数据驱动（卡片由 modules.js 渲染），不再写死静态链接。
+// 因此「首页收录」的断言拆成两半：登记表里有本模块 + index.html 会渲染登记表。
+function loadRegistry() {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'modules.js'), 'utf8');
+  const sandbox = {};
+  new Function('window', src)(sandbox);
+  return sandbox.MODULES;
+}
+
+test('modules.js 将 DHCP 演示登记到计算机网络展厅', () => {
+  const entry = loadRegistry().find((m) => m.path === 'DHCP工作过程/index.html');
+  assert.ok(entry, 'modules.js 中缺少 DHCP工作过程/index.html 登记');
+  assert.equal(entry.discipline, 'net');
+  assert.equal(entry.title, 'DHCP DORA 四步报文交互过程');
+  assert.ok(entry.badge && entry.desc, '登记缺少 badge / desc 展示字段');
+  assert.ok(
+    fs.existsSync(path.join(__dirname, '..', entry.path)),
+    `登记路径不存在: ${entry.path}`
+  );
+});
+
+test('首页从 modules.js 数据驱动渲染卡片', () => {
   const home = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
-  assert.match(home, /href=["']DHCP工作过程\/index\.html["'][^>]*data-discipline=["']net["']/);
+  assert.match(home, /<script\s+src=["']modules\.js["']\s*>/);
+  // 卡片模板按登记表字段生成 href 与 data-discipline
+  assert.match(home, /href="\$\{m\.path\}"/);
+  assert.match(home, /data-discipline="\$\{m\.discipline\}"/);
+  assert.match(home, /window\.MODULES/);
 });

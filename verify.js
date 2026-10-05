@@ -83,7 +83,101 @@ modules.forEach((m, idx) => {
   }
 });
 
-// 3. 输出汇总统计
+// 3. 全站 JavaScript 语法体检（node --check，零依赖）
+console.log('\n🔎 JS 语法体检...');
+const { spawnSync } = require('child_process');
+
+function walk(dir, exts, out = []) {
+  for (const name of fs.readdirSync(dir)) {
+    if (name.startsWith('.') || name === 'node_modules') continue;
+    const full = path.join(dir, name);
+    if (fs.statSync(full).isDirectory()) walk(full, exts, out);
+    else if (exts.includes(path.extname(name))) out.push(full);
+  }
+  return out;
+}
+
+const jsFiles = walk(__dirname, ['.js', '.cjs']);
+let jsBroken = 0;
+jsFiles.forEach((file) => {
+  const r = spawnSync(process.execPath, ['--check', file], { encoding: 'utf8' });
+  if (r.status !== 0) {
+    console.error(`❌ 语法错误: ${path.relative(__dirname, file)}\n${(r.stderr || '').trim()}\n`);
+    errors++;
+    jsBroken++;
+  }
+});
+console.log(jsBroken === 0 ? `✅ ${jsFiles.length} 个 JS 文件语法全部通过` : `❌ ${jsBroken} 个文件语法失败`);
+
+// 4. 模块目录 ↔ modules.js 双向核对（原校验只做了“登记 → 磁盘”方向）
+console.log('\n🔎 模块目录与登记表双向核对...');
+const registeredDirs = new Set(modules.map((m) => String(m.path).split('/')[0]));
+const dirCount = { total: 0, orphan: 0 };
+fs.readdirSync(__dirname, { withFileTypes: true }).forEach((d) => {
+  if (!d.isDirectory() || d.name.startsWith('.')) return;
+  dirCount.total++;
+  if (!fs.existsSync(path.join(__dirname, d.name, 'index.html'))) return; // 非模块目录
+  if (!registeredDirs.has(d.name)) {
+    console.warn(`⚠️  目录 "${d.name}" 有 index.html，但未登记到 modules.js（门厅看不到它）`);
+    warnings++;
+    dirCount.orphan++;
+  }
+});
+console.log(dirCount.orphan === 0 ? `✅ ${dirCount.total} 个目录无游离模块` : `⚠️  ${dirCount.orphan} 个游离模块目录`);
+
+// 5. 模块内部相对链接死链体检（原先只查 modules.js 里的 path）
+console.log('\n🔎 模块内相对链接死链体检...');
+let refCount = 0;
+// 不只扫已登记模块：只要目录里有 index.html 就扫（未登记的已在第 4 节报警）
+const htmlEntryList = fs.readdirSync(__dirname, { withFileTypes: true })
+  .filter((d) => d.isDirectory() && !d.name.startsWith('.'))
+  .map((d) => path.join(d.name, 'index.html'))
+  .filter((rel) => fs.existsSync(path.join(__dirname, rel)));
+htmlEntryList.forEach((rel) => {
+  const htmlPath = path.join(__dirname, rel);
+  const html = fs.readFileSync(htmlPath, 'utf8');
+  const dir = path.dirname(htmlPath);
+  const refs = [...html.matchAll(/(?:src|href)\s*=\s*["']([^"']+)["']/g)].map((x) => x[1]);
+  refs.forEach((ref) => {
+    if (/^(https?:)?\/\//i.test(ref)) return;          // 外链交给 CDN 体检
+    if (/^(#|data:|mailto:|javascript:|tel:)/i.test(ref)) return;
+    if (ref.includes('${')) return;                    // 模板字符串，运行时才展开
+    const clean = ref.split('#')[0].split('?')[0];
+    if (!clean) return;
+    refCount++;
+    if (!fs.existsSync(path.resolve(dir, clean))) {
+      console.error(`❌ ${rel} 死链: ${ref}`);
+      errors++;
+    }
+  });
+});
+console.log(`✅ ${htmlEntryList.length} 个模块页共检查 ${refCount} 条相对引用`);
+
+// 6. CDN 黄金配方版本一致性（AGENT.md §5.2）
+console.log('\n🔎 CDN 版本一致性体检...');
+const htmlFiles = walk(__dirname, ['.html']);
+const CDN_RULES = [
+  { name: 'KaTeX', test: /katex/i, expect: /0\.16\.11/ },
+  { name: 'GSAP', test: /gsap/i, expect: /3\.12\.5/ },
+  { name: 'Three.js', test: /three/i, expect: /r128|0\.128\.0/ }
+];
+let cdnOff = 0;
+htmlFiles.forEach((file) => {
+  const html = fs.readFileSync(file, 'utf8');
+  [...html.matchAll(/https:\/\/[^"'\s)]+/g)].forEach((x) => {
+    const url = x[0];
+    CDN_RULES.forEach((rule) => {
+      if (rule.test.test(url) && !rule.expect.test(url)) {
+        console.warn(`⚠️  ${rule.name} 版本偏离黄金配方: ${path.relative(__dirname, file)} -> ${url}`);
+        warnings++;
+        cdnOff++;
+      }
+    });
+  });
+});
+console.log(cdnOff === 0 ? '✅ CDN 版本与黄金配方一致' : `⚠️  ${cdnOff} 处 CDN 版本偏离`);
+
+// 7. 输出汇总统计
 console.log('\n📊 学科收录统计:');
 console.log(`  - 高等数学 (math):       ${counts.math} 个`);
 console.log(`  - 概率统计 (prob):       ${counts.prob} 个`);
