@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="固定俯视沙盘演示 Dijkstra 算法：探路计算、前驱更新、贪心锁定与最短路径回溯。">
+  <title>迪杰斯特拉算法 · 最短路径</title>
+  <link rel="stylesheet" href="style.css">
+  <script defer src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+  <script defer src="app.js"></script>
+</head>
+<body>
+  <header class="site-header">
+    <a class="back-link tactile" href="../index.html#ds">← 返回数据结构</a>
+    <span class="site-name">可视化实验室</span>
+    <span class="view-label">固定全局俯视</span>
+  </header>
+  <main>
+    <div class="title-row">
+      <div>
+        <h1>迪杰斯特拉算法<span class="english-name">Dijkstra</span></h1>
+        <p class="subtitle">每次锁定暂定距离最小的节点，让最短路径逐步浮现。</p>
+      </div>
+      <div class="destination" aria-label="起点 A，终点 F">
+        <span class="endpoint"><small>起点</small><strong>A</strong></span>
+        <span class="route-dots" aria-hidden="true">········→</span>
+        <span class="endpoint"><small>终点</small><strong>F</strong></span>
+      </div>
+    </div>
+
+    <section class="stage" aria-label="最短路径动画沙盘">
+      <div class="stage-heading">
+        <div class="stage-indicator"><i id="activity-led" aria-hidden="true"></i><span id="stage-status">初始化起点</span></div>
+        <div class="legend" aria-label="图例">
+          <span><i class="legend-node unvisited" aria-hidden="true"></i>未访问</span>
+          <span><i class="legend-node frontier" aria-hidden="true"></i>候选</span>
+          <span><i class="legend-node settled" aria-hidden="true">✓</i>已锁定</span>
+          <span><i class="legend-fiber" aria-hidden="true"></i>当前最优前驱</span>
+        </div>
+      </div>
+      <svg id="graph" viewBox="0 0 1000 560" role="img" aria-label="从 A 到 F 的六节点正权无向图" aria-describedby="graph-description">
+        <title id="graph-title">从 A 到 F 的六节点正权无向图</title>
+        <desc id="graph-description">边权：AB=2，AC=7，BC=3，BD=6，CD=2，CE=6，DE=5，DF=2，EF=4。动画显示当前距离和前驱。</desc>
+        <defs>
+          <filter id="soft-glow" x="-100%" y="-100%" width="300%" height="300%">
+            <feGaussianBlur stdDeviation="3" result="blur"/><feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+          </filter>
+          <radialGradient id="focus-wash"><stop offset="0" stop-color="#84B6EC" stop-opacity=".24"/><stop offset="1" stop-color="#84B6EC" stop-opacity="0"/></radialGradient>
+        </defs>
+        <g id="edge-layer" aria-hidden="true"></g>
+        <rect id="selection-dim" width="1000" height="560" fill="#484B49" opacity="0" pointer-events="none" aria-hidden="true"/>
+        <g id="weight-layer" aria-hidden="true"></g>
+        <g id="node-layer" aria-hidden="true"></g>
+        <g id="pulse-layer" pointer-events="none" aria-hidden="true"></g>
+        <g id="floating-layer" pointer-events="none" aria-hidden="true"></g>
+      </svg>
+      <div class="stage-foot">
+        <span id="current-explanation">起点 A 的距离为 0。</span>
+        <span id="scene-counter" class="scene-counter">1 / 10</span>
+      </div>
+    </section>
+
+    <div class="state-line">
+      <div class="phase-list" aria-label="当前算法阶段">
+        <span data-phase="relax"><i aria-hidden="true"></i>探路计算</span>
+        <span data-phase="compare"><i aria-hidden="true"></i>比对更新</span>
+        <span data-phase="select"><i aria-hidden="true"></i>最短锁定</span>
+        <span data-phase="finish"><i aria-hidden="true"></i>路径回溯</span>
+      </div>
+      <div id="result" class="result" aria-live="polite"><span id="result-route"></span><span class="result-length">距离 <strong id="result-distance"></strong></span></div>
+    </div>
+
+    <section class="playback" aria-label="演示播放控制">
+      <div class="transport">
+        <button id="reset" class="tactile" type="button" title="重新开始（Home）"><span aria-hidden="true">↺</span><span>重播</span></button>
+        <button id="previous" class="tactile" type="button" title="上一步（左方向键）"><span aria-hidden="true">‹</span><span>上一步</span></button>
+        <button id="play" class="beam-cta" type="button" title="播放或暂停（空格）"><span id="play-symbol" aria-hidden="true">▶</span><span id="play-label">播放</span></button>
+        <button id="next" class="tactile" type="button" title="下一步（右方向键）"><span>下一步</span><span aria-hidden="true">›</span></button>
+      </div>
+      <div class="progress-control">
+        <label for="progress" class="sr-only">演示进度</label>
+        <input id="progress" class="taste-slider" type="range" min="0" max="1" step="0.01" value="0">
+        <div class="progress-meta"><span id="elapsed">0:00</span><span id="progress-caption">初始化</span><span id="duration">0:00</span></div>
+      </div>
+      <label class="speed-control" for="speed">速度
+        <select id="speed"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="1.5">1.5×</option><option value="2">2×</option></select>
+      </label>
+    </section>
+    <p id="dependency-notice" class="dependency-notice" hidden>动画引擎未加载。可用上一步、下一步或进度条查看算法状态；联网后刷新可恢复动画。</p>
+    <footer class="page-foot"><span>正权无向图 · 6 个节点 · 9 条边</span><span>空格播放 / 暂停，← → 逐步观察</span></footer>
+    <p id="accessible-state" class="sr-only" aria-live="polite"></p>
+  </main>
+</body>
+</html>
