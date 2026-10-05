@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>第二类曲面积分 · 看懂水怎样穿过曲面</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<link rel="stylesheet" href="style.css?v=animation-2">
+<script defer src="model.js?v=animation-2"></script>
+<script defer src="app.js?v=animation-7"></script>
+</head>
+<body>
+<header class="page-header">
+  <a class="back-link" href="../index.html#math">← 返回高等数学</a>
+  <h1>第二类曲面积分</h1><p>先看水怎样穿过，再看公式怎样写</p>
+</header>
+<main>
+  <nav class="chapter-nav" aria-label="讲解章节">
+    <button data-chapter="0" class="active"><span>1</span> 水怎样穿过</button>
+    <button data-chapter="1"><span>2</span> 放大一小块</button>
+    <button data-chapter="2"><span>3</span> 为什么看影子</button>
+    <button data-chapter="3"><span>4</span> 把小块加起来</button>
+  </nav>
+  <section class="stage-shell" aria-label="曲面积分动画">
+    <div id="stage" role="img" aria-label="蓝色水流从下向上穿过薄网"></div>
+    <div class="scene-caption">
+      <p id="sceneCount">第 1 / 15 步 · 水怎样穿过</p>
+      <h2 id="sceneTitle">通量，到底在数什么？</h2>
+      <p id="sceneDescription">想象一张薄网。我们只数单位时间内穿过它的水。</p>
+    </div>
+    <svg id="labelLines" class="label-lines" aria-hidden="true"></svg>
+    <div id="labels" class="annotation-layer" aria-hidden="true"></div>
+    <div id="quantityChip" class="quantity-chip"><span id="quantityLabel">穿过的水量</span><strong id="quantityValue">100%</strong></div>
+    <div id="sumChip" class="sum-chip" hidden><span id="sumCount">0 / 64 块</span><strong id="sumValue">0.000</strong><span>近似净通量</span></div>
+    <div class="lesson-cue" aria-live="polite" aria-atomic="true"><span class="cue-dot"></span><p id="lessonCue">先看蓝色水流穿过网，再按“播放讲解”跟着看。</p></div>
+    <p class="orbit-hint">拖动画面可换个角度看</p>
+    <div id="loadError" class="load-error" role="alert" hidden>动画暂时加载失败，请刷新页面重试。</div>
+  </section>
+  <div id="lessonProgress" class="lesson-progress" aria-label="选择讲解步骤"></div>
+  <div class="playback-bar">
+    <div class="transport">
+      <button id="btnPrevious" class="tactile-btn" disabled>← 上一步</button>
+      <button id="btnPlay" class="tactile-btn primary">▶ 播放讲解</button>
+      <button id="btnNext" class="tactile-btn">下一步 →</button>
+      <button id="btnReset" class="tactile-btn">从头看</button>
+    </div>
+    <label class="speed-control">讲解速度 <select id="speedSelect" aria-label="讲解速度"><option value="0.5">慢一点 · 0.5×</option><option value="1" selected>正常 · 1×</option><option value="2">快一点 · 2×</option></select></label>
+  </div>
+  <div id="flatExperiment" class="experiment-strip">
+    <label for="angleSlider">自己转一下网 <output id="angleValue">0°</output></label>
+    <input id="angleSlider" type="range" min="0" max="180" value="0" aria-label="网的倾斜角度">
+    <button id="btnFlip" class="tactile-btn">翻转金箭头的方向</button>
+  </div>
+  <div class="details-row">
+    <details id="mathDetails">
+      <summary>把刚才的动画写成公式</summary>
+      <div class="details-body">
+        <p id="formulaExplanation">水速 × 垂直于水流的有效面积；沿金箭头穿过记正，反向记负。</p>
+        <div id="formula" class="formula"></div><div id="componentValues" class="component-values"></div>
+        <p class="math-note">F 是流速向量，n 是单位法向量（金箭头），dS 是小片面积。数值示例取 F = (1, 1, 1.2)；第一章只开启竖直分量。</p>
+      </div>
+    </details>
+    <details id="exploreDetails">
+      <summary>自由观察与换一张网</summary>
+      <div class="details-body explore-controls">
+        <label>曲面 <select id="surfaceSelect"><option value="paraboloid">弯曲的网 · 抛物面</option><option value="hemisphere">球面的一部分 · 球冠</option><option value="plane">平直的斜网 · 平面</option></select></label>
+        <label id="streamControl">看哪个方向的水 <select id="streamSelect"><option value="all">三个分量</option><option value="r">竖直 · 蓝色 R</option><option value="p">横向 x · 红色 P</option><option value="q">横向 y · 绿色 Q</option></select></label>
+        <div class="view-buttons" aria-label="观察视角">
+          <button class="tactile-btn" data-view="lesson">回到讲解视角</button>
+          <button class="tactile-btn" data-view="top">从上面看</button>
+          <button class="tactile-btn" data-view="side">从侧面看</button>
+        </div>
+        <button id="btnFlipSurface" class="tactile-btn">翻转曲面的正方向</button>
+        <p>自由调整会暂停讲解。点“从头看”可恢复初始设置。</p>
+      </div>
+    </details>
+  </div>
+</main>
+</body>
+</html>
