@@ -241,3 +241,37 @@
 - 原则上**一个模块一条提交**，保证日后可按模块独立回溯；
 - 严禁将多个模块、基建文件、文档重构混入单条提交，除非用户明确要求合并提交；
 - 提交前用 `git status` 核对实际入库文件清单，如与预期不符须先澄清再提交。
+
+---
+
+## §8 项目级工具加载清单 (Loaded Project Tools)
+
+> 依据上一级容器规范 [`/home/hf/项目/AGENT.md`](file:///home/hf/项目/AGENT.md) §2 开工强制流程，以及 [`Tools/AGENT.md`](file:///home/hf/项目/Tools/AGENT.md) §2 选型流程。
+> `Tools/` 为**只读源**，以下均为复制到本项目的**项目级副本**，可自由裁剪，严禁反向写回 `Tools/`。
+> 加载日期：2025-10-05。项目类型判定：**前端视觉类 · 零构建 · 已锁死设计系统（DESIGN_SYSTEM.md）· 原生 JS + GSAP 动画**。
+
+### 8.1 已加载（6 个 skill，全部在 `.agents/skills/`）
+
+| skill | 来源路径 | 为什么加载 |
+|---|---|---|
+| `karpathy-guidelines` | `Tools/andrej-karpathy-skills/skills/karpathy-guidelines/` | **行为底座**：Think Before Coding / Simplicity First / Surgical Changes / Goal-Driven，治理 AI 乱改、加戏、在 52 个沙盒间产生越界 diff。 |
+| `gsap-core` | `Tools/gsap-skills/gsap-core/` | 全站 47 处 GSAP CDN 引用，`§3` 全部动效铁律的实作基础；含 `matchMedia` + `prefers-reduced-motion`（站内 37 处已在用）。 |
+| `gsap-timeline` | `Tools/gsap-skills/gsap-timeline/` | 22 个模块使用 `gsap.timeline()` 做多段编排，直接支撑 `§3.2` 三阶段转场管线（Outro → Pivot → Intro）与单步/自动播放的状态机。 |
+| `gsap-performance` | `Tools/gsap-skills/gsap-performance/` | 直接对应 `§3.1`（60fps 硬指标）与 `§3.5`（补间竞态清理）：只动 transform/opacity、`will-change` 纪律、`quickTo` 跟随。 |
+| `gsap-utils` | `Tools/gsap-skills/gsap-utils/` | 11 个模块手写 `clamp` / `mapRange` 类归一化逻辑，改用 `gsap.utils` 可减样板代码，符合 Simplicity First。 |
+| `webapp-testing` | `Tools/anthropic-skills/skills/webapp-testing/` | 补 `§7.1` "必要时补做浏览器实测"的空白：`verify.js` 只能查注册表，Playwright 可起服务、抓 console 报错、截图验收 52 个模块。 |
+
+### 8.2 明确不装（选型裁剪记录）
+
+| 工具 | 不装理由 |
+|---|---|
+| `taste-skill` | 其分析文档明示"视觉方向已定死的设计系统项目谨慎叠加"。本项目 `DESIGN_SYSTEM.md` 已锁死浅色纸质美学，且 `§1.2` 要求美学自主创新，再叠 taste 会与设计法典打架。 |
+| `ECC` | 总览表判定"简单页面、纯设计稿项目"不适合；本项目已有自己的三步闭环与防呆铁律，按需取 1–3 个也暂无明确缺口。 |
+| `vercel-agent-skills` | 主体为 React 性能条目，本项目原生 JS + CDN，无 React。 |
+| `understand-anything` | 知识图谱/diff 影响分析要求通读全仓，与 `§1.1` "严禁跨模块全量翻查"的沙盒纪律直接冲突。 |
+| `serena-mcp-quickstart` | 模块间零运行时依赖、各自独立目录，grep 定位已足够，不值得接 LSP。 |
+| `markitdown` | 无外部文档转 Markdown 的需求。 |
+| `gsap-scrolltrigger` / `gsap-react` / `gsap-frameworks` | 无滚动驱动动画；原生 JS 无 React/Vue/Svelte。 |
+| `gsap-plugins` | 仅 `操作系统引导流程` 一个模块用了 `MotionPathPlugin`，按"按名取、不整包"规则不预装；需要时再读 `Tools/gsap-skills/gsap-plugins/`。 |
+| `anthropic-skills/frontend-design` | 与 taste 同赛道，本项目审美由 `DESIGN_SYSTEM.md` 负责，暂不需要第二套审美 skill。 |
+| `superpowers` | **已全局安装**于 `~/.agents/skills/`，按 `Tools/AGENT.md` 无需从 `Tools/` 加载；另见 `§6` 技能使用偏好。 |
