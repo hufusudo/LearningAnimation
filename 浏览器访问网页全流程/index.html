@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>浏览器访问网页全流程 · 交互演示</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="stylesheet" href="style.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+</head>
+<body class="bg-[#FAF9F5] text-stone-800 font-sans antialiased">
+
+<div class="max-w-7xl mx-auto px-4 sm:px-6 py-5">
+
+  <!-- ══════════ HUD 顶栏 ══════════ -->
+  <header class="flex flex-wrap items-center gap-3 mb-4">
+    <a href="../index.html#net" class="text-xs font-mono text-stone-600 hover:text-stone-900 border border-[#E5E4DC] bg-white px-2.5 py-1.5 rounded-lg flex items-center gap-1 transition-colors shadow-sm">
+      &larr; 返回计算机网络
+    </a>
+    <h1 class="text-sm font-semibold tracking-wide text-stone-800">浏览器访问网页全流程</h1>
+    <span class="text-[11px] font-mono text-stone-400 border border-[#E5E4DC] bg-white px-2 py-0.5 rounded-lg">多进程接力 · 四层泳道 · 协议累积</span>
+
+    <div class="flex-1"></div>
+
+    <span id="phase-indicator" class="text-[11px] font-mono text-stone-500 border border-[#E5E4DC] bg-white px-2.5 py-1.5 rounded-lg">阶段 0/4 · 序章</span>
+
+    <div class="flex items-center gap-1.5">
+      <button id="btn-prev" class="tactile-btn">⏮ 上一步</button>
+      <button id="btn-play" class="tactile-btn">▶ 播放</button>
+      <button id="btn-next" class="tactile-btn">⏭ 下一步</button>
+      <button id="btn-auto" class="tactile-btn" title="从当前阶段起，自动连续播放到最后一阶段">⏩ 全自动</button>
+      <button id="btn-reset" class="tactile-btn">⟲ 复位</button>
+    </div>
+
+    <div class="flex items-center gap-1.5">
+      <span class="text-[11px] font-mono text-stone-400">速率</span>
+      <button data-speed="0.5" class="tactile-btn speed-btn">0.5x</button>
+      <button data-speed="1" class="tactile-btn speed-btn is-on">1x</button>
+      <button data-speed="2" class="tactile-btn speed-btn">2x</button>
+    </div>
+  </header>
+
+  <!-- ══════════ 主体三栏 ══════════ -->
+  <main class="grid grid-cols-1 lg:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)] gap-4">
+
+    <!-- ── 左：四层泳道时间轴主舞台 ── -->
+    <section class="flex flex-col gap-3 min-w-0">
+
+      <!-- 序章 URL 输入条 -->
+      <div class="relative overflow-hidden rounded-2xl border border-[#E5E4DC] bg-white p-3.5 shadow-sm">
+        <div class="flex items-center gap-2 mb-2.5">
+          <span class="w-2 h-2 rounded-full bg-stone-300"></span>
+          <span class="text-[11px] font-mono uppercase tracking-wider text-stone-500">地址栏 · URL 分段解剖</span>
+        </div>
+
+        <div class="flex flex-wrap items-baseline gap-x-1 gap-y-1 font-mono text-[13px] sm:text-sm px-3 py-2.5 rounded-xl bg-[#FAF9F5] border border-[#E5E4DC]">
+          <span class="url-part text-stone-400" data-part="scheme">https://</span><span class="url-part text-stone-400" data-part="host">www.example-university.edu.cn</span><span class="url-part text-stone-400" data-part="path">/cs/net/408-index.html</span><span class="url-part text-stone-400" data-part="query">?chapter=4&amp;view=full</span><span class="url-part text-stone-400" data-part="fragment">#tcp-handshake</span>
+        </div>
+
+        <!-- 分段归属引线标签 -->
+        <div class="flex flex-wrap gap-x-5 gap-y-1.5 mt-2.5 min-h-[18px]">
+          <span class="part-owner text-[11px] font-mono text-emerald-700 flex items-center gap-1"><span class="w-3 h-px bg-emerald-300"></span>host 段 &rarr; DNS 阶段</span>
+          <span class="part-owner text-[11px] font-mono text-amber-700 flex items-center gap-1"><span class="w-3 h-px bg-amber-300"></span>path / query 段 &rarr; HTTP 阶段</span>
+          <span class="part-owner text-[11px] font-mono text-stone-400 flex items-center gap-1"><span class="w-3 h-px bg-stone-300"></span>scheme 段 &rarr; 决定协议栈</span>
+        </div>
+      </div>
+
+      <!-- 泳道舞台 -->
+      <div class="stage relative flex-1 min-h-[520px] overflow-hidden rounded-2xl border border-[#E5E4DC] bg-[#FAF9F5] shadow-sm">
+        <div class="glow-sky pointer-events-none absolute inset-0"></div>
+        <div class="glow-amber pointer-events-none absolute inset-0"></div>
+        <div class="blueprint pointer-events-none absolute inset-0"></div>
+
+        <div class="relative z-10 flex flex-col h-full">
+
+          <!-- 四条泳道 -->
+          <div class="flex-1 flex flex-col justify-center gap-[22px] px-3 py-4" id="lanes">
+
+            <!-- L1 服务器 -->
+            <div class="lane lane--server" data-lane="server">
+              <span class="lane__title">服务器</span>
+              <div class="lane__body">
+                <div class="node node--webserver" id="node-webserver">
+                  <span class="node__label">Web 服务器</span>
+                  <span class="node__sub">93.184.216.34</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- L2 网络 -->
+            <div class="lane lane--net" data-lane="net">
+              <span class="lane__title">网络</span>
+              <div class="lane__body">
+                <div class="node node--router" id="node-router">
+                  <span class="node__label">默认网关</span>
+                  <span class="node__sub">192.168.1.1</span>
+                </div>
+                <div class="node node--dns" id="node-dns">
+                  <span class="node__label">DNS 服务器</span>
+                  <span class="node__sub">8.8.8.8 : 53/UDP</span>
+                </div>
+                <div class="node node--arp" id="node-arp">
+                  <span class="node__label">ARP 缓存</span>
+                  <span class="node__sub" id="arp-cache-sub">（空）</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- L3 客户端协议层 -->
+            <div class="lane lane--proto" data-lane="proto">
+              <span class="lane__title">协议层</span>
+              <div class="lane__body">
+                <div class="chip chip--dns" id="chip-dns"><span>DNS</span></div>
+                <div class="chip chip--tcp" id="chip-tcp"><span>TCP</span></div>
+                <div class="chip chip--http" id="chip-http"><span>HTTP</span></div>
+              </div>
+            </div>
+
+            <!-- L4 浏览器进程层 -->
+            <div class="lane lane--proc" data-lane="proc">
+              <span class="lane__title">浏览器</span>
+              <div class="lane__body">
+                <div class="proc proc--ui" id="proc-ui">
+                  <span class="proc__name">UI 进程</span>
+                  <span class="proc__sub">敲回车的地方</span>
+                </div>
+                <div class="proc proc--net" id="proc-net">
+                  <span class="proc__name">网络进程</span>
+                  <span class="proc__sub">真正发包</span>
+                  <div class="proc__slot" id="net-queue"></div>
+                </div>
+                <div class="proc proc--render" id="proc-render">
+                  <span class="proc__name">渲染进程</span>
+                  <span class="proc__sub">真正出像素</span>
+                  <div class="dom-preview" id="dom-preview"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 报文信封条带 -->
+          <div id="envelope-bar" class="h-16 shrink-0 mx-3 mb-3 rounded-xl border border-[#E5E4DC] bg-white/80 backdrop-blur-sm px-3 py-2 flex items-center gap-2 overflow-x-auto">
+            <span class="text-[10px] font-mono text-stone-400 shrink-0">报文信封</span>
+            <div id="envelope-slot" class="flex items-center gap-2 flex-1 min-w-0"></div>
+          </div>
+        </div>
+
+        <!-- 报文斜线 SVG 层 -->
+        <svg id="timeline-root" class="pointer-events-none absolute inset-0 w-full h-full z-20"></svg>
+        <!-- 浮层：令牌 / 说明小卡（置于信封条带之上，斜线之下） -->
+        <div id="float-layer" class="pointer-events-none absolute inset-0 z-30"></div>
+      </div>
+
+      <!-- 进度轨 -->
+      <div id="progress-rail" class="flex items-center gap-1.5">
+        <div class="rail-seg" data-phase="0"><span>序章</span></div>
+        <div class="rail-seg" data-phase="1"><span>1 ARP</span></div>
+        <div class="rail-seg" data-phase="2"><span>2 DNS</span></div>
+        <div class="rail-seg" data-phase="3"><span>3 TCP</span></div>
+        <div class="rail-seg" data-phase="4"><span>4 HTTP</span></div>
+      </div>
+    </section>
+
+    <!-- ── 右：协议清单 + 阶段解说 ── -->
+    <aside class="flex flex-col gap-3 min-w-0">
+
+      <!-- 协议清单 -->
+      <div class="relative flex flex-col overflow-hidden rounded-2xl rounded-tl-3xl rounded-br-3xl border border-[#E5E4DC] bg-white shadow-sm">
+        <div class="dotmask pointer-events-none absolute inset-0"></div>
+        <div class="relative z-10 flex items-center justify-between px-4 py-3 border-b border-stone-100">
+          <div class="flex items-center gap-2">
+            <span class="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span>
+            <h2 class="text-xs font-semibold uppercase tracking-wider text-stone-700">本次访问协议清单</h2>
+          </div>
+          <span class="text-[11px] font-mono text-stone-400">0/5</span>
+        </div>
+        <ul class="relative z-10 py-2 px-2">
+          <li class="proto-item" data-proto="arp"><span class="pi__idx">①</span><span class="pi__name">ARP</span><span class="pi__out">→ 网关 MAC</span></li>
+          <li class="proto-item" data-proto="dns"><span class="pi__idx">②</span><span class="pi__name">DNS</span><span class="pi__out">→ 目标 IP</span></li>
+          <li class="proto-item" data-proto="tcp"><span class="pi__idx">③</span><span class="pi__name">TCP</span><span class="pi__out">→ 双向连接</span></li>
+          <li class="proto-item" data-proto="http"><span class="pi__idx">④</span><span class="pi__name">HTTP</span><span class="pi__out">→ 文档</span></li>
+          <li class="proto-item" data-proto="render"><span class="pi__idx">⑤</span><span class="pi__name">渲染</span><span class="pi__out">→ 像素</span></li>
+        </ul>
+        <div class="relative z-10 px-4 py-2.5 border-t border-stone-100 bg-white/70 backdrop-blur-md min-h-[38px]">
+          <p id="proto-summary" class="text-[11px] font-mono text-stone-400">待全部点亮</p>
+        </div>
+      </div>
+
+      <!-- 阶段解说 -->
+      <div class="relative flex-1 flex flex-col overflow-hidden rounded-2xl rounded-tl-3xl rounded-br-3xl border border-[#E5E4DC] bg-white shadow-sm">
+        <div class="dotmask pointer-events-none absolute inset-0"></div>
+        <div class="relative z-10 flex items-center justify-between px-4 py-3 border-b border-stone-100">
+          <div class="flex items-center gap-2">
+            <span class="w-2 h-2 rounded-full bg-blue-500 animate-pulse"></span>
+            <h2 id="narrative-title" class="text-xs font-semibold uppercase tracking-wider text-stone-700">序章 · URL 分段解剖</h2>
+          </div>
+          <span id="narrative-step" class="text-[11px] font-mono text-stone-400">STEP 0</span>
+        </div>
+
+        <div class="relative z-10 px-4 py-3.5 flex-1">
+          <p id="narrative-body" class="text-xs leading-relaxed text-stone-600">
+            不同字符，归属不同协议。点「下一步」开始解剖一段 URL。
+          </p>
+        </div>
+
+        <!-- 易错点 Callout -->
+        <div class="relative z-10 px-4 pb-4">
+          <div id="callout" class="border border-purple-200 bg-purple-50/60 rounded-xl p-3 text-[11px] text-purple-900 leading-relaxed flex items-start gap-2">
+            <span class="text-purple-600 font-bold shrink-0">[!important]</span>
+            <div id="callout-body">ARP 与 DNS 实际是<b>并行</b>发生的——DNS 查询包同样需要链路层地址。本片为叙事清晰分开展示。</div>
+          </div>
+        </div>
+      </div>
+    </aside>
+  </main>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
