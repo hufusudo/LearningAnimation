@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>多元函数的辨析 · 可视化实验室</title>
+
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- GSAP CDN (Step 2 时间轴接入时启用，Step 1 仅预置 killTweensOf 防呆) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+
+  <!-- KaTeX CDN (非 defer：保证 app.js 执行时 window.katex 已就绪) -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+
+  <!-- Three.js r128 + OrbitControls -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="min-h-screen bg-[#FAF9F5] text-stone-900 antialiased selection:bg-stone-200 flex flex-col">
+
+  <!-- ══════════════ 顶部导航条 ══════════════ -->
+  <header class="border-b border-[#E5E4DC] bg-[#FAF9F5]/90 backdrop-blur sticky top-0 z-30 px-4 lg:px-8 py-3">
+    <div class="max-w-7xl mx-auto flex items-center justify-between gap-4">
+      <div class="flex items-center gap-3 min-w-0">
+        <a href="../index.html#math" class="shrink-0 text-xs font-mono text-stone-600 hover:text-stone-900 border border-[#E5E4DC] bg-white px-2.5 py-1.5 rounded-lg flex items-center gap-1 transition-colors shadow-sm" title="返回高等数学">
+          <span>&larr; 返回高等数学</span>
+        </a>
+        <div class="h-4 w-[1px] bg-stone-300 hidden sm:block"></div>
+        <h1 class="text-base font-semibold tracking-tight text-stone-900 truncate">多元函数的辨析</h1>
+      </div>
+      <div class="flex items-center gap-2 shrink-0">
+        <span class="hidden sm:inline text-[11px] font-mono px-2 py-0.5 rounded border border-amber-200 bg-amber-50 text-amber-800">STEP 1 · 静态骨架</span>
+        <span class="text-xs font-mono px-2 py-0.5 rounded border border-[#E5E4DC] bg-white text-stone-600">高等数学</span>
+      </div>
+    </div>
+  </header>
+
+  <main class="flex-1 w-full max-w-7xl mx-auto p-4 lg:p-5 flex flex-col gap-4">
+
+    <!-- ══════════════ 载体曲面公式卡 ══════════════ -->
+    <section class="relative overflow-hidden rounded-2xl rounded-tl-3xl rounded-br-3xl border border-[#E5E4DC] bg-white p-4 lg:p-5 shadow-[0_4px_20px_-4px_rgba(0,0,0,0.04)] ring-1 ring-black/[0.03]">
+      <div class="pointer-events-none absolute inset-0 bg-[radial-gradient(#CBD5E1_1.2px,transparent_1.2px)] bg-[size:14px_14px] [mask-image:radial-gradient(ellipse_70%_60%_at_50%_50%,#000_60%,transparent_100%)]"></div>
+
+      <div class="relative z-10 flex flex-wrap items-center justify-between gap-2 pb-2.5 border-b border-stone-100">
+        <div class="flex items-center gap-2">
+          <span class="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span>
+          <h2 class="text-xs font-semibold tracking-wider text-stone-700 uppercase">载体曲面与核心命题</h2>
+        </div>
+        <span class="text-[11px] font-mono text-stone-400">z = xy / √(x²+y²) · 四叶折叠帐篷</span>
+      </div>
+
+      <div class="relative z-10 pt-3 grid gap-3 lg:grid-cols-[auto_minmax(0,1fr)] lg:items-center">
+        <div class="math-block" data-math="z=\begin{cases}\dfrac{xy}{\sqrt{x^{2}+y^{2}}}, & \rho=\sqrt{x^{2}+y^{2}}>0\\[6pt] 0, & (x,y)=(0,0)\end{cases}"></div>
+        <p class="text-xs text-stone-600 leading-relaxed font-sans">
+          在原点处：<strong class="text-stone-800">连续</strong>与<strong class="text-stone-800">两个偏导存在</strong>均成立，
+          沿 $X$ 轴与 $Y$ 轴的剖线都完全水平 —— 但沿 $y=x$ 的对角线却蹦出斜率 $k_\pm=\pm 1/2$ 的
+          <strong class="text-rose-700">V 字折痕</strong>。本演示用「立靶子 → 打破靶子 → 量化破产 → 法向撕裂」
+          四步，逐一攻破「连续且偏导存在 $\nRightarrow$ 可微」这一认知盲区。
+        </p>
+      </div>
+    </section>
+
+    <!-- ══════════════ 主工作区：左 3D 舞台 / 右 HUD ══════════════ -->
+    <div class="grid gap-4 lg:grid-cols-[minmax(0,1.65fr)_minmax(0,1fr)] items-start">
+
+      <!-- ─────── 左：3D 几何主舞台 ─────── -->
+      <section id="stage-container"
+               class="relative w-full h-[62vh] min-h-[440px] lg:h-[640px] rounded-2xl border border-[#E5E4DC] bg-[#FAF9F5] overflow-hidden shadow-sm">
+        <!-- 顶部天青柔光晕 -->
+        <div class="pointer-events-none absolute inset-0 z-0 bg-[radial-gradient(circle_650px_at_50%_0px,rgba(56,189,248,0.09),transparent)]"></div>
+        <!-- 右下琥珀微光晕 -->
+        <div class="pointer-events-none absolute inset-0 z-0 bg-[radial-gradient(circle_450px_at_85%_70%,rgba(245,158,11,0.06),transparent)]"></div>
+        <!-- 工程制图 18px 细线微网格 -->
+        <div class="pointer-events-none absolute inset-0 z-0 bg-[linear-gradient(to_right,rgba(0,0,0,0.035)_1px,transparent_1px),linear-gradient(to_bottom,rgba(0,0,0,0.035)_1px,transparent_1px)] bg-[size:18px_18px]"></div>
+
+        <!-- Three.js 画布挂载点 -->
+        <div id="viewport" class="absolute inset-0 z-10"></div>
+
+        <!-- 3D 漂浮文字 Label 层（由 app.js 手动投影定位） -->
+        <div id="label-layer" class="absolute inset-0 z-20 pointer-events-none overflow-hidden"></div>
+
+        <!-- 视口角标：坐标说明 -->
+        <div class="absolute left-3 bottom-3 z-20 pointer-events-none font-mono text-[10px] leading-relaxed text-stone-500">
+          <div class="px-2 py-1 rounded-md bg-white/75 backdrop-blur-sm border border-[#E5E4DC]">
+            <span class="text-stone-400">左键拖拽</span> 旋转 · <span class="text-stone-400">滚轮</span> 缩放
+          </div>
+        </div>
+
+        <!-- 视口角标：当前机位 -->
+        <div class="absolute right-3 top-3 z-20 pointer-events-none font-mono text-[10px] px-2 py-1 rounded-md bg-white/75 backdrop-blur-sm border border-[#E5E4DC] text-stone-500" id="cam-readout">
+          CAM (0.00, -3.50, 1.20)
+        </div>
+
+        <!-- 可拖拽探索微提示（设计方案 §四.2：运镜落位后才开放自由微调） -->
+        <div id="explore-hint" class="explore-hint pointer-events-none absolute left-1/2 bottom-3 z-20 font-mono text-[10px] px-2.5 py-1 rounded-full border border-[#E5E4DC] bg-white/85 backdrop-blur-sm text-stone-500 shadow-sm">
+          运镜落位 · 可拖拽自由微调视角
+        </div>
+
+        <!-- 图例 -->
+        <div class="absolute left-3 top-3 z-20 pointer-events-none rounded-lg bg-white/80 backdrop-blur-sm border border-[#E5E4DC] px-2.5 py-2 space-y-1 font-mono text-[10px] text-stone-600">
+          <div class="flex items-center gap-1.5"><span class="inline-block w-3 h-[3px] rounded-full bg-blue-600"></span>剖面截交线</div>
+          <div class="flex items-center gap-1.5"><span class="inline-block w-3 h-[3px] rounded-full bg-amber-500"></span>单刀剖切面</div>
+          <div class="flex items-center gap-1.5"><span class="inline-block w-3 h-[3px] rounded-full bg-slate-400"></span>候选切平面 z=0</div>
+          <div class="flex items-center gap-1.5"><span class="inline-block w-3 h-[3px] rounded-full bg-rose-600"></span>残差立柱 Δz</div>
+          <div class="flex items-center gap-1.5"><span class="inline-block w-3 h-[3px] rounded-full bg-emerald-600"></span>法向量探针</div>
+        </div>
+      </section>
+
+      <!-- ─────── 右：HUD 三段式 ─────── -->
+      <aside class="flex flex-col gap-4 w-full min-w-0">
+
+        <!-- 【Top 22%】概念拓扑看板 -->
+        <section class="relative overflow-hidden rounded-2xl rounded-tl-3xl rounded-br-3xl border border-[#E5E4DC] bg-white shadow-[0_4px_20px_-4px_rgba(0,0,0,0.05)] ring-1 ring-black/[0.03]">
+          <div class="pointer-events-none absolute inset-0 bg-[radial-gradient(#CBD5E1_1.2px,transparent_1.2px)] bg-[size:14px_14px] [mask-image:radial-gradient(ellipse_70%_60%_at_50%_50%,#000_60%,transparent_100%)]"></div>
+
+          <div class="relative z-10 flex items-center justify-between gap-2 px-4 pt-3 pb-2 border-b border-stone-100">
+            <div class="flex items-center gap-2">
+              <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+              <h3 class="text-xs font-semibold uppercase tracking-wider text-stone-700">概念拓扑看板</h3>
+            </div>
+            <span class="text-[11px] font-mono text-stone-400">LOGIC MAP</span>
+          </div>
+
+          <!-- 拓扑图：4 节点菱形 + 4 条蕴含关系 -->
+          <div class="relative z-10 px-3 pb-3 pt-1">
+            <svg viewBox="0 0 400 202" class="w-full h-auto select-none" id="topology-svg" xmlns="http://www.w3.org/2000/svg">
+              <defs>
+                <marker id="arr-ok" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+                  <path d="M0 0 L10 5 L0 10 z" fill="#059669"/>
+                </marker>
+                <marker id="arr-bad" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+                  <path d="M0 0 L10 5 L0 10 z" fill="#E11D48"/>
+                </marker>
+              </defs>
+
+              <!-- A: 偏导连续 ⟹ 偏导存在（定理，恒成立） -->
+              <g class="topo-edge" id="edge-1">
+                <line x1="180" y1="34" x2="78" y2="80" stroke-width="1.6" marker-end="url(#arr-ok)"/>
+                <text x="122" y="52" text-anchor="end" font-size="9" font-family="monospace">定理</text>
+              </g>
+              <!-- B: 偏导连续 ⟹ 可微（定理，恒成立） -->
+              <g class="topo-edge" id="edge-2">
+                <line x1="220" y1="34" x2="322" y2="80" stroke-width="1.6" marker-end="url(#arr-ok)"/>
+                <text x="278" y="52" font-size="9" font-family="monospace">定理</text>
+              </g>
+              <!-- C: 偏导存在 ⟹ 连续（成立，本例满足） -->
+              <g class="topo-edge" id="edge-3">
+                <line x1="76" y1="114" x2="178" y2="152" stroke-width="1.6" marker-end="url(#arr-ok)"/>
+                <text x="118" y="140" text-anchor="end" font-size="9" font-family="monospace">成立</text>
+              </g>
+              <!-- D: 连续 ⇏ 可微 —— 本例反例击破（核心断裂箭头，Phase1-Beat05 激活） -->
+              <g class="topo-edge" id="edge-break">
+                <line x1="256" y1="170" x2="284" y2="122" stroke-width="1.8" stroke-dasharray="5 3" marker-end="url(#arr-bad)"/>
+                <line x1="257" y1="140" x2="283" y2="130" stroke-width="2.4" stroke-linecap="round" class="slash"/>
+                <text x="252" y="146" text-anchor="end" font-size="9" font-family="monospace">击破</text>
+              </g>
+
+              <!-- 节点：偏导存在（左中，Phase1-Beat02 点亮 ✓ 翠绿） -->
+              <g class="topo-node topo-off" id="node-exists">
+                <rect x="8" y="86" width="108" height="28" rx="9" stroke-width="1.2"/>
+                <circle cx="23" cy="100" r="3.5"/>
+                <text class="n-txt" x="33" y="104" font-size="11.5">偏导存在</text>
+                <text class="n-badge" x="107" y="105" text-anchor="end" font-size="12" font-weight="bold">✓</text>
+              </g>
+              <!-- 节点：可微（右中，Phase2-Beat05 判定 ✕ 品红） -->
+              <g class="topo-node topo-off" id="node-diff">
+                <rect x="284" y="86" width="108" height="28" rx="9" stroke-width="1.2"/>
+                <circle cx="299" cy="100" r="3.5"/>
+                <text class="n-txt" x="309" y="104" font-size="11.5">可微</text>
+                <text class="n-badge" x="383" y="105" text-anchor="end" font-size="12" font-weight="bold">✕</text>
+              </g>
+              <!-- 节点：偏导连续（上，Phase3-Beat05 判定 ✕ 灰灭） -->
+              <g class="topo-node topo-off" id="node-c1">
+                <rect x="146" y="6" width="108" height="28" rx="9" stroke-width="1.2"/>
+                <circle cx="161" cy="20" r="3.5"/>
+                <text class="n-txt" x="171" y="24" font-size="11.5">偏导连续</text>
+                <text class="n-badge" x="245" y="25" text-anchor="end" font-size="12" font-weight="bold">✕</text>
+              </g>
+              <!-- 节点：连续（下，Phase1-Beat05 点亮 ✓ 翠绿） -->
+              <g class="topo-node topo-off" id="node-cont">
+                <rect x="146" y="158" width="108" height="28" rx="9" stroke-width="1.2"/>
+                <circle cx="161" cy="172" r="3.5"/>
+                <text class="n-txt" x="171" y="176" font-size="11.5">连续</text>
+                <text class="n-badge" x="245" y="177" text-anchor="end" font-size="12" font-weight="bold">✓</text>
+              </g>
+            </svg>
+
+            <div class="mt-1 px-1">
+              <div class="border border-amber-200 bg-amber-50/70 rounded-xl px-3 py-2 text-[11px] leading-relaxed text-amber-900 flex items-start gap-2">
+                <span class="shrink-0 font-bold">[!warning]</span>
+                <div><strong>本例的判定：</strong>连续 ✓、偏导存在 ✓、偏导连续 ✕、<strong>可微 ✕</strong>。</div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- 【Mid 58%】动态推导与量化面板 -->
+        <section class="relative overflow-hidden rounded-2xl rounded-tl-3xl rounded-br-3xl border border-[#E5E4DC] bg-white shadow-[0_4px_20px_-4px_rgba(0,0,0,0.05)] ring-1 ring-black/[0.03]">
+          <div class="pointer-events-none absolute inset-0 bg-[radial-gradient(#CBD5E1_1.2px,transparent_1.2px)] bg-[size:14px_14px] [mask-image:radial-gradient(ellipse_70%_60%_at_50%_50%,#000_60%,transparent_100%)]"></div>
+
+          <div class="relative z-10 flex items-center justify-between gap-2 px-4 pt-3 pb-2 border-b border-stone-100">
+            <div class="flex items-center gap-2">
+              <span class="w-2 h-2 rounded-full bg-blue-500 animate-pulse"></span>
+              <h3 class="text-xs font-semibold uppercase tracking-wider text-stone-700">动态推导与量化面板</h3>
+            </div>
+            <span class="text-[11px] font-mono text-stone-400" id="hud-beat-tag">BEAT 01/05</span>
+          </div>
+
+          <div class="relative z-10 px-4 py-3 space-y-2.5">
+
+            <!-- 阶段指示器 -->
+            <div class="grid grid-cols-3 gap-1.5" id="phase-track">
+              <div class="phase-chip" data-phase="1">
+                <div class="font-mono text-[10px] text-stone-400">PHASE 1</div>
+                <div class="text-[11px] font-semibold text-stone-700 leading-tight">正交盲区</div>
+              </div>
+              <div class="phase-chip" data-phase="2">
+                <div class="font-mono text-[10px] text-stone-400">PHASE 2</div>
+                <div class="text-[11px] font-semibold text-stone-700 leading-tight">可微破产</div>
+              </div>
+              <div class="phase-chip" data-phase="3">
+                <div class="font-mono text-[10px] text-stone-400">PHASE 3</div>
+                <div class="text-[11px] font-semibold text-stone-700 leading-tight">法向撕裂</div>
+              </div>
+            </div>
+
+            <!-- 解算数据卡 -->
+            <div class="grid grid-cols-2 gap-2">
+              <div class="data-card" id="card-theta">
+                <div class="data-card-label">当前剖切角 θ</div>
+                <div class="data-card-value" data-math-value="theta">0.0°</div>
+                <div class="data-card-foot">X 轴 → 对角线</div>
+              </div>
+              <div class="data-card" id="card-slope">
+                <div class="data-card-label">折痕斜率 k<sub>±</sub></div>
+                <div class="data-card-value" data-math-value="slope">± 0.000</div>
+                <div class="data-card-foot">k<sub>±</sub> = ½·sin 2θ</div>
+              </div>
+              <div class="data-card" id="card-dz">
+                <div class="data-card-label">残差标尺 Δz</div>
+                <div class="data-card-value" data-math-value="dz">0.000</div>
+                <div class="data-card-foot">曲面高 − 切平面高</div>
+              </div>
+              <div class="data-card" id="card-ratio">
+                <div class="data-card-label">极限比值 Δz/ρ</div>
+                <div class="data-card-value" data-math-value="ratio">0.000</div>
+                <div class="data-card-foot">ρ→0 时仍 ≠ 0</div>
+              </div>
+            </div>
+
+            <!-- 纸面滑块：剖切角 / 采样半径 -->
+            <div class="rounded-xl border border-[#E5E4DC] bg-[#FAF9F5] px-3 py-2.5 space-y-2.5">
+              <div class="flex items-center gap-3">
+                <label class="font-mono text-[10px] text-stone-500 w-20 shrink-0" for="slider-theta">剖切角 θ</label>
+                <input id="slider-theta" type="range" min="0" max="90" step="0.5" value="0" class="taste-slider flex-1">
+                <span id="label-theta" class="font-mono text-[11px] text-stone-700 w-12 text-right shrink-0">0.0°</span>
+              </div>
+              <div class="flex items-center gap-3">
+                <label class="font-mono text-[10px] text-stone-500 w-20 shrink-0" for="slider-rho">采样 ρ</label>
+                <input id="slider-rho" type="range" min="0.05" max="1.2" step="0.01" value="0.5" class="taste-slider flex-1">
+                <span id="label-rho" class="font-mono text-[11px] text-stone-700 w-12 text-right shrink-0">0.50</span>
+              </div>
+            </div>
+
+            <!-- 状态看板（Beat 05 定论输出位） -->
+            <div id="verdict-box" class="rounded-xl border border-stone-200 bg-stone-50 px-3 py-2.5">
+              <div class="font-mono text-[10px] text-stone-400 mb-1">状态看板</div>
+              <div id="verdict-text" class="text-[11px] leading-relaxed text-stone-600">
+                静态骨架待确认 —— Step 2 将在此打印各阶段判据结论。
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- 【Bottom 20%】时序控制器 -->
+        <section class="rounded-2xl border border-[#E5E4DC] bg-white p-3 shadow-sm">
+          <div class="flex flex-wrap items-center justify-between gap-3">
+            <div class="flex items-center gap-2 flex-wrap">
+              <button id="btn-prev" class="tactile-btn inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#E5E4DC] bg-gradient-to-b from-white to-[#F7F6F0] text-xs font-mono font-medium text-stone-700 shadow-[0_1.5px_0_#D6D3CD] hover:bg-stone-50 active:shadow-none active:translate-y-[1.5px] transition-all duration-100 select-none">
+                <span class="text-stone-400">⏮</span><span>上一步</span>
+              </button>
+
+              <button id="btn-play" class="group relative inline-flex items-center gap-2 px-4 py-2 rounded-full overflow-hidden text-xs font-medium text-stone-800 bg-white/80 backdrop-blur-md shadow-[0_2px_12px_rgba(37,99,235,0.12)] hover:shadow-[0_4px_20px_rgba(37,99,235,0.2)] active:scale-[0.98] transition-all select-none">
+                <div class="absolute inset-[-150%] w-[400%] h-[400%] pointer-events-none [animation:beam-spin_4s_linear_infinite]">
+                  <div class="w-full h-full [background:conic-gradient(from_0deg,transparent_0_300deg,rgba(37,99,235,0.45)_340deg,transparent_360deg)]"></div>
+                </div>
+                <div class="absolute inset-[1px] rounded-full bg-white/90 backdrop-blur-sm pointer-events-none"></div>
+                <span id="btn-play-icon" class="relative z-10 text-blue-600">▶</span>
+                <span id="btn-play-text" class="relative z-10 font-sans tracking-wide">播放/暂停</span>
+              </button>
+
+              <button id="btn-next" class="tactile-btn inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#E5E4DC] bg-gradient-to-b from-white to-[#F7F6F0] text-xs font-mono font-medium text-stone-700 shadow-[0_1.5px_0_#D6D3CD] hover:bg-stone-50 active:shadow-none active:translate-y-[1.5px] transition-all duration-100 select-none">
+                <span>下一步</span><span class="text-stone-400">⏭</span>
+              </button>
+
+              <button id="btn-reset" class="tactile-btn inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#E5E4DC] bg-gradient-to-b from-white to-[#F7F6F0] text-xs font-mono font-medium text-stone-600 shadow-[0_1.5px_0_#D6D3CD] hover:bg-stone-50 active:shadow-none active:translate-y-[1.5px] transition-all duration-100 select-none">
+                <span>↺ 复位</span>
+              </button>
+            </div>
+
+            <div class="flex items-center gap-3 text-xs font-mono text-stone-500">
+              <span>速度:</span>
+              <input id="slider-speed" type="range" min="0.5" max="2" step="0.5" value="1" class="taste-slider w-20">
+              <span id="label-speed">1.0x</span>
+            </div>
+          </div>
+
+          <!-- 15 Beat 进度轨 -->
+          <div class="mt-3 flex items-center gap-3">
+            <span class="font-mono text-[10px] text-stone-400 shrink-0">BEATS</span>
+            <div id="beat-track" class="flex items-center gap-1 flex-1 min-w-0"></div>
+            <span class="font-mono text-[10px] text-stone-500 shrink-0" id="beat-readout">1 / 15</span>
+          </div>
+        </section>
+
+      </aside>
+    </div>
+  </main>
+
+  <footer class="border-t border-[#E5E4DC] py-4 mt-2 text-center text-xs font-mono text-stone-400">
+    LearningAnimation · 浅色纸质美学与 60fps 动量连续性
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
