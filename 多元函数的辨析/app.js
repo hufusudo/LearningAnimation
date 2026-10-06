@@ -691,7 +691,7 @@
     { left: '$', right: '$', display: false }
   ];
 
-  /** AGENT.md §3.7：动态 LaTeX 必须走 katex.render，CDN 失效时降级为纯文本 */
+  /** AGENTS.md §3.7：动态 LaTeX 必须走 katex.render，CDN 失效时降级为纯文本 */
   function setMath(el, latex, fallback) {
     if (!el) return;
     if (hasKatex) {

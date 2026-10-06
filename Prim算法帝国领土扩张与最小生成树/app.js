@@ -3,7 +3,7 @@
  *  Prim 算法：帝国领土扩张与最小生成树机制
  *  核心交互逻辑 · 动效状态机 · 割性质贪心计算
  *
- *  设计契约 (遵循 AGENT.md / DESIGN_SYSTEM.md 铁律)：
+ *  设计契约 (遵循 AGENTS.md / DESIGN_SYSTEM.md 铁律)：
  *   §3.5 防呆铁律 1 —— 任何重置 / 换起点 / 切预设 / 单步 / 倍速前，
  *                    必定先 gsap.killTweensOf('*') + 清空延时器 + 令牌作废。
  *   §3.6 防呆铁律 2 —— 无写死像素宽度；监听 resize/ResizeObserver 重算
