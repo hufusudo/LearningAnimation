@@ -1,0 +1,51 @@
+/* 默认浅色起点，按当前模块的设计调整令牌与布局。 */
+:root {
+  --bg-page: #FAF9F5;
+  --bg-card: #FFFFFF;
+  --text-primary: #292524;
+  --text-secondary: #57534E;
+  --border-subtle: #E5E4DC;
+  --accent: #2563EB;
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  color: var(--text-primary);
+  background: var(--bg-page);
+  font: 1rem/1.6 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+.module-header, main {
+  width: min(80rem, calc(100% - 2rem));
+  margin-inline: auto;
+}
+.module-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.75rem 1.5rem;
+  padding-block: 1.25rem;
+}
+.module-header a { color: var(--text-secondary); }
+h1 {
+  margin: 0;
+  font-size: clamp(1.25rem, 2.5vw, 1.75rem);
+  overflow-wrap: anywhere;
+}
+.stage {
+  position: relative;
+  min-width: 0;
+  min-height: 20rem;
+  padding: 1rem;
+  border: 1px solid var(--border-subtle);
+  border-radius: 0.75rem;
+  background: var(--bg-card);
+}
+.starter-note { color: var(--text-secondary); }
+a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+button, input, select { font: inherit; }
+button:disabled, input:disabled, select:disabled { cursor: not-allowed; }
+main { padding-bottom: 2rem; }
