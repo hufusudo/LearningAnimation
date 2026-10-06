@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>磁盘调度：SCAN 与 C-SCAN 扫描算法 · 可视化实验室</title>
+
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- GSAP 动画引擎 (Step 2 接线) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="min-h-screen bg-[#FAF9F5] text-stone-900 antialiased selection:bg-stone-200">
+
+  <!-- ① 顶部导航条 + 阶段徽标 -->
+  <header class="header">
+    <div class="header__inner">
+      <a href="../index.html#os" class="backlink" title="返回计算机操作系统">
+        <span>&larr; 返回计算机操作系统</span>
+      </a>
+      <span class="h-sep" aria-hidden="true"></span>
+      <h1 class="header__title">磁盘调度：SCAN 与 C-SCAN 扫描算法</h1>
+      <div class="header__right">
+        <span class="disc-badge">计算机操作系统</span>
+        <div class="phase-bar" id="phase-bar">
+          <span class="phase-badge is-active" data-phase="0">P1 布景</span>
+          <span class="phase-badge" data-phase="1">P2 SCAN</span>
+          <span class="phase-badge" data-phase="2">P3 C-SCAN</span>
+          <span class="phase-badge" data-phase="3">P4 对比</span>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <main class="main">
+    <div class="layout-grid">
+
+      <!-- ══════════ 左列：队列 + 舞台 + 控制 ══════════ -->
+      <div class="stage-col">
+
+        <!-- ② 待服务队列 -->
+        <section class="panel queue-panel">
+          <div class="panel__head">
+            <span class="panel__title"><i class="led led--emerald"></i>待服务队列</span>
+            <span class="panel__meta" id="queue-meta">8 个请求 · 磁道 0–199</span>
+            <button id="btn-group" class="tactile-btn tactile-btn--sm" title="切换预设请求组">
+              <span>⇄ 换一组</span>
+            </button>
+          </div>
+          <div class="chip-track" id="queue">
+            <span class="chip" data-cyl="98">98</span>
+            <span class="chip" data-cyl="183">183</span>
+            <span class="chip" data-cyl="37">37</span>
+            <span class="chip" data-cyl="122">122</span>
+            <span class="chip" data-cyl="14">14</span>
+            <span class="chip" data-cyl="124">124</span>
+            <span class="chip" data-cyl="65">65</span>
+            <span class="chip" data-cyl="67">67</span>
+            <span class="chip-empty" id="queue-empty">队列已清空</span>
+          </div>
+          <div class="panel__foot">
+            <span class="group-label" id="group-label">组 A · 教材例题</span>
+            <span class="panel__hint">磁头起始 53 · 初始方向 →（向大号）</span>
+          </div>
+        </section>
+
+        <!-- ④ 演示主舞台 -->
+        <section id="stage-container" class="stage">
+          <!-- 工程微网格 + 双层柔光 -->
+          <div class="stage__glow stage__glow--sky" aria-hidden="true"></div>
+          <div class="stage__glow stage__glow--amber" aria-hidden="true"></div>
+          <div class="stage__grid" aria-hidden="true"></div>
+
+          <!-- 轴轨：所有按磁道定位的元素都在轨内，安全内缩由 .stage 的 CSS 变量统一决定 -->
+          <div class="axis-rail">
+          <!-- 端点 callout（三件独立、侧固定，避免 transform 与 GSAP 抢占） -->
+          <div class="cap-callout cap-callout--right" id="callout-turn">
+            <span class="cap-callout__text">到达端点 199，SCAN 掉头</span>
+          </div>
+          <div class="cap-callout cap-callout--right" id="callout-jump">
+            <span class="cap-callout__text">C-SCAN 不回头服务，直接跳回起点</span>
+          </div>
+          <div class="cap-callout cap-callout--center" id="callout-pivot">
+            <span class="cap-callout__text">布景复位：磁头回到 53 · 队列恢复 · 改用 C-SCAN</span>
+          </div>
+
+          <!-- 方向扫描窗：从磁头向当前方向射出（01 拍展开、03 拍收回，低于磁头泳道图层） -->
+          <div class="dir-beam" id="dir-beam" aria-hidden="true"></div>
+
+          <!-- 第一层级：磁头滑块（外层只管定位，内层承接 GSAP 位移/缩放） -->
+          <div class="head" id="head" style="left:26.633%">
+            <div class="head__in">
+              <span class="head-arrow" id="head-arrow">&#9654;</span>
+              <span class="head-body">
+                <span class="head-body__label">磁头</span>
+                <b class="head-body__cyl" id="head-cyl">53</b>
+              </span>
+            </div>
+          </div>
+          <span class="dot-halo" id="dot-halo" style="left:26.633%" aria-hidden="true"></span>
+
+          <!-- 第一层级：请求旗帜（外层定位+居中不动，内层承接动画） -->
+          <div class="flags" id="flags">
+            <span class="flag flag--low"  data-cyl="14"  style="left:7.035%"><span class="flag__body"><span class="flag__label">14</span><span class="flag__dot"></span><span class="flag__stem"></span></span></span>
+            <span class="flag flag--high" data-cyl="37"  style="left:18.593%"><span class="flag__body"><span class="flag__label">37</span><span class="flag__dot"></span><span class="flag__stem"></span></span></span>
+            <span class="flag flag--low"  data-cyl="65"  style="left:32.663%"><span class="flag__body"><span class="flag__label">65</span><span class="flag__dot"></span><span class="flag__stem"></span></span></span>
+            <span class="flag flag--high" data-cyl="67"  style="left:33.668%"><span class="flag__body"><span class="flag__label">67</span><span class="flag__dot"></span><span class="flag__stem"></span></span></span>
+            <span class="flag flag--low"  data-cyl="98"  style="left:49.246%"><span class="flag__body"><span class="flag__label">98</span><span class="flag__dot"></span><span class="flag__stem"></span></span></span>
+            <span class="flag flag--high" data-cyl="122" style="left:61.307%"><span class="flag__body"><span class="flag__label">122</span><span class="flag__dot"></span><span class="flag__stem"></span></span></span>
+            <span class="flag flag--low"  data-cyl="124" style="left:62.312%"><span class="flag__body"><span class="flag__label">124</span><span class="flag__dot"></span><span class="flag__stem"></span></span></span>
+            <span class="flag flag--high" data-cyl="183" style="left:91.96%"><span class="flag__body"><span class="flag__label">183</span><span class="flag__dot"></span><span class="flag__stem"></span></span></span>
+          </div>
+
+          <!-- 数轴：刻度与端点 -->
+          <div class="axis-marks" id="axis-marks">
+            <span class="axis-line" id="axis-line"></span>
+            <span class="tick" style="left:0.0%" data-cyl="0"></span>
+            <span class="tick" style="left:12.563%" data-cyl="25"></span>
+            <span class="tick" style="left:25.126%" data-cyl="50"></span>
+            <span class="tick" style="left:37.688%" data-cyl="75"></span>
+            <span class="tick" style="left:50.251%" data-cyl="100"></span>
+            <span class="tick" style="left:62.814%" data-cyl="125"></span>
+            <span class="tick" style="left:75.377%" data-cyl="150"></span>
+            <span class="tick" style="left:87.94%" data-cyl="175"></span>
+            <span class="tick" style="left:100.0%" data-cyl="199"></span>
+            <span class="axis-cap" id="axis-cap-0" style="left:0.0%" data-cyl="0"></span>
+            <span class="axis-cap axis-cap--end" id="axis-cap-199" style="left:100.0%" data-cyl="199"></span>
+            <span class="cap-label cap-0" id="cap-0" style="left:0.0%" data-cyl="0">0</span>
+            <span class="cap-label" style="left:25.126%" data-cyl="50">50</span>
+            <span class="cap-label" style="left:50.251%" data-cyl="100">100</span>
+            <span class="cap-label" style="left:75.377%" data-cyl="150">150</span>
+            <span class="cap-label cap-end" id="cap-199" style="left:100.0%" data-cyl="199">199</span>
+          </div>
+
+          <!-- 轨迹泳道（SVG 局部坐标 0–1000 对齐数轴 92% 宽） -->
+          <svg class="trails" viewBox="0 0 1000 100" preserveAspectRatio="none" aria-hidden="true">
+            <!-- 泳道 A：SCAN 之字形（去程 y=18 / 回程 y=38） -->
+            <g class="trail-scan">
+              <line class="trail-seg" x1="266.3" y1="18" x2="326.6" y2="18"></line>
+              <line class="trail-seg" x1="326.6" y1="18" x2="336.7" y2="18"></line>
+              <line class="trail-seg" x1="336.7" y1="18" x2="492.5" y2="18"></line>
+              <line class="trail-seg" x1="492.5" y1="18" x2="613.1" y2="18"></line>
+              <line class="trail-seg" x1="613.1" y1="18" x2="623.1" y2="18"></line>
+              <line class="trail-seg" x1="623.1" y1="18" x2="919.6" y2="18"></line>
+              <line class="trail-seg" x1="919.6" y1="18" x2="1000" y2="18"></line>
+              <line class="trail-turn" x1="1000" y1="18" x2="1000" y2="38"></line>
+              <line class="trail-seg" x1="1000" y1="38" x2="185.9" y2="38"></line>
+              <line class="trail-seg" x1="185.9" y1="38" x2="70.4" y2="38"></line>
+            </g>
+            <!-- 泳道 B：C-SCAN 锯齿形（去程 y=64 / 空跑虚线对角 / 回程 y=86） -->
+            <g class="trail-cscan">
+              <line class="trail-seg" x1="266.3" y1="64" x2="326.6" y2="64"></line>
+              <line class="trail-seg" x1="326.6" y1="64" x2="336.7" y2="64"></line>
+              <line class="trail-seg" x1="336.7" y1="64" x2="492.5" y2="64"></line>
+              <line class="trail-seg" x1="492.5" y1="64" x2="613.1" y2="64"></line>
+              <line class="trail-seg" x1="613.1" y1="64" x2="623.1" y2="64"></line>
+              <line class="trail-seg" x1="623.1" y1="64" x2="919.6" y2="64"></line>
+              <line class="trail-seg" x1="919.6" y1="64" x2="1000" y2="64"></line>
+              <polyline class="trail-dash" points="1000,64 0,86"></polyline>
+              <line class="trail-seg" x1="0" y1="86" x2="70.4" y2="86"></line>
+              <line class="trail-seg" x1="70.4" y1="86" x2="185.9" y2="86"></line>
+            </g>
+          </svg>
+          <span class="trail-tag trail-tag--scan">SCAN · 之字形往返</span>
+          <span class="trail-tag trail-tag--cscan">C-SCAN · 锯齿形单向（虚线=空跑）</span>
+          </div>
+
+        </section>
+
+        <!-- 图例（舞台下方独立行，不与轨迹争位） -->
+        <div class="legend" id="legend">
+          <span class="legend__item"><i class="lg-axis"></i>磁道轴 0–199</span>
+          <span class="legend__item"><i class="lg-flag"></i>待服务请求</span>
+          <span class="legend__item"><i class="lg-head"></i>磁头</span>
+          <span class="legend__item"><i class="lg-solid"></i>实线 = 已扫描</span>
+          <span class="legend__item"><i class="lg-dash"></i>虚线 = 空跑回跳</span>
+          <span class="legend__item"><i class="lg-beam"></i>方向扫描窗</span>
+          <span class="legend__item"><i class="lg-dist">+12</i>方向内距离 · 最近高亮</span>
+          <span class="legend__item"><i class="lg-outside"></i>淡出 = 当前方向之外</span>
+        </div>
+
+        <!-- ③ 控制条 -->
+        <div class="controls" id="controls">
+          <div class="controls__group">
+            <button id="btn-play" class="beam-cta">
+              <span class="beam-cta__beam" aria-hidden="true"></span>
+              <span class="beam-cta__inner" aria-hidden="true"></span>
+              <span class="beam-cta__icon" id="btn-play-icon">&#9654;</span>
+              <span class="beam-cta__text" id="btn-play-text">自动演进</span>
+            </button>
+            <button id="btn-prev" class="tactile-btn"><span>&#9664; 上一拍</span></button>
+            <button id="btn-next" class="tactile-btn"><span>下一拍 &#9654;</span></button>
+            <button id="btn-reset" class="tactile-btn"><span>&#8634; 复位</span></button>
+          </div>
+          <div class="controls__speed">
+            <span class="speed__label">速度</span>
+            <input id="slider-speed" class="taste-slider" type="range" min="0.5" max="2" step="0.5" value="1" aria-label="播放速度">
+            <span class="speed__value" id="label-speed">1.0x</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- ══════════ 右列：HUD + 已服务序列 ══════════ -->
+      <aside class="sidebar">
+        <section class="dot-card">
+          <div class="dot-card__head">
+            <div class="dot-card__title"><i class="led led--emerald"></i>调度仪表</div>
+            <span class="dot-card__step" id="hud-step">STEP #00</span>
+          </div>
+          <div class="hud-row hud-row--dir">
+            <span class="hud-key">当前方向</span>
+            <span class="hud-dir" id="hud-dir">&rarr;</span>
+          </div>
+          <div class="hud-row">
+            <span class="hud-key">累计寻道距离</span>
+            <span class="hud-val"><b class="hud-num" id="hud-dist">0</b><em>柱道</em></span>
+          </div>
+          <div class="hud-row">
+            <span class="hud-key">已服务</span>
+            <span class="hud-val"><b class="hud-num hud-num--sm" id="hud-progress">0 / 8</b></span>
+          </div>
+          <div class="hud-row">
+            <span class="hud-key">当前段</span>
+            <span class="hud-val hud-val--seg" id="hud-seg">待启动</span>
+          </div>
+          <div class="hud-row">
+            <span class="hud-key">方向内候选</span>
+            <span class="hud-val hud-val--seg" id="hud-cand">—</span>
+          </div>
+          <div class="hud-row">
+            <span class="hud-key">下一目标</span>
+            <span class="hud-val hud-val--seg" id="hud-next">—</span>
+          </div>
+          <div class="dot-card__foot">
+            <span>算法</span>
+            <span class="algo-pill is-active" id="algo-scan">SCAN</span>
+            <span class="algo-pill" id="algo-cscan">C-SCAN</span>
+          </div>
+        </section>
+
+        <section class="panel seq-card">
+          <div class="panel__head">
+            <span class="panel__title"><i class="led led--amber"></i>已服务序列</span>
+            <span class="panel__meta" id="seq-meta">0 / 8</span>
+          </div>
+          <div class="seq-wrap">
+            <ol class="seq-list" id="seq-scan"></ol>
+            <ol class="seq-list" id="seq-cscan" hidden></ol>
+            <div class="seq-empty" id="seq-empty">尚无服务记录 —— 点击「自动演进」开始</div>
+          </div>
+        </section>
+      </aside>
+    </div>
+
+    <!-- ══════════ P4 对比总结看板（静态预览态，Step 2 起由时间轴点亮） ══════════ -->
+    <section class="panel cmp-card" id="compare-panel">
+      <div class="panel__head">
+        <span class="panel__title"><i class="led led--sky"></i>P4 · 对比总结</span>
+        <span class="panel__meta">同题同起点 · 磁头 53 · 方向 →</span>
+      </div>
+
+      <div class="cmp-grid">
+        <div class="cmp-row cmp-row--scan" data-algo="scan">
+          <div class="cmp-name">SCAN<span>扫帚式折返</span></div>
+          <div class="cmp-dist">总寻道距离 <b class="cmp-num cmp-num-scan" id="cmp-num-scan">0</b><em>柱道</em></div>
+          <div class="cmp-seq cmp-seq--scan" id="cmp-seq-scan">53 → …</div>
+        </div>
+
+        <div class="cmp-delta" id="cmp-delta">
+          <span class="cmp-delta__label">Δ 差值</span>
+          <b class="cmp-delta__num" id="cmp-delta-num">0</b>
+        </div>
+
+        <div class="cmp-row cmp-row--cscan" data-algo="cscan">
+          <div class="cmp-name">C-SCAN<span>单向回跳</span></div>
+          <div class="cmp-dist">总寻道距离 <b class="cmp-num cmp-num-cscan" id="cmp-num-cscan">0</b><em>柱道</em></div>
+          <div class="cmp-seq cmp-seq--cscan" id="cmp-seq-cscan">53 → …</div>
+        </div>
+      </div>
+
+      <div class="conclusion" id="conclusion">
+        <span class="callout-tag callout-tag--tip">[!TIP]</span>
+        <div><strong>记住这一句：</strong>SCAN 是磁头沿一个方向扫到底再折返的"扫帚"，C-SCAN 到头后直接跳回起点、始终单向服务 —— <strong>折返方式决定了服务顺序和总寻道距离。</strong></div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    LearningAnimation · 磁盘调度 SCAN / C-SCAN · 浅色纸质美学与 60fps 动量连续性
+  </footer>
+
+  <!-- 队列 chip 飞入已服务序列的瞬态幽灵层（固定定位，不参与文档流） -->
+  <div id="ghost-layer" aria-hidden="true"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
