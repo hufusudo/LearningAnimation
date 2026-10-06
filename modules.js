@@ -391,9 +391,9 @@ window.MODULES = [
     "title": "浏览器访问网页全流程",
     "discipline": "net",
     "path": "浏览器访问网页全流程/index.html",
-    "badge": "多进程接力 · 四层泳道 · 协议累积",
-    "desc": "把 ARP、DNS、TCP、HTTP 串成一次回车引发的因果接力：四层泳道时间轴上浏览器 UI、网络、渲染三进程分工接力，报文以斜线飞行、斜线数量即协议形状，协议清单随阶段逐条点亮，最终汇总「一次回车 = 5 种协议接力」。",
-    "formula": "① ARP→网关MAC ② DNS→IP ③ TCP→连接 ④ HTTP→文档 ⑤ Render→像素"
+    "badge": "六段主线 · 报文时序 · 页面逐步呈现",
+    "desc": "从网址拆解、DNS 解析、TCP 握手、TLS 协商到 HTTP 请求与页面渲染，逐个观察 23 个动作。固定参与者、保留每步结果，直观看清 HTML 如何引出资源请求并变成屏幕上的网页。",
+    "formula": "URL → DNS → TCP → TLS → HTTP → 页面"
   },
   {
     "title": "第二类曲面积分：通量与三向投影影子墙",

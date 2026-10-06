@@ -1,801 +1,218 @@
-/* ══════════════════════════════════════════════════════════════
-   浏览器访问网页全流程 · app.js
-   Step 2：严格按《设计方案.md》第三章 5 张《动作时序规格表》落地
-
-   硬约束（AGENT.md + 设计方案 §5.2）：
-   · 禁 setTimeout / setInterval，一律 GSAP timeline
-   · 每阶段一条子时间轴 getPhaseTimeline(i)，主控制器统一调度
-   · Beat 间用相对偏移量衔接（<+= / <）
-   · 每次状态切换前 killTweensOf 防竞态
-   · duration 全部按 State.speed 缩放
-   ══════════════════════════════════════════════════════════════ */
-
 (function () {
-  "use strict";
+  'use strict';
+  const { PHASES, STEPS, IP, REQUEST, HTML, snapshot } = window.WebJourney;
+  const $ = selector => document.querySelector(selector);
+  const esc = text => String(text).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const reduced = window.matchMedia('(prefers-reduced-motion: reduce)');
+  const engine = window.gsap;
+  const State = { index: 0, settled: true, playing: false, auto: false, speed: 1, tl: null };
+  const scene = $('#scene');
+  const resourceInfo = [ ['css','site.css',13,14], ['image','network.svg',15,16], ['js','app.js',17,18] ];
+  const image = '<svg viewBox="0 0 240 80" aria-label="浏览器与服务器连接示意"><rect x="8" y="18" width="64" height="42" rx="5" fill="#eff6ff" stroke="#93c5fd"/><path d="M72 39h96" stroke="#2563eb" stroke-width="2"/><path d="m161 34 7 5-7 5" fill="none" stroke="#2563eb" stroke-width="2"/><rect x="168" y="18" width="64" height="42" rx="5" fill="#ecfdf5" stroke="#6ee7b7"/><text x="40" y="43" text-anchor="middle" fill="#2563eb" font-size="12">浏览器</text><text x="200" y="43" text-anchor="middle" fill="#047857" font-size="12">服务器</text></svg>';
+  $('#phase-nav').innerHTML = PHASES.map((p,i) => `<button class="phase-button" data-phase="${i}"><span class="phase-num">${String(i+1).padStart(2,'0')}</span><b>${p.name}</b><small>${p.output}</small></button>`).join('');
+  $('#step-seek').max = STEPS.length - 1;
 
-  /* ── CDN 失败降级 ── */
-  if (!window.gsap) {
-    const b = document.getElementById("narrative-body");
-    if (b) b.textContent = "动画引擎 GSAP 未能加载，页面已降级为静态图解（文字与布局完整可读）。";
-    return;
+  function message(s, index) {
+    const response = s.from !== 'browser';
+    const current = index === State.index;
+    return `<div class="message ${s.phase===1?'dns-message':''} ${response?'is-response':''} ${current?'is-current':'is-past'}" data-message="${index}"><div class="message-track"><span class="message-label">${esc(s.label)}</span><div class="message-line"${current && !State.settled?' style="transform:scaleX(0)"':''}></div></div><p class="message-sub">${esc(s.sub)}</p></div>`;
   }
-
-  const $ = (s, r) => (r || document).querySelector(s);
-  const $$ = (s, r) => Array.prototype.slice.call((r || document).querySelectorAll(s));
-  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-
-  /* ══════════ DOM 引用 ══════════ */
-  const stage      = $(".stage");
-  const svg        = $("#timeline-root");
-  const floatLayer = $("#float-layer");
-  const envSlot    = $("#envelope-slot");
-  const netQueue   = $("#net-queue");
-  const domPrev    = $("#dom-preview");
-  const lanes      = $$(".lane");
-  const parts      = {
-    scheme:  $('.url-part[data-part="scheme"]'),
-    host:    $('.url-part[data-part="host"]'),
-    path:    $('.url-part[data-part="path"]'),
-    query:   $('.url-part[data-part="query"]'),
-    fragment:$('.url-part[data-part="fragment"]')
-  };
-  const ownerTags  = $$(".part-owner");
-  const EL = {
-    procUI: $("#proc-ui"), procNet: $("#proc-net"), procRender: $("#proc-render"),
-    web: $("#node-webserver"), router: $("#node-router"), dns: $("#node-dns"),
-    chipDNS: $("#chip-dns"), chipTCP: $("#chip-tcp"), chipHTTP: $("#chip-http"),
-    arpCache: $("#node-arp"), arpCacheSub: $("#arp-cache-sub"),
-    narrTitle: $("#narrative-title"), narrBody: $("#narrative-body"),
-    narrStep: $("#narrative-step"), calloutBody: $("#callout-body"),
-    summary: $("#proto-summary"), indicator: $("#phase-indicator"),
-    btnPlay: $("#btn-play"), btnAuto: $("#btn-auto")
-  };
-
-  /* ══════════ 状态 ══════════ */
-  const State = {
-    phase: -1,
-    speed: 1,
-    playing: false,
-    auto: false,
-    tl: null,
-    wires: [],
-    floats: [],
-    envelopes: []
-  };
-  /** 毫秒 → 秒（受速率缩放，AGENT.md §3.4） */
-  const D = (ms) => ms / 1000 / State.speed;
-
-  /**
-   * 规格表锚点：把《动作时序规格表》中各 Beat 的绝对毫秒转为 timeline 绝对秒位置。
-   * 全项目强制使用绝对锚点 + Beat 内微偏移（+0.05s 级），
-   * 严禁依赖 ">" / "<" 相对定位——它们会向时间轴起点塌缩，
-   * 导致实测时长腰斩、Beat 相对次序错乱。
-   * 各阶段总时长（speed=1）应精确落在规格表估算值上。
-   */
-  const at = (ms, offset) => D(ms) + (offset || 0);
-
-  /* ══════════ 几何工具 ══════════ */
-  const SVGNS = "http://www.w3.org/2000/svg";
-  function svgEl(tag, attrs) {
-    const e = document.createElementNS(SVGNS, tag);
-    for (const k in attrs) e.setAttribute(k, attrs[k]);
-    return e;
+  function codePanel(label, code, waiting) {
+    return `<div class="code-panel ${waiting?'is-waiting':''}"><div class="code-label"><span>${esc(label)}</span>${waiting?'<span>尚未到达</span>':''}</div><pre>${esc(code)}</pre></div>`;
   }
-  /** 元素中心（相对 stage 的像素坐标） */
-  function stagePos(el, side) {
-    const s = stage.getBoundingClientRect();
-    const b = el.getBoundingClientRect();
-    let x = b.left + b.width / 2, y = b.top + b.height / 2;
-    if (side === "right") x = b.right;
-    else if (side === "left") x = b.left;
-    return { x: x - s.left, y: y - s.top };
-  }
-  /** 元素中心（页面绝对坐标，供 float-layer 使用） */
-  function pagePos(el, side) {
-    const b = el.getBoundingClientRect();
-    let x = b.left + b.width / 2, y = b.top + b.height / 2;
-    if (side === "right") x = b.right;
-    else if (side === "left") x = b.left;
-    return { x: x + window.scrollX, y: y + window.scrollY };
-  }
+  function currentState() { return snapshot(State.index - (State.settled ? 0 : 1)); }
 
-  /**
-   * 斜线几何：单一函数产出，杜绝散落魔法数字（设计方案 §5.2）
-   * 设计稿要求 45° 直斜线，但四条泳道内容均左对齐，
-   * 真正的 45° 直���无法同时「不压节点」且「端点落在节点边缘」，
-   * 故采用「S 形飞行弧线」：水平跨度随垂直距离增长（保 45° 观感），
-   * 并按 slot 递增右移，使多条报文在时间轴上可区分先后。
-   */
-  function computeWire(fromEl, toEl, slot) {
-    slot = slot || 0;
-    const a = stagePos(fromEl, "right");
-    const bLeft  = stagePos(toEl, "left");
-    const bRight = stagePos(toEl, "right");
-    const spanCap = svg.getBoundingClientRect().width * 0.42;
-
-    let target, c2x;
-    if (bLeft.x - a.x >= 18)       { target = bLeft;  c2x = bLeft.x - 30; }
-    else if (a.x - bRight.x >= 18) { target = bRight; c2x = bRight.x + 30; }
-    else                           { target = bLeft;  c2x = bLeft.x - 30; }
-
-    const dy = Math.abs(target.y - a.y);
-    const bulge = clamp(dy * 0.45 + 36 + slot * 22, 40, spanCap);
-    const midY = (a.y + target.y) / 2;
-    const c1 = { x: a.x + bulge, y: midY };
-    const c2 = { x: c2x, y: midY };
-    const d = "M " + a.x.toFixed(1) + " " + a.y.toFixed(1) +
-              " C " + c1.x.toFixed(1) + " " + c1.y.toFixed(1) + ", " +
-                       c2.x.toFixed(1) + " " + c2.y.toFixed(1) + ", " +
-                       target.x.toFixed(1) + " " + target.y.toFixed(1);
-    return { d: d, from: a, to: target, c1: c1, c2: c2 };
+  function renderUrl() {
+    return `<p class="scene-intro">同一个网址里，<strong>每一部分都有不同的去处</strong>。</p><div class="url-flow">
+      <div class="url-route ${State.index===1?'is-current':''}"><code>https://</code><span class="route-arrow">→</span><div class="route-target"><b>选择通信方式</b><span>TLS + HTTP，目标端口 443</span></div></div>
+      <div class="url-route ${State.index===1?'is-current':''}"><code>learn.example</code><span class="route-arrow">→</span><div class="route-target"><b>DNS 要找的主机名</b><span>先得到目标 IP 地址</span></div></div>
+      <div class="url-route ${State.index===1?'is-current':''}"><code>/net/index.html<br>?chapter=4</code><span class="route-arrow">→</span><div class="route-target"><b>HTTP 要取的资源</b><span>路径与查询参数一起发送</span></div></div>
+      <div class="url-route local-route"><code>#tcp</code><span class="route-arrow">↳</span><div class="route-target"><b>留在浏览器</b><span>定位页面元素，不随请求发送</span></div></div></div>${State.index===0?'<div class="initial-prompt"><b>从这里开始。</b> 点击“下一步”，逐个观察一次导航。</div>':''}`;
   }
-
-  /* ══════════ 斜线（Wire） ══════════ */
-  let wireSeq = 0;
-  function makeWire(opts) {
-    const geo = computeWire(opts.from, opts.to, opts.slot);
-    const id = "w" + (++wireSeq);
-    const path = svgEl("path", { class: "wire", d: geo.d, "data-kind": opts.kind, "data-wire-id": id });
-    const head = svgEl("path", { class: "wire-head", d: "M 0,-4 L 9,0 L 0,4 Z", "data-kind": opts.kind, opacity: "0" });
-    svg.appendChild(path);
-    svg.appendChild(head);
-
-    const w = {
-      id: id, el: path, head: head,
-      from: opts.from, to: opts.to, kind: opts.kind, slot: opts.slot || 0,
-      len: 0, progress: 0
-    };
-    layoutWire(w);
-    State.wires.push(w);
-    return w;
+  function renderNetwork(state, phase) {
+    const first = PHASES[phase].start;
+    let intro = '';
+    if (phase===1) intro = 'DNS 只解决一件事：<strong>learn.example 对应哪个 IP？</strong>';
+    if (phase===2) intro = `已知 IP <strong>${IP}</strong>，现在与网站建立可靠连接。`;
+    if (phase===3) intro = 'TCP 已建立。HTTPS 还要<strong>确认网站身份，并保护后续内容</strong>。';
+    if (phase===4) intro = '安全通道已就绪。现在才问网站：<strong>请给我这份文档</strong>。';
+    const messages = STEPS.slice(first,State.index+1).map((s,j) => message(s,first+j)).join('');
+    let end = '';
+    if (phase===1) end = `<div class="connection-banner ${state.ip?'':'pending'}">${state.ip?`域名 → ${IP} · 下一步用它连接网站`:'等待 DNS 应答 · 此刻没有网页数据'}</div>`;
+    if (phase===2) end = `<div class="sequence-caption"><span>客户端：<b>${state.client}</b></span><span>服务器：<b>${state.server}</b></span></div><div class="connection-banner ${state.tcp?'':'pending'}">${state.tcp?'可靠连接已建立 · 下一步建立 TLS 安全通道':'三次握手分别确认，不要跳过第三次 ACK'}</div>`;
+    if (phase===3) end = `<div class="connection-banner ${state.tls?'':'pending'}">${state.tls?'身份验证通过 · 后续 HTTP 内容受 TLS 保护':'TLS 协商中 · 图中为消息组，省略协议细节'}</div>`;
+    if (phase===4) end = `<div class="http-panels">${codePanel('请求 · 应用层视图',REQUEST,false)}${codePanel('响应 · 解密后的内容',state.html?'HTTP/1.1 200 OK\nContent-Type: text/html\n\n'+HTML:'HTTP/1.1 200 OK\nContent-Type: text/html\n\n（等待 HTML 正文）',!state.html)}</div><p class="wire-hint">面板展示应用层内容；网络上传输时受 TLS 保护。#tcp 不在请求里。</p>`;
+    return `<p class="scene-intro">${intro}</p><div class="seq">${messages}</div>${end}`;
   }
-  function layoutWire(w) {
-    const geo = computeWire(w.from, w.to, w.slot);
-    w.el.setAttribute("d", geo.d);
-    let len = 0;
-    try { len = w.el.getTotalLength(); } catch (e) { len = 0; }
-    w.len = len;
-    w.el.setAttribute("stroke-dasharray", len);
-    w.el.setAttribute("stroke-dashoffset", len * (1 - w.progress));
-    // 光头定位
-    const p = w.el.getPointAtLength(len * w.progress);
-    w.head.setAttribute("transform", "translate(" + p.x.toFixed(1) + "," + p.y.toFixed(1) + ")");
+  function renderResources(state) {
+    return resourceInfo.map(([key,name,req]) => {
+      const requesting = State.index===req || (State.index===req+1&&!State.settled);
+      return `<div class="resource ${state[key]?'is-ready':requesting?'is-requesting':''}"><code>${name}</code><span>${state[key]?(key==='js'&&state.render!=='complete'?'已下载，待执行':'已收到'):requesting?'请求中':'待请求'}</span></div>`;
+    }).join('');
   }
-  /** 让报文沿斜线飞行：progress 0→1，onUpdate 实时重算 dashoffset 与光头 */
-  function flyWire(tl, w, at, ms, ease) {
-    const o = { p: 0 };
-    tl.to(o, {
-      p: 1, duration: D(ms), ease: ease || "power2.inOut",
-      onUpdate: function () { w.progress = o.p; layoutWire(w); }
-    }, at);
-    return o;
-  }
-  /** 报文在斜线中点短暂驻留时的脉冲（spec 未要求，暂不启用） */
-  function removeWire(w) {
-    if (w.el.parentNode) w.el.parentNode.removeChild(w.el);
-    if (w.head.parentNode) w.head.parentNode.removeChild(w.head);
-  }
-
-  /* ══════════ 报文信封 ══════════ */
-  const ENV_MAX = 3;
-  function pushEnvelope(text, dir) {
-    const el = document.createElement("div");
-    el.className = "envelope is-fresh";
-    el.innerHTML = '<span class="envelope__dir' + (dir < 0 ? " is-down" : "") + '">' +
-                   (dir < 0 ? "▼" : "▲") + '</span><span class="envelope__text"></span>';
-    el.querySelector(".envelope__text").textContent = text;
-    State.envelopes.push({ el: el });
-    renderEnvelopes();
-    return el;
-  }
-  function renderEnvelopes() {
-    envSlot.innerHTML = "";
-    const all = State.envelopes;
-    const show = Math.max(0, ENV_MAX - (all.length > ENV_MAX ? 1 : 0));
-    if (all.length > ENV_MAX) {
-      const badge = document.createElement("div");
-      badge.className = "envelope";
-      badge.style.borderStyle = "dashed";
-      badge.textContent = "+" + (all.length - ENV_MAX);
-      envSlot.appendChild(badge);
+  function preview(state) {
+    let content = '<div class="preview-empty">还没有页面像素</div>';
+    let label = '未绘制';
+    if (state.render==='style') label = '样式已确定，尚未绘制';
+    if (state.render==='layout') {
+      content = `<div class="preview-content styled layout-only"><h3>标题位置</h3><p>段落位置</p><div class="image-box"></div></div>`;
+      label = '布局示意 · 不是屏幕画面';
     }
-    all.slice(-show).forEach(function (e) { envSlot.appendChild(e.el); });
-  }
-  function envelopeText(el, t) {
-    const n = el.querySelector(".envelope__text");
-    if (n) n.textContent = t;
-  }
-
-  /* ══════════ 浮层（令牌 / 说明小卡） ══════════ */
-  function placeFloat(el, pos) {
-    el.style.left = pos.x + "px";
-    el.style.top = pos.y + "px";
-  }
-  function makeToken(kind, text, nearEl, side) {
-    const el = document.createElement("div");
-    el.className = "token";
-    el.dataset.kind = kind;
-    el.textContent = text;
-    floatLayer.appendChild(el);
-    const p = pagePos(nearEl, side);
-    gsap.set(el, { xPercent: -50, yPercent: -50, x: p.x, y: p.y, scale: 0.85, opacity: 0 });
-    State.floats.push(el);
-    return { el: el, from: p };
-  }
-  function makeNoteCard(html, nearEl, offset) {
-    const el = document.createElement("div");
-    el.className = "note-card";
-    el.innerHTML = html;
-    floatLayer.appendChild(el);
-    const p = pagePos(nearEl, "right");
-    placeFloat(el, { x: p.x + (offset ? offset.dx : 96), y: p.y + (offset ? offset.dy : 0) });
-    gsap.set(el, { scale: 0.9, opacity: 0 });
-    State.floats.push(el);
-    return el;
-  }
-  function clearFloats() {
-    State.floats.forEach(function (el) { if (el.parentNode) el.parentNode.removeChild(el); });
-    State.floats = [];
-  }
-
-  /* ══════════ 渲染进程 DOM 树预览 ══════════ */
-  function buildDomPreview() {
-    domPrev.innerHTML = "";
-    const rows = [
-      [["html", 92], ["head", 46]],
-      [["title", 30], ["link", 26]],
-      [["body", 68]],
-      [["div#main", 56], ["span", 22], ["img", 18]]
-    ];
-    rows.forEach(function (cells) {
-      const row = document.createElement("div");
-      row.className = "dp-row";
-      const br = document.createElement("span");
-      br.className = "dp-branch";
-      row.appendChild(br);
-      cells.forEach(function (c) {
-        const n = document.createElement("span");
-        n.className = "dp-node";
-        n.style.width = c[1] + "px";
-        n.dataset.label = c[0];
-        row.appendChild(n);
-      });
-      domPrev.appendChild(row);
-    });
-    const grid = document.createElement("div");
-    grid.className = "pixel-grid";
-    for (let i = 0; i < 24; i++) grid.appendChild(document.createElement("i"));
-    domPrev.appendChild(grid);
-  }
-  function getPixelGrid() { return $(".pixel-grid", domPrev); }
-
-  /* ══════════ 状态重置（竞态清理核心） ══════════ */
-  function resetWorld() {
-    if (window.gsap) gsap.killTweensOf("*");
-    if (window.gsap && State.tl) { State.tl.kill(); State.tl = null; }
-
-    State.wires.forEach(removeWire);
-    State.wires = [];
-    clearFloats();
-    State.envelopes = [];
-    envSlot.innerHTML = "";
-
-    lanes.forEach(function (l) { l.classList.remove("is-active", "is-dim"); gsap.set(l, { opacity: 1 }); });
-    $$(".chip").forEach(function (c) { c.classList.remove("is-on", "is-warm"); });
-    // 协议清单全清，累积点亮由 goto() 按「已通过的阶段」重新施加（累积语义）
-    $$(".proto-item").forEach(function (i) { i.classList.remove("is-lit", "is-current"); });
-    EL.summary.textContent = "待全部点亮";
-    setProtoCount(0);
-    $$(".rail-seg").forEach(function (s) { s.classList.remove("is-active", "is-done"); });
-    [EL.procUI, EL.procNet, EL.procRender].forEach(function (p) { p.classList.remove("is-focus"); });
-    gsap.set([EL.web, EL.router, EL.dns], { clearProps: "all" });
-    gsap.set(EL.arpCache, { opacity: 0.45 });
-    EL.arpCacheSub.textContent = "（空）";
-    netQueue.innerHTML = "";
-    buildDomPreview();
-    $$(".wire-head").forEach(function (h) { h.setAttribute("opacity", "0"); });
-    ownerTags.forEach(function (t) { gsap.set(t, { opacity: 1, x: 0 }); });
-    Object.keys(parts).forEach(function (k) { gsap.set(parts[k], { color: "#A8A29E", scale: 1, opacity: 1, y: 0 }); });
-  }
-
-  function setProtoCount(n) {
-    const hdr = $(".proto-item").closest("div").querySelector("span:last-child");
-    if (hdr) hdr.textContent = n + "/5";
-  }
-  function setLane(key) {
-    lanes.forEach(function (l) {
-      const on = l.dataset.lane === key;
-      l.classList.toggle("is-active", on);
-      l.classList.toggle("is-dim", key !== null && !on);
-    });
-  }
-
-  /**
-   * 协议清单是「累积」语义：一旦点亮不再熄灭，观众看到的永远是「走到这里已用了几种协议」。
-   * 因此统计口径是 DOM 中已点亮条目数，而不是本阶段的增量。
-   */
-  function lightProto(key) {
-    const item = $('.proto-item[data-proto="' + key + '"]');
-    if (!item) return;
-    item.classList.add("is-lit");
-    const n = $$(".proto-item.is-lit").length;
-    setProtoCount(n);
-    if (n >= 5) {
-      EL.summary.innerHTML = '<span class="text-amber-700">一次回车 = 5 种协议接力</span>';
-    } else {
-      EL.summary.textContent = "本次访问已用 " + n + " 种协议";
+    if (state.render==='paint'||state.render==='complete') {
+      content = `<div class="preview-content styled"><h3 id="preview-title">网络学习笔记</h3><p>一次访问，从域名走到页面。</p>${image}<p class="welcome">${state.render==='complete'?'欢迎回来，开始学习 TCP。':'页面已显示，脚本尚未更新提示。'}</p></div>`;
+      label = state.render==='complete'?'脚本更新后的页面':'第一次绘制';
     }
+    return `<div><div class="page-preview"><div class="preview-bar"><code>learn.example</code><span>浏览器视口</span></div><div class="preview-body">${content}</div></div><p class="preview-note">${label}</p></div>`;
+  }
+  function renderPage(state) {
+    const step = STEPS[State.index];
+    const arrow = step.from ? `<div class="render-message ${step.from==='server'?'is-response':''}"><span class="render-arrow">${step.from==='server'?'←':'→'}</span>${esc(step.label)}<p class="message-sub">${step.from==='server'?'网站 → 浏览器':'浏览器 → 网站'} · 复用已有连接</p></div>` : '';
+    const pipeline = [['dom','DOM'],['css','CSSOM'],['style','样式'],['layout','布局'],['paint','绘制'],['complete','JS 更新']];
+    const order = ['blank','style','layout','paint','complete'];
+    const rank = order.indexOf(state.render);
+    return `<p class="scene-intro"><strong>HTML 不是截图。</strong> 浏览器读取结构、补齐资源，再产生页面像素。</p>${arrow}<div class="render-view"><div class="render-work">${State.index===12?codePanel('已收到的 HTML · 继续发现资源',HTML,false):'<div class="dom-sketch"><b>DOM</b><span>html</span><span class="branch">↳</span><span>body</span><span class="branch">↳</span><span>h1 / p / img</span></div>'}<div class="resource-list">${renderResources(state)}</div><div class="render-pipeline">${pipeline.map(([key,label],i) => {
+      const ready = key==='dom'||key==='css'?state[key]:rank>=order.indexOf(key);
+      return `${i?'<i>→</i>':''}<span class="${ready?'is-ready':step.unlock===key?'is-current':''}">${label}</span>`;
+    }).join('')}</div><p class="preview-note">DOM 与 CSSOM 共同参与样式计算。</p></div>${preview(state)}</div><p class="wire-hint">为看清分工，这里依次展开。真实下载、解析和渲染可以交叠。</p>`;
   }
 
-  /* ══════════ 阶段文案 ══════════ */
-  const PHASES = [
-    {
-      key: "prologue", title: "序章 · URL 分段解剖", step: "STEP 0",
-      body: "不同字符，归属不同协议。<b class='text-emerald-700'>host</b> 段交给 DNS 换出 IP，<b class='text-amber-700'>path / query</b> 段原样交给 HTTP 说明「要哪个资源」。",
-      callout: "<b>ARP 与 DNS 实际并行</b>——DNS 查询包同样需要链路层地址。本片为叙事清晰分开展示。"
-    },
-    {
-      key: "arp", title: "阶段 1 · ARP 问路", step: "STEP 1",
-      body: "目标 IP 已就位，但网卡只认 MAC。于是<b class='text-rose-700'>广播问</b>「192.168.1.1 是谁」，<b class='text-amber-700'>网关单播答</b>，结果存入本机 ARP 缓存。",
-      callout: "ARP 表现有结果会缓存在本机，命中时不再广播，直接静默发帧——所以第一次访问才慢。"
-    },
-    {
-      key: "dns", title: "阶段 2 · DNS 解析", step: "STEP 2",
-      body: "域名对人类友好，对路由器毫无意义。网络进程调用 OS 解析器逐级查缓存，<b class='text-emerald-700'>未命中</b>才向 DNS 服务器发 UDP 查询，换回一个 32 位地址。",
-      callout: "DNS 走 UDP 53：单次查询短小，无连接也不必可靠；正式解析常配 TCP 53 或 DoH/DoT 以保隐私。"
-    },
-    {
-      key: "tcp", title: "阶段 3 · TCP 三次握手", step: "STEP 3",
-      body: "<b>IP 只是门牌，TCP 才是一条双向管道。</b>SYN → SYN+ACK → ACK 三次交互后，双方才确认「我发的你能收，你发的我能收」。",
-      callout: "第三次握手不可省：它让服务器确认客户端的初始序号，否则旧连接串扰的历史报文仍会被误接收。"
-    },
-    {
-      key: "http", title: "阶段 4 · HTTP 请求与渲染", step: "STEP 4",
-      body: "管道就绪才谈得上要什么。发出 GET，服务器回 <b class='text-amber-700'>200 + HTML</b>；解析器<b class='text-emerald-700'>边解析边发现</b> <code>&lt;link&gt;</code>/<code>&lt;script&gt;</code>/<code>&lt;img&gt;</code>，立即并发拉取子资源，全部到手才构建渲染树、绘出像素。",
-      callout: "子资源复用同一条 TCP 连接（HTTP/1.1 存在队头阻塞），这正是 HTTP/2 引入多路复用的原因。"
+  function updateEvidence(state) {
+    const info = { ip:[IP,'等待 DNS'], tcp:['已建立','尚未建立'], tls:['已加密','尚未就绪'], html:['已收到','尚未收到'] };
+    Object.entries(info).forEach(([key,[yes,no]]) => {
+      const el=$('#evidence-'+key);
+      el.classList.toggle('is-ready',state[key]);
+      el.querySelector('b').textContent=state[key]?yes:no;
+    });
+  }
+  function render() {
+    const s = STEPS[State.index];
+    const p = PHASES[s.phase];
+    const state = currentState();
+    $('#phase-label').textContent = `${String(s.phase+1).padStart(2,'0')} / ${p.name}`;
+    $('#step-title').textContent=s.title;
+    $('#step-count').textContent=`${State.index+1} / ${STEPS.length}`;
+    $('#why').textContent=s.why;
+    $('#result').textContent=State.settled?s.result:'观察当前动作，结果将在动作完成后保留。';
+    $('#next-cause').textContent=State.settled?s.next:'当前动作完成后，再看下一步。';
+    $('#result-state').textContent=State.settled?(State.index===STEPS.length-1?'✓ 本次访问演示完成':'✓ 结果已确认'):'● 当前动作进行中';
+    $('#result-panel').classList.toggle('is-pending',!State.settled);
+    $('#detail-body').textContent=p.detail;
+    $('#detail-visual').innerHTML=s.phase===1?'<div class="detail-chain"><span>浏览器 / 系统缓存（本次未命中）</span><span>递归解析器</span><span>必要时：根 → 顶级域 → 权威服务器</span><span>应答回到客户端，暂存 IP</span></div>':'';
+    document.querySelectorAll('.phase-button').forEach((b,i) => {
+      b.classList.toggle('is-current',i===s.phase);
+      b.classList.toggle('is-done',i<s.phase);
+      if (i===s.phase) b.setAttribute('aria-current','step'); else b.removeAttribute('aria-current');
+    });
+    document.querySelectorAll('[data-url]').forEach(el => {
+      const key=el.dataset.url;
+      el.classList.toggle('url-active',s.phase===0 && State.index===1 || s.phase===1&&key==='host' || s.phase===4&&['path','query'].includes(key));
+    });
+    ['browser','dns','server'].forEach(key => {
+      const el=$('#actor-'+key);
+      const active = key==='browser'||key==='dns'&&s.phase===1||key==='server'&&s.phase>=2;
+      el.classList.toggle('is-active',active);
+      el.classList.toggle('is-ready',key==='server'&&state.tls);
+    });
+    $('#browser-status').textContent=s.phase===0?'正在处理网址':s.phase===1?'等待 / 接收地址':s.phase===2?state.client:s.phase===3?(state.tls?'TLS 就绪':'TLS 协商'):s.phase===4?'HTTP 客户端':'解析与渲染';
+    $('#dns-status').textContent=state.ip?'地址已返回':'回答“地址是什么”';
+    $('#server-status').textContent=state.ip?`${IP} : 443`:'地址尚未得到';
+    scene.innerHTML=s.phase===0?renderUrl():s.phase===5?renderPage(state):renderNetwork(state,s.phase);
+    updateEvidence(state);
+    syncControls();
+  }
+  function syncControls() {
+    $('#btn-prev').disabled=State.index===0;
+    $('#btn-next').disabled=State.index===STEPS.length-1&&State.settled;
+    $('#btn-play').disabled=!engine;
+    $('#btn-play').textContent=State.playing?'Ⅱ 暂停':State.auto?'▶ 继续播放':State.index===STEPS.length-1&&State.settled?'▶ 从头播放':'▶ 自动播放';
+    $('#step-seek').value=State.index;
+    $('#play-status').textContent=State.playing?(State.auto?'自动播放中':'动作进行中'):State.auto?'已暂停':'单步观察';
+  }
+  function stop() {
+    if (State.tl) { State.tl.kill(); State.tl=null; }
+    if (engine) {
+      engine.killTweensOf([scene,$('#result-panel'),...document.querySelectorAll('.evidence-item')]);
+      engine.set([scene,$('#result-panel')],{clearProps:'opacity,transform'});
     }
-  ];
-
-  function applyPhaseText(i) {
-    const p = PHASES[i];
-    EL.narrTitle.textContent = p.title;
-    EL.narrStep.textContent = p.step;
-    EL.narrBody.innerHTML = p.body;
-    EL.indicator.textContent = (i === 0 ? "序章" : "阶段 " + i + "/4") + " · " + p.title.split(" · ")[1];
+    State.playing=false;
   }
-  function setCallout(html) { EL.calloutBody.innerHTML = html; }
-
-  /* ══════════════════════════════════════════════════════
-     以下为 5 张《动作时序规格表》的逐 Beat 实现
-     ══════════════════════════════════════════════════════ */
-
-  /** 序章《动作时序规格表》 · 总时长 ~1.65s */
-  function phasePrologue(tl) {
-    // ── Beat 01 上下文建立 · @0ms · 200ms power1.out ──
-    tl.fromTo($$(".url-part"),
-      { opacity: 0.3, y: 6 },
-      { opacity: 1, y: 0, duration: D(200), stagger: D(30), ease: "power1.out" }, at(0));
-    tl.to(lanes, { opacity: 0.35, duration: D(200), ease: "power1.out" }, at(0));
-
-    // ── Beat 02 产生预期 · @200ms · 150ms sine.out ──
-    tl.to(parts.scheme, { color: "#4338CA", scale: 1.06, duration: D(150), ease: "sine.out" }, at(200));
-    tl.fromTo(ownerTags[2], { opacity: 0, x: -6 }, { opacity: 1, x: 0, duration: D(150), ease: "sine.out" }, at(230));
-
-    // ── Beat 03 核心动作 · @350ms · 900ms power2.inOut ──
-    const hostTok = makeToken("host", "www.example-university.edu.cn", parts.host, "right");
-    const q = pagePos(netQueue, "left");
-    tl.to(parts.host, { color: "#047857", duration: D(200), ease: "power2.inOut" }, at(350));
-    tl.to(hostTok.el, { opacity: 1, scale: 1.05, duration: D(150), ease: "sine.out" }, at(430));
-    tl.to(hostTok.el, {
-      x: q.x, y: q.y, scale: 0.95, duration: D(500), ease: "power2.inOut",
-      onComplete: function () {
-        const t = document.createElement("div");
-        t.className = "token"; t.dataset.kind = "host"; t.textContent = "example-university.edu.cn";
-        netQueue.appendChild(t);
-        hostTok.el.remove();
-      }
-    }, at(500));
-    tl.to([parts.path, parts.query, parts.fragment],
-      { color: "#B45309", duration: D(200), stagger: D(80), ease: "power2.inOut" }, at(620));
-    tl.fromTo([ownerTags[0], ownerTags[1]],
-      { opacity: 0, y: 4 }, { opacity: 1, y: 0, duration: D(180), stagger: D(80), ease: "power2.out" }, at(900));
-
-    // ── Beat 04 落位沉淀 · @1250ms · 180ms back.out(1.3) ──
-    tl.to(hostTok.el, { scale: 1, duration: D(180), ease: "back.out(1.3)" }, at(1250));
-
-    // ── Beat 05 状态确认 · @1430ms · 220ms power1.inOut ──
-    const env = pushEnvelope("GET /cs/net/408-index.html?chapter=4 HTTP/1.1", 1);
-    tl.fromTo(env, { opacity: 0, y: 6 }, { opacity: 1, y: 0, duration: D(220), ease: "power1.inOut" }, at(1430));
-    tl.to(lanes, { opacity: 1, duration: D(220), ease: "power1.inOut" }, at(1450));
-  }
-
-  /** 阶段 1《ARP 问路》 · 总时长 ~1.83s */
-  function phaseArp(tl) {
-    // ── Beat 01 上下文建立 · @0ms · 200ms power1.out ──
-    tl.call(setLane, ["proc"], at(0));
-    tl.to(EL.procNet, { scale: 1.03, duration: D(200), ease: "power1.out" }, at(0));
-    tl.to(EL.procNet, { scale: 1, duration: D(200), ease: "power1.inOut" }, at(200));
-
-    // ── Beat 02 产生预期 · @200ms · 180ms sine.out ──
-    const envReq = pushEnvelope("ARP Request · who has 192.168.1.1?", 1);
-    tl.to(EL.procNet, { y: -4, scale: 1.05, duration: D(180), ease: "sine.out" }, at(200));
-    tl.fromTo(envReq, { opacity: 0, y: 8 }, { opacity: 1, y: 0, duration: D(180), ease: "power1.out" }, at(220));
-
-    // ── Beat 03 核心动作（广播上行）· @380ms · 700ms power2.inOut ──
-    const w1 = makeWire({ from: EL.procNet, to: EL.router, kind: "broadcast", slot: 0 });
-    const ripple = svgEl("circle", { class: "broadcast-ripple", r: 18, cx: 0, cy: 0 });
-    svg.appendChild(ripple);
-    const rp = stagePos(EL.router, "right");
-    ripple.setAttribute("cx", rp.x); ripple.setAttribute("cy", rp.y);
-
-    flyWire(tl, w1, at(380), 700, "power2.inOut");
-    tl.call(function () {
-      envelopeText(envReq, "ARP Request · 目标 MAC: FF:FF:FF:FF:FF:FF（广播）");
-    }, [], at(560));
-    tl.fromTo(ripple,
-      { scale: 0.6, opacity: 0.9, transformOrigin: rp.x + "px " + rp.y + "px" },
-      { scale: 1.4, opacity: 0, duration: D(300), ease: "power2.out" }, at(860));
-    tl.fromTo(w1.head, { opacity: 0 }, { opacity: 1, duration: D(150) }, at(900));
-    tl.to(EL.procNet, { y: 0, scale: 1, duration: D(180), ease: "sine.out" }, at(1000));
-
-    // ── Beat 04 落位沉淀（单播下行）· @1080ms · 500ms power2.inOut ──
-    const w2 = makeWire({ from: EL.router, to: EL.procNet, kind: "unicast", slot: 0 });
-    const envRsp = pushEnvelope("ARP Reply · 3C-7F-21-9A", -1);
-    flyWire(tl, w2, at(1080), 500, "power2.inOut");
-    tl.fromTo(envRsp, { opacity: 0, y: 8 }, { opacity: 1, y: 0, duration: D(240), ease: "power1.out" }, at(1100));
-    tl.fromTo(w2.head, { opacity: 0 }, { opacity: 1, duration: D(150) }, at(1450));
-
-    const macTok = makeToken("mac", "3C-7F-21-9A", EL.router, "left");
-    tl.to(macTok.el, { opacity: 1, scale: 1, duration: D(180), ease: "back.out(1.2)" }, at(1380));
-    tl.to(EL.arpCache, { opacity: 1, duration: D(240), ease: "power1.out" }, at(1420));
-    tl.call(function () { EL.arpCacheSub.textContent = "192.168.1.1 → 3C-7F-21-9A"; }, [], at(1460));
-    tl.to(macTok.el, { opacity: 0, duration: D(150) }, at(1600));
-
-    // ── Beat 05 状态确认 · @1730ms · 250ms power1.inOut ──
-    tl.add(function () { lightProto("arp"); setCallout(PHASES[1].callout); }, at(1730));
-    tl.call(setLane, [null], at(1740));
-  }
-
-  /** 阶段 2《DNS 解析》 · 总时长 ~2.0s */
-  function phaseDns(tl) {
-    // ── Beat 01 上下文建立 · @0ms · 200ms power1.out ──
-    tl.call(setLane, ["proc"], at(0));
-    tl.to(EL.procNet, { scale: 1.05, duration: D(200), ease: "power1.out" }, at(0));
-    tl.to(EL.procNet, { scale: 1, duration: D(200), ease: "power1.inOut" }, at(200));
-
-    const stack = makeNoteCard(
-      '<b>解析器调用栈</b><br><span class="nc-tag">1</span>浏览器网络进程<br>' +
-      '<span class="nc-tag">2</span>OS 解析器 getaddrinfo<br><span class="nc-tag">3</span>浏览器 DNS 缓存 → hosts → 本地 DNS',
-      EL.procNet, { dx: 112, dy: -82 });
-    const anchor = pagePos(EL.procNet, "right");
-    const miss = document.createElement("div");
-    miss.className = "note-card";
-    miss.style.width = "auto";
-    miss.style.padding = "2px 8px";
-    miss.style.borderColor = "#FECACA";
-    miss.style.background = "#FEF2F2";
-    miss.style.color = "#B91C1C";
-    miss.textContent = "三级缓存全部未命中";
-    floatLayer.appendChild(miss);
-    placeFloat(miss, { x: anchor.x + 112, y: anchor.y + 14 });
-    State.floats.push(miss);
-
-    tl.fromTo(stack, { opacity: 0, scale: 0.9 }, { opacity: 1, scale: 1, duration: D(200), ease: "power1.out" }, at(80));
-
-    // ── Beat 02 产生预期 · @200ms · 300ms power1.out ──
-    tl.add(function () { EL.chipDNS.classList.add("is-on"); }, at(200));
-    tl.fromTo(stack, { opacity: 1 }, { opacity: 0.5, duration: D(300), ease: "power1.inOut" }, at(300));
-    tl.to(miss, { opacity: 1, duration: D(300), ease: "power1.out" }, at(360));
-
-    // ── Beat 03 核心动作（去-回两段斜线）· @500ms · 900ms power2.inOut ──
-    const envQ = pushEnvelope("DNS 查询 · id 0x3F2A · UDP:53 → src", 1);
-    const w1 = makeWire({ from: EL.procNet, to: EL.dns, kind: "req", slot: 0 });
-    flyWire(tl, w1, at(500), 430, "power2.inOut");
-    tl.fromTo(envQ, { opacity: 0, y: 8 }, { opacity: 1, y: 0, duration: D(200), ease: "power1.out" }, at(520));
-    tl.fromTo(w1.head, { opacity: 0 }, { opacity: 1, duration: D(150) }, at(780));
-
-    const envA = pushEnvelope("DNS 应答 · A 记录 · ttl 300 · 4 字节", -1);
-    const w2 = makeWire({ from: EL.dns, to: EL.procNet, kind: "rsp", slot: 0 });
-    flyWire(tl, w2, at(980), 430, "power2.inOut");
-    tl.fromTo(envA, { opacity: 0, y: 8 }, { opacity: 1, y: 0, duration: D(200), ease: "power1.out" }, at(1000));
-    tl.fromTo(w2.head, { opacity: 0 }, { opacity: 1, duration: D(150) }, at(1260));
-    tl.to(stack, { opacity: 0, duration: D(200) }, at(1250));
-    tl.to(miss, { opacity: 0, duration: D(200) }, at(1250));
-
-    // ── Beat 04 落位沉淀 · @1410ms · 300ms back.out(1.2) ──
-    const mid = w2.el.getPointAtLength(w2.len * 0.5);
-    const stageOrigin = pagePos(stage, "left");
-    const ipTok = document.createElement("div");
-    ipTok.className = "token";
-    ipTok.dataset.kind = "ip";
-    ipTok.textContent = "93.184.216.34";
-    floatLayer.appendChild(ipTok);
-    placeFloat(ipTok, { x: stageOrigin.x + mid.x, y: stageOrigin.y + mid.y });
-    gsap.set(ipTok, { xPercent: -50, yPercent: -50, opacity: 0, scale: 0.8 });
-    State.floats.push(ipTok);
-    tl.to(ipTok, { opacity: 1, scale: 1, duration: D(300), ease: "back.out(1.2)" }, at(1410));
-    tl.add(function () { EL.chipTCP.classList.add("is-warm"); }, at(1560));
-    tl.to(ipTok, { opacity: 0, duration: D(200) }, at(1620));
-
-    // ── Beat 05 状态确认 · @1750ms · 250ms power1.inOut ──
-    tl.add(function () { lightProto("dns"); setCallout(PHASES[2].callout); }, at(1750));
-    tl.call(setLane, [null], at(1760));
-  }
-
-  /** 阶段 3《TCP 三次握手》 · 总时长 ~1.98s */
-  function phaseTcp(tl) {
-    // ── Beat 01 上下文建立 · @0ms · 200ms power1.out ──
-    tl.call(setLane, ["proc"], at(0));
-    const slot = $(".proc__slot", EL.procNet);
-    if (slot) {
-      const t = document.createElement("div");
-      t.className = "token"; t.dataset.kind = "ip"; t.textContent = "93.184.216.34";
-      slot.appendChild(t);
-    }
-    tl.to(EL.procNet, { scale: 1.04, duration: D(200), ease: "power1.out" }, at(0));
-    tl.to(EL.procNet, { scale: 1, duration: D(200), ease: "power1.inOut" }, at(200));
-
-    // ── Beat 02 产生预期 · @200ms · 180ms sine.out ──
-    const synTok = makeToken("syn", "SYN seq=x", EL.procNet, "right");
-    tl.to(EL.procNet, { y: -4, scale: 1.05, duration: D(180), ease: "sine.out" }, at(200));
-    tl.to(EL.web, { y: -4, scale: 1.04, duration: D(180), ease: "sine.out" }, at(200));
-    tl.to(synTok.el, { opacity: 1, scale: 1, duration: D(180), ease: "sine.out" }, at(220));
-
-    // ── Beat 03 核心动作（三条斜线）· @380ms · 1000ms power2.inOut ──
-    const e1 = pushEnvelope("① SYN   seq=x", 1);
-    const w1 = makeWire({ from: EL.procNet, to: EL.web, kind: "handshake", slot: 0 });
-    flyWire(tl, w1, at(380), 300, "power2.inOut");
-    tl.fromTo(e1, { opacity: 0, y: 8 }, { opacity: 1, y: 0, duration: D(200), ease: "power1.out" }, at(390));
-    tl.fromTo(w1.head, { opacity: 0 }, { opacity: 1, duration: D(120) }, at(560));
-
-    const e2 = pushEnvelope("② SYN+ACK   seq=y ack=x+1", -1);
-    const w2 = makeWire({ from: EL.web, to: EL.procNet, kind: "handshake", slot: 1 });
-    flyWire(tl, w2, at(720), 300, "power2.inOut");
-    tl.fromTo(e2, { opacity: 0, y: 8 }, { opacity: 1, y: 0, duration: D(200), ease: "power1.out" }, at(730));
-    tl.fromTo(w2.head, { opacity: 0 }, { opacity: 1, duration: D(120) }, at(900));
-
-    const e3 = pushEnvelope("③ ACK   x+1", 1);
-    const w3 = makeWire({ from: EL.procNet, to: EL.web, kind: "handshake", slot: 2 });
-    flyWire(tl, w3, at(1060), 300, "power2.inOut");
-    tl.fromTo(e3, { opacity: 0, y: 8 }, { opacity: 1, y: 0, duration: D(200), ease: "power1.out" }, at(1070));
-    tl.fromTo(w3.head, { opacity: 0 }, { opacity: 1, duration: D(120) }, at(1240));
-
-    // ── Beat 04 落位沉淀 · @1380ms · 300ms power1.out ──
-    const connC = makeNoteCard(
-      '<b>连接已建立</b><br>客户端 ⟷ 服务器<br><span style="color:#059669">ESTABLISHED</span>',
-      EL.procNet, { dx: 116, dy: 100 });
-    tl.to(EL.procNet, { y: 0, scale: 1, duration: D(300), ease: "power1.out" }, at(1380));
-    tl.to(EL.web, { y: 0, scale: 1, duration: D(300), ease: "power1.out" }, at(1380));
-    tl.to(synTok.el, { opacity: 0, duration: D(150) }, at(1380));
-    tl.fromTo(connC, { opacity: 0, scale: 0.8 },
-      { opacity: 1, scale: 1, duration: D(300), ease: "back.out(1.4)" }, at(1450));
-    tl.add(function () {
-      EL.chipTCP.classList.remove("is-warm");
-      EL.chipTCP.classList.add("is-on");
-    }, at(1450));
-
-    // ── Beat 05 状态确认 · @1730ms · 250ms power1.inOut ──
-    tl.add(function () { lightProto("tcp"); setCallout(PHASES[3].callout); }, at(1730));
-    tl.call(setLane, [null], at(1740));
-  }
-
-  /** 阶段 4《HTTP 与渲染》 · 总时长 ~2.9s */
-  function phaseHttp(tl) {
-    // ── Beat 01 上下文建立 · @0ms · 200ms power1.out ──
-    tl.call(setLane, ["proc"], at(0));
-    EL.procRender.classList.add("is-focus");
-    tl.to(EL.procRender, { scale: 1.04, duration: D(200), ease: "power1.out" }, at(0));
-    tl.to(EL.procRender, { scale: 1, duration: D(200), ease: "power1.inOut" }, at(200));
-    tl.to($$(".dp-node"), { opacity: 0.3, duration: D(200) }, at(0));
-    tl.to($$(".dp-branch"), { opacity: 0.3, duration: D(200) }, at(0));
-
-    // ── Beat 02 产生预期 · @200ms · 200ms sine.out ──
-    const e1 = pushEnvelope("GET /cs/net/408-index.html HTTP/1.1", 1);
-    tl.to(EL.procNet, { y: -4, duration: D(200), ease: "sine.out" }, at(200));
-    tl.fromTo(e1, { opacity: 0, y: 8 }, { opacity: 1, y: 0, duration: D(200), ease: "power1.out" }, at(220));
-    tl.to(EL.procNet, { y: 0, duration: D(200), ease: "sine.out" }, at(340));
-
-    // ── Beat 03 核心动作（请求→应答→DOM 生长）· @400ms · 1100ms power2.inOut ──
-    const w1 = makeWire({ from: EL.procNet, to: EL.web, kind: "req", slot: 0 });
-    flyWire(tl, w1, at(400), 380, "power2.inOut");
-    tl.fromTo(w1.head, { opacity: 0 }, { opacity: 1, duration: D(150) }, at(620));
-
-    const e2 = pushEnvelope("200 OK · text/html · 2.4 KB", -1);
-    const w2 = makeWire({ from: EL.web, to: EL.procNet, kind: "rsp", slot: 0 });
-    flyWire(tl, w2, at(820), 380, "power2.inOut");
-    tl.fromTo(e2, { opacity: 0, y: 8 }, { opacity: 1, y: 0, duration: D(200), ease: "power1.out" }, at(840));
-    tl.fromTo(w2.head, { opacity: 0 }, { opacity: 1, duration: D(150) }, at(1040));
-
-    const htmlCard = makeNoteCard(
-      '&lt;html&gt;<br>&nbsp;&nbsp;&lt;head&gt;<br>&nbsp;&nbsp;&nbsp;&nbsp;&lt;link href="a.css"&gt;<br>' +
-      '&nbsp;&nbsp;&lt;/head&gt;<br>&nbsp;&nbsp;&lt;body&gt;…&lt;/body&gt;',
-      EL.procRender, { dx: 134, dy: -70 });
-    tl.fromTo(htmlCard, { opacity: 0, y: 6 }, { opacity: 1, y: 0, duration: D(250), ease: "power2.out" }, at(1020));
-    tl.to($$(".dp-node"), { opacity: 1, duration: D(250), stagger: D(50), ease: "power2.out" }, at(1120));
-    tl.to($$(".dp-branch"), { opacity: 1, duration: D(250), stagger: D(50) }, at(1120));
-    tl.to(htmlCard, { opacity: 0, duration: D(200) }, at(1420));
-
-    // ── Beat 04 落位沉淀（3 条子资源并行 + 渲染树点亮）· @1500ms · 900ms power2.inOut ──
-    const subLabels = ["a.css", "m.js", "h.png"];
-    const reqWires = [], rspWires = [];
-    subLabels.forEach(function (label, i) {
-      const e = pushEnvelope("GET /" + label + " · 复用同一连接", 1);
-      const wr = makeWire({ from: EL.procRender, to: EL.web, kind: "req", slot: i });
-      const wp = makeWire({ from: EL.web, to: EL.procRender, kind: "rsp", slot: i });
-      reqWires.push(wr); rspWires.push(wp);
-      const base = at(1500, i * 0.02);
-      flyWire(tl, wr, base, 400, "power2.inOut");
-      tl.fromTo(e, { opacity: 0, y: 8 }, { opacity: 1, y: 0, duration: D(200), ease: "power1.out" }, at(1500, i * 0.04));
-      tl.fromTo(wr.head, { opacity: 0 }, { opacity: 1, duration: D(150) }, at(1780, i * 0.02));
-      // 应答回到渲染进程
-      flyWire(tl, wp, at(1940, i * 0.02), 400, "power2.inOut");
-      tl.fromTo(wp.head, { opacity: 0 }, { opacity: 1, duration: D(150) }, at(2200, i * 0.02));
-    });
-    tl.add(function () { EL.chipHTTP.classList.add("is-on"); }, at(1560));
-    tl.add(function () {
-      $$(".dp-node").forEach(function (n) { n.classList.add("is-lit"); });
-    }, at(2300));
-    tl.to($$(".dp-node"), { opacity: 1, duration: D(400), stagger: D(40), ease: "power1.out" }, at(2300));
-    tl.to(getPixelGrid(), { opacity: 1, duration: D(400), ease: "power1.out" }, at(2340));
-    tl.fromTo($$(".pixel-grid i"), { scale: 0.6 },
-      { scale: 1, duration: D(300), stagger: D(10), ease: "back.out(1.6)" }, at(2400));
-
-    // ── Beat 05 状态确认 · @2500ms · 400ms power1.inOut ──
-    tl.add(function () { lightProto("http"); }, at(2500));
-    tl.add(function () { lightProto("render"); }, at(2610));
-    tl.to(getPixelGrid(), { scale: 1.02, duration: D(300), ease: "back.out(1.2)" }, at(2620));
-    tl.to(getPixelGrid(), { scale: 1, duration: D(300), ease: "power2.out" }, at(2920));
-    tl.add(function () {
-      $$(".rail-seg").forEach(function (s) { s.classList.add("is-done"); });
-    }, at(2500));
-    tl.call(setLane, [null], at(2520));
-  }
-
-  /* ══════════ 每阶段子时间轴 ══════════ */
-  const BUILDERS = [phasePrologue, phaseArp, phaseDns, phaseTcp, phaseHttp];
-  function getPhaseTimeline(phaseIndex) {
-    const tl = gsap.timeline({ paused: true, onComplete: onPhaseComplete });
-    BUILDERS[phaseIndex](tl);
-    return tl;
-  }
-
-  /* ══════════ 主控制器 ══════════ */
-  function goto(i, opts) {
-    opts = opts || {};
-    i = clamp(i, 0, PHASES.length - 1);
-    resetWorld();
-
-    State.phase = i;
-    applyPhaseText(i);
-    setCallout(PHASES[i].callout);
-
-    // 进度轨
-    $$(".rail-seg").forEach(function (s, idx) {
-      s.classList.toggle("is-done", idx < i);
-      s.classList.toggle("is-active", idx === i);
-    });
-    // 当前协议高亮（未点亮前先标 current）
-    const protoKeys = [null, "arp", "dns", "tcp", "http"];
-    $$(".proto-item").forEach(function (el) {
-      el.classList.toggle("is-current", el.dataset.proto === protoKeys[i]);
-    });
-
-    // 累积语义：仅把「已完整播放过」的阶段点亮的协议重新施加。
-    // 阶段 4 内的 http / render 仍由其 Beat 05 依次点亮，保持「先演后点」。
-    const passed = [[], ["arp"], ["arp", "dns"], ["arp", "dns", "tcp"], ["arp", "dns", "tcp"]][i];
-    passed.forEach(function (k) { lightProto(k); });
-
-    State.tl = getPhaseTimeline(i);
-    State.tl.progress(0, true).pause();
-    State.playing = false;
-    EL.btnPlay.textContent = "▶ 播放";
-
-    if (opts.autoplay) play();
-  }
-
-  function play() {
-    if (!State.tl) return;
-    if (State.tl.progress() >= 1) { goto(State.phase, { autoplay: false }); }
-    State.tl.play();
-    State.playing = true;
-    EL.btnPlay.textContent = "⏸ 暂停";
-  }
-  function pause() {
-    if (!State.tl) return;
-    State.tl.pause();
-    State.playing = false;
-    EL.btnPlay.textContent = "▶ 播放";
-  }
-  function togglePlay() {
-    // 手动播放接管：退出自动连播，避免两套调度同时驱动同一时间轴
-    if (State.auto) stopAuto();
-    if (State.playing) pause(); else play();
-  }
-  function next() {
-    if (State.auto) stopAuto();
-    if (State.phase < PHASES.length - 1) goto(State.phase + 1); else pause();
-  }
-  function prev() {
-    if (State.auto) stopAuto();
-    if (State.phase > 0) goto(State.phase - 1);
-  }
-  function reset() {
-    stopAuto();
-    goto(0);
-  }
-
-  /* ── 全自动连播：从当前阶段一路播到最后一阶段 ──
-     仍由 GSAP 时间轴驱动，不使用 setTimeout/setInterval；
-     阶段衔接发生在子时间轴 onComplete 回调里，符合「统一时间轴管线」铁律。 */
-  function startAuto() {
-    State.auto = true;
-    syncAutoBtn();
-    const atLast = State.phase >= PHASES.length - 1;
-    const phaseDone = !State.tl || State.tl.progress() >= 1;
-    if (atLast) goto(0, { autoplay: true });            // 已在末阶段 → 从头重放
-    else if (phaseDone) goto(State.phase + 1, { autoplay: true }); // 当前阶段已播完 → 直接接力下一阶段
-    else play();                                        // 当前阶段未播完 → 从中断处续播
-  }
-  function stopAuto() {
-    if (!State.auto) return;
-    State.auto = false;
-    syncAutoBtn();
-  }
-  function toggleAuto() {
-    if (State.auto) { stopAuto(); pause(); } else { startAuto(); }
-  }
-  function syncAutoBtn() {
-    EL.btnAuto.classList.toggle("is-on", State.auto);
-    EL.btnAuto.textContent = State.auto ? "⏸ 停止连播" : "⏩ 全自动";
-  }
-
-  function onPhaseComplete() {
-    State.playing = false;
-    if (State.auto && State.phase < PHASES.length - 1) {
-      goto(State.phase + 1, { autoplay: true });   // 接力下一阶段
+  function goto(index, options={}) {
+    const auto=options.auto===true;
+    stop();
+    State.index=Math.max(0,Math.min(STEPS.length-1,index));
+    State.auto=auto;
+    State.settled=false;
+    if (!engine || options.instant) {
+      State.settled=true;
+      render();
       return;
     }
-    if (State.auto) stopAuto();                     // 末阶段播完，退出连播
-    EL.btnPlay.textContent = State.phase < PHASES.length - 1 ? "▶ 下一阶段" : "▶ 重播";
+    State.playing=true;
+    syncControls();
+    const dur=reduced.matches ? .05 : .9;
+    const outro=reduced.matches?0:.15;
+    const arrival=outro+dur+.2;
+    const rest=arrival+.35;
+    const motion={progress:0};
+    const hold={progress:0};
+    const tl=engine.timeline({paused:true,onComplete:() => {
+      State.playing=false;
+      if(State.auto && State.index<STEPS.length-1) goto(State.index+1,{auto:true});
+      else { State.auto=false; syncControls(); }
+    }});
+    State.tl=tl;
+    tl.to(scene,{opacity:0,y:-6,scale:.99,duration:outro,ease:'power2.in'},0);
+    tl.call(render,[],outro);
+    tl.fromTo(scene,{opacity:0,y:8,scale:1},{opacity:1,y:0,scale:1,duration:reduced.matches?0:.35,ease:'power4.out',immediateRender:false},outro);
+    tl.to(motion,{progress:1,duration:dur,ease:'expo.out',onUpdate:() => {
+      const line=scene.querySelector('.message.is-current .message-line');
+      if(line) line.style.transform=`scaleX(${motion.progress})`;
+      const arrow=scene.querySelector('.render-arrow');
+      if(arrow) arrow.style.transform=`translateX(${(1-motion.progress)*(STEPS[State.index].from==='server'?16:-16)}px)`;
+    }},outro+.1);
+    tl.call(() => { State.settled=true; render(); },[],arrival);
+    tl.fromTo($('#result-panel'),{opacity:.4,y:5},{opacity:1,y:0,duration:reduced.matches?0:.3,ease:'power4.out',immediateRender:false},arrival);
+    tl.call(() => {
+      if(!State.auto) { tl.pause(); State.playing=false; syncControls(); }
+    },[],rest);
+    tl.to(hold,{progress:1,duration:2.7,ease:'none'},rest);
+    tl.timeScale(State.speed).play();
   }
-
-  /* ══════════ 事件绑定 ══════════ */
-  $("#btn-play").addEventListener("click", togglePlay);
-  $("#btn-next").addEventListener("click", next);
-  $("#btn-prev").addEventListener("click", prev);
-  $("#btn-auto").addEventListener("click", toggleAuto);
-  $("#btn-reset").addEventListener("click", reset);
-
-  $$(".speed-btn").forEach(function (btn) {
-    btn.addEventListener("click", function () {
-      $$(".speed-btn").forEach(function (b) { b.classList.remove("is-on"); });
-      btn.classList.add("is-on");
-      State.speed = parseFloat(btn.dataset.speed);
-      // 速率切换：重建当前阶段以按新速率精确缩放，避免截断；
-      // 自动连播中则同步保持连播，不因切速率而中断。
-      goto(State.phase, { autoplay: State.playing || State.auto });
-    });
+  function next() { goto(State.index+1); }
+  function prev() { goto(State.index-1); }
+  function reset() { goto(0,{instant:true}); if(engine) engine.set(scene,{clearProps:'opacity,transform'}); }
+  function togglePlay() {
+    if(!engine) return;
+    if(State.playing) { State.tl.pause(); State.playing=false; syncControls(); return; }
+    State.auto=true;
+    State.playing=true;
+    if(State.index===STEPS.length-1&&State.settled) goto(0,{auto:true});
+    else if(State.tl) { State.tl.play(); syncControls(); }
+    else goto(State.index,{auto:true});
+  }
+  $('#btn-next').addEventListener('click',next);
+  $('#btn-prev').addEventListener('click',prev);
+  $('#btn-play').addEventListener('click',togglePlay);
+  $('#btn-replay').addEventListener('click',() => goto(State.index));
+  $('#btn-reset').addEventListener('click',reset);
+  $('#phase-nav').addEventListener('click',event => {
+    const button=event.target.closest('[data-phase]');
+    if(!button) return;
+    $('#phase-detail').open=false;
+    goto(PHASES[Number(button.dataset.phase)].start);
   });
-
-  window.addEventListener("resize", function () {
-    State.wires.forEach(layoutWire);
+  $('#step-seek').addEventListener('input',event => goto(Number(event.target.value),{instant:true}));
+  $('#speed').addEventListener('change',event => {
+    State.speed=Number(event.target.value);
+    if(State.tl) State.tl.timeScale(State.speed);
   });
-
-  /* ══════════ 启动 ══════════ */
-  buildDomPreview();
-  goto(0);
-
-  /* 对外暴露（调试与规范自检用） */
-  window.APP = {
-    PHASE_COUNT: PHASES.length,
-    State: State,
-    computeWire: computeWire,
-    getPhaseTimeline: getPhaseTimeline,
-    setPhaseActive: setLane,
-    controller: {
-      goto: goto, play: play, pause: pause,
-      next: next, prev: prev, reset: reset,
-      auto: startAuto, stopAuto: stopAuto
-    }
-  };
+  document.addEventListener('keydown',event => {
+    if(/INPUT|SELECT|TEXTAREA|BUTTON|SUMMARY/.test(event.target.tagName)||event.ctrlKey||event.metaKey||event.altKey) return;
+    if(event.key==='ArrowRight') { event.preventDefault(); next(); }
+    if(event.key==='ArrowLeft') { event.preventDefault(); prev(); }
+    if(event.code==='Space') { event.preventDefault(); togglePlay(); }
+  });
+  if(!engine) $('#engine-note').hidden=false;
+  render();
+  window.APP={State,STEPS,PHASES,snapshot,controller:{goto,next,prev,reset,play:togglePlay}};
 })();
