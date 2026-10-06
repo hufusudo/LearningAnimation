@@ -153,7 +153,7 @@ htmlEntryList.forEach((rel) => {
 });
 console.log(`✅ ${htmlEntryList.length} 个模块页共检查 ${refCount} 条相对引用`);
 
-// 6. CDN 黄金配方版本一致性（AGENT.md §5.2）
+// 6. CDN 黄金配方版本一致性（AGENTS.md §5.2）
 console.log('\n🔎 CDN 版本一致性体检...');
 const htmlFiles = walk(__dirname, ['.html']);
 const CDN_RULES = [
