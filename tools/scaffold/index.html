@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{title}} · LearningAnimation</title>
+  <link rel="stylesheet" href="style.css">
+
+  <!-- 按演示需要启用依赖；基础页面只使用本地 CSS / JS。
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+  -->
+</head>
+<body>
+  <header class="module-header">
+    <a href="../index.html#{{discipline}}">← 返回{{disciplineName}}</a>
+    <h1>{{title}}</h1>
+  </header>
+  <main>
+    <section id="stage" class="stage" aria-label="{{title}}演示区">
+      <!-- 按设计方案建立 DOM / SVG / Canvas 图元，交付前替换占位说明。 -->
+      <p class="starter-note">演示内容待实现。</p>
+    </section>
+    <!-- 按实际需求添加控制区、图例与说明；组件配方见 docs/ui-recipes.md。 -->
+  </main>
+  <!-- 如需 model.js，在 app.js 之前用普通 script 标签加载。 -->
+  <script src="app.js"></script>
+</body>
+</html>
