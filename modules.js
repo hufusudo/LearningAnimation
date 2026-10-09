@@ -172,14 +172,6 @@ window.MODULES = [
     "formula": "dentry · Inode · i_nlink · 悬空链接"
   },
   {
-    "title": "文件从 open() 到 read() 的全生命周期",
-    "discipline": "os",
-    "path": "文件打开与读取全过程/index.html",
-    "badge": "fd → file → inode 三级映射",
-    "desc": "四列区分用户空间与内核空间：路径逐级检索与磁盘 inode 调入、系统打开文件表项插入（offset/count/flags）、fd 最小空闲位分配与指针回传、描述符寻址取 offset、inode 块索引定位 Block 12 搬运 100 字节到 buf[]，最后 offset 数字滚动 0 → 100。",
-    "formula": "路径解析 → 建表项 → 绑定 fd → 寻址 → 搬运 → offset 推进"
-  },
-  {
     "title": "置换-选择排序与最佳归并树可视化",
     "discipline": "ds",
     "path": "置换-选择排序与最佳归并树/index.html",
@@ -348,14 +340,6 @@ window.MODULES = [
     "formula": "∬_Σ f dS = ∬_D f √(1+z_x²+z_y²) dxdy"
   },
   {
-    "title": "文件索引寻道与缓冲写回",
-    "discipline": "os",
-    "path": "文件索引寻道与缓冲写回/index.html",
-    "badge": "多级索引寻道 · 硬链接共享 · 脏缓冲刷盘",
-    "desc": "从 /users/docs/test.txt 逐级目录解析锁定 inode #8，进程 A/B 的 fd=3、fd=4 引线汇聚到同一系统表项（Open Count 0→2），直接+一级间接索引载入真实数据块，脏缓冲「改一变二」验证后抛物线刷盘写回。",
-    "formula": "fd → 系统打开文件表 → inode → 磁盘块 · 脏缓冲刷盘"
-  },
-  {
     "title": "DNS 查询全景：域与区的划分及迭代/递归查询机制",
     "discipline": "net",
     "path": "DNS查询全景与域区划分/index.html",
@@ -378,22 +362,6 @@ window.MODULES = [
     "badge": "割性质 · 贪心扩张 · 最小生成树",
     "desc": "沙盘上从首都长出一棵最小生成树：领土气泡弹性融合裹入新国、边界前线割集动态比价锁定最低权边、能量脉冲沿皇家骨干路滑行、成环冗余道路灰化打上 ✕ 作废，支持单步前进/后退、倍速与三套地图预设。",
     "formula": "Cut Property · 每次取跨割最小权边 → n-1 条边构成 MST"
-  },
-  {
-    "title": "多元函数的辨析：四大概念的几何辨析",
-    "discipline": "math",
-    "path": "多元函数的辨析/index.html",
-    "badge": "四叶帐篷曲面 · 剖面折痕 · 残差比判据 · 法向撕裂",
-    "desc": "以 z=xy/√(x²+y²) 四叶折叠帐篷为靶：单刀剖面绕 Z 轴从 X 轴转到对角线，截交线在 45° 蜕变为斜率 ±1/2 的 V 字折痕；放大后 Δz/ρ 死锁在 1/2≠0 证明不可微；再由 r=0.2 巡检环上的法向探针扫出波浪伞面，暴露偏导在原点极限不存在。",
-    "formula": "连续 ∧ 偏导存在 ⇏ 可微 · Δz/ρ ≡ 1/2"
-  },
-  {
-    "title": "浏览器访问网页全流程",
-    "discipline": "net",
-    "path": "浏览器访问网页全流程/index.html",
-    "badge": "六段主线 · 报文时序 · 页面逐步呈现",
-    "desc": "从网址拆解、DNS 解析、TCP 握手、TLS 协商到 HTTP 请求与页面渲染，逐个观察 23 个动作。固定参与者、保留每步结果，直观看清 HTML 如何引出资源请求并变成屏幕上的网页。",
-    "formula": "URL → DNS → TCP → TLS → HTTP → 页面"
   },
   {
     "title": "第二类曲面积分：通量与三向投影影子墙",
