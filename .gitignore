@@ -23,3 +23,10 @@ yarn-debug.log*
 yarn-error.log*
 tmp/
 temp/
+
+# AI 工具目录与模块内的本地设计方案（不纳入版本库）
+# 注意：tools/scaffold/设计方案.md 是新建模块用的模板，仍纳入版本库
+.claude/
+.codex/
+.agents/
+/*/设计方案.md
