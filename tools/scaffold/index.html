@@ -3,31 +3,41 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{{title}} · LearningAnimation</title>
+  <title>{{title}} · 可视化实验室</title>
   <link rel="stylesheet" href="style.css">
 
-  <!-- 按演示需要启用依赖；基础页面只使用本地 CSS / JS。
+  <!-- 需要动画引擎时取消注释（版本与 verify.js 的黄金配方一致）。
   <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
-  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
-  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
   -->
 </head>
 <body>
-  <header class="module-header">
-    <a href="../index.html#{{discipline}}">← 返回{{disciplineName}}</a>
-    <h1>{{title}}</h1>
+  <header class="site-header">
+    <a class="back-link" href="../index.html#{{discipline}}">← 返回{{disciplineName}}</a>
+    <span class="site-name">可视化实验室</span>
   </header>
   <main>
-    <section id="stage" class="stage" aria-label="{{title}}演示区">
-      <!-- 按设计方案建立 DOM / SVG / Canvas 图元，交付前替换占位说明。 -->
-      <p class="starter-note">演示内容待实现。</p>
+    <div class="title-row">
+      <div>
+        <h1>{{title}}</h1>
+        <p class="subtitle">用一句话说明这个演示让观众看懂什么。</p>
+      </div>
+    </div>
+
+    <section class="stage" id="stage" aria-label="{{title}}演示区">
+      <div class="stage-heading">
+        <span class="phase" id="phase">待实现</span>
+      </div>
+      <div class="sand" id="sand-wrap">
+        <!-- 按设计方案放置 SVG 舞台：宽屏与竖屏两套构图（DESIGN_SYSTEM §9）。 -->
+        <p class="starter-note">演示内容待实现。</p>
+      </div>
+      <div class="stage-foot">
+        <p class="caption" id="caption" aria-live="polite"></p>
+      </div>
     </section>
-    <!-- 按实际需求添加控制区、图例与说明；组件配方见 docs/ui-recipes.md。 -->
+
+    <!-- 控制区、辅助视图与一行示意说明按设计方案添加；组件见 docs/ui-recipes.md。 -->
   </main>
-  <!-- 如需 model.js，在 app.js 之前用普通 script 标签加载。 -->
   <script src="app.js"></script>
 </body>
 </html>

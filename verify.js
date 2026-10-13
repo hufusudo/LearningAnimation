@@ -177,7 +177,23 @@ htmlFiles.forEach((file) => {
 });
 console.log(cdnOff === 0 ? '✅ CDN 版本与黄金配方一致' : `⚠️  ${cdnOff} 处 CDN 版本偏离`);
 
-// 7. 输出汇总统计
+// 7. README 模块数与登记表核对（首段“项目涵盖 N 个”是对外说明，须与登记表一致）
+console.log('\n🔎 README 模块数核对...');
+const readmeFile = path.join(__dirname, 'README.md');
+const readmeCount = fs.existsSync(readmeFile)
+  ? fs.readFileSync(readmeFile, 'utf8').match(/项目涵盖\s*\*\*(\d+)\s*个\*\*/)
+  : null;
+if (!readmeCount) {
+  console.error('❌ README.md 中找不到“项目涵盖 **N 个**”模块数声明，请同步修改 verify.js 的核对规则。');
+  errors++;
+} else if (Number(readmeCount[1]) !== modules.length) {
+  console.error(`❌ README.md 写的模块数为 ${readmeCount[1]}，登记表共 ${modules.length} 个，请同步修改 README.md。`);
+  errors++;
+} else {
+  console.log(`✅ README 模块数与登记表一致（${modules.length} 个）`);
+}
+
+// 8. 输出汇总统计
 console.log('\n📊 学科收录统计:');
 console.log(`  - 高等数学 (math):       ${counts.math} 个`);
 console.log(`  - 概率统计 (prob):       ${counts.prob} 个`);

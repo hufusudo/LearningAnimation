@@ -45,7 +45,11 @@ test('新建模块使用本地基础资源，登记表仅增加一条记录', (t
     badge: '截面观察', desc: '切片演示的交互式教学演示。', formula: '高等数学 · 核心直观'
   });
   assert.ok(fs.readFileSync(path.join(root, 'modules.js'), 'utf8').startsWith('/* 登记表备注保留 */'));
-  assert.deepEqual(fs.readdirSync(path.join(root, '切片演示')).sort(), ['app.js', 'index.html', 'style.css']);
+  assert.deepEqual(fs.readdirSync(path.join(root, '切片演示')).sort(), ['app.js', 'index.html', 'style.css', '设计方案.md']);
+  const design = fs.readFileSync(path.join(root, '切片演示', '设计方案.md'), 'utf8');
+  assert.ok(design.startsWith('# 切片演示 · 设计方案'));
+  assert.ok(design.includes('../DESIGN_SYSTEM.md'));
+  assert.ok(!design.includes('{{'));
   const html = fs.readFileSync(path.join(root, '切片演示', 'index.html'), 'utf8');
   assert.ok(html.includes('../index.html#math'));
   assert.ok(!html.includes('{{'));
@@ -114,6 +118,14 @@ test('登记表无法解析或模板缺失时，不留下半成品目录', (t) =
   fs.unlinkSync(path.join(root, 'tools', 'scaffold', 'app.js'));
   assert.notEqual(run(root, '缺模板', 'net').status, 0);
   assert.ok(!fs.existsSync(path.join(root, '缺模板')));
+  assert.deepEqual(records(root), []);
+});
+
+test('设计方案模板缺失时拒绝创建，不留下目录', (t) => {
+  const root = fixture(t);
+  fs.unlinkSync(path.join(root, 'tools', 'scaffold', '设计方案.md'));
+  assert.notEqual(run(root, '缺方案模板', 'net').status, 0);
+  assert.ok(!fs.existsSync(path.join(root, '缺方案模板')));
   assert.deepEqual(records(root), []);
 });
 

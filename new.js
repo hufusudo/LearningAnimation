@@ -1,6 +1,7 @@
 /**
  * 创建独立演示模块：node new.js "模块名称" <math|prob|ds|co|os|net> [特性标签]
- * 基础模板位于 tools/scaffold/；仅生成三个入口文件，不规定演示布局或播放器。
+ * 基础模板位于 tools/scaffold/：生成三个入口文件；目录里还没有《设计方案.md》时，同时生成其模板。
+ * 已保存的设计方案保持原样；模板只提供结构，不规定演示布局或播放器。
  */
 const fs = require('node:fs');
 const path = require('node:path');
@@ -11,11 +12,20 @@ const DISCIPLINES = {
   co: '计算机组成原理', os: '计算机操作系统', net: '计算机网络'
 };
 const FILES = ['index.html', 'style.css', 'app.js'];
+const DESIGN_DOC = '设计方案.md';
 
 function escapeHtml(value) {
   return value.replace(/[&<>"']/g, (char) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
   })[char]);
+}
+
+// 替换模板中的 {{字段}}；遇到未知字段时直接拒绝，避免生成残缺页面
+function fillTemplate(text, fields) {
+  return text.replace(/\{\{(\w+)\}\}/g, (token, key) => {
+    if (!Object.hasOwn(fields, key)) throw new Error('模板存在未知字段：' + token);
+    return fields[key];
+  });
 }
 
 function createModule(name, discipline, badge) {
@@ -36,7 +46,7 @@ function createModule(name, discipline, badge) {
     if (FILES.some((file) => fs.existsSync(path.join(target, file)))) {
       throw new Error('目标目录已有页面代码，已停止创建，避免覆盖。');
     }
-    if (fs.readdirSync(target).length && !fs.existsSync(path.join(target, '设计方案.md'))) {
+    if (fs.readdirSync(target).length && !fs.existsSync(path.join(target, DESIGN_DOC))) {
       throw new Error('非空目录缺少设计方案.md，已停止创建。');
     }
   }
@@ -53,18 +63,19 @@ function createModule(name, discipline, badge) {
     throw new Error('模块名称或入口已经登记，已停止创建。');
   }
 
-  const fields = {
+  // 模板全部读入并替换完成后，才开始写任何文件。
+  const htmlFields = {
     title: escapeHtml(name),
     discipline,
     disciplineName: escapeHtml(DISCIPLINES[discipline])
   };
-  const contents = FILES.map((file) => {
-    const template = fs.readFileSync(path.join(__dirname, 'tools', 'scaffold', file), 'utf8');
-    return template.replace(/\{\{(\w+)\}\}/g, (token, key) => {
-      if (!Object.hasOwn(fields, key)) throw new Error('模板存在未知字段：' + token);
-      return fields[key];
-    });
-  });
+  const textFields = { title: name, discipline, disciplineName: DISCIPLINES[discipline] };
+  const readTemplate = (file, fields) => fillTemplate(
+    fs.readFileSync(path.join(__dirname, 'tools', 'scaffold', file), 'utf8'), fields);
+  const contents = FILES.map((file) => readTemplate(file, htmlFields));
+  const designPath = path.join(target, DESIGN_DOC);
+  const writeDesign = !fs.existsSync(designPath);
+  const designContent = writeDesign ? readTemplate(DESIGN_DOC, textFields) : null;
   records.push({
     title: name, discipline, path: entryPath, badge: badge || '交互演示',
     desc: name + '的交互式教学演示。',
@@ -82,16 +93,17 @@ function createModule(name, discipline, badge) {
       fs.mkdirSync(target);
       directoryCreated = true;
     }
-    FILES.forEach((file, index) => {
-      const dest = path.join(target, file);
+    const writeNew = (dest, text) => {
       const descriptor = fs.openSync(dest, 'wx');
       created.push(dest);
       try {
-        fs.writeFileSync(descriptor, contents[index], 'utf8');
+        fs.writeFileSync(descriptor, text, 'utf8');
       } finally {
         fs.closeSync(descriptor);
       }
-    });
+    };
+    FILES.forEach((file, index) => writeNew(path.join(target, file), contents[index]));
+    if (writeDesign) writeNew(designPath, designContent);
     const descriptor = fs.openSync(temporaryRegistry, 'wx', fs.statSync(registryFile).mode);
     temporaryCreated = true;
     try {
@@ -106,8 +118,13 @@ function createModule(name, discipline, badge) {
     if (directoryCreated && fs.existsSync(target)) fs.rmdirSync(target);
     throw error;
   }
-  console.log('已创建 ' + name + '/：index.html、style.css、app.js；原有设计方案保留。');
-  console.log('已登记到 modules.js。请按设计方案实现内容，控件和组件按需添加。');
+  if (writeDesign) {
+    console.log('已创建 ' + name + '/：index.html、style.css、app.js 与设计方案.md 模板。');
+    console.log('已登记到 modules.js。请先在设计方案.md 写清关键信息清单（见 DESIGN_SYSTEM.md §0），再实现页面。');
+  } else {
+    console.log('已创建 ' + name + '/：index.html、style.css、app.js；原有设计方案保留。');
+    console.log('已登记到 modules.js。请按设计方案实现内容，控件和组件按需添加。');
+  }
 }
 
 const [rawName, rawDiscipline, rawBadge] = process.argv.slice(2);
