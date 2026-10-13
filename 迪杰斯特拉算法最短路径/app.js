@@ -172,7 +172,7 @@ function initializeDijkstraDemo() {
     const fill = svg('circle', { r: 0, class: 'node-fill' }, group);
     const name = svg('text', { y: -53, class: 'node-name' }, group);
     name.textContent = node.id;
-    const value = svg('text', { class: 'distance', y: 1, fill: '#9A9F96' }, group);
+    const value = svg('text', { class: 'distance', y: 1, fill: '#8C9189' }, group);
     value.textContent = '∞';
     const shards = Array.from({ length: 4 }, (_, i) => {
       const clip = svg('clipPath', { id: `shard-clip-${node.id}-${i}`, clipPathUnits: 'userSpaceOnUse' }, defs);
@@ -265,7 +265,7 @@ function initializeDijkstraDemo() {
       } else v.arrows.forEach(arrow => attrs(arrow, { opacity: 0 }));
       const probe = phase.type === 'relax' && phase.probes.find(p => p.edge.id === edge.id);
       const highlight = probe ? bell(local, .80, 1.03, 1.40) : 0;
-      attrs(v.weight, { fill: highlight > .25 ? '#2563EB' : finishing && pathEdges.has(edge.id) ? '#927029' : '#71776F' });
+      attrs(v.weight, { fill: highlight > .25 ? '#2563EB' : finishing && pathEdges.has(edge.id) ? '#8D6D29' : '#6B7066' });
       attrs(v.weightBg, { fill: highlight > .25 ? '#EDF5FF' : '#FAF9F5' });
       attrs(v.plus, { opacity: highlight, y: -21 - highlight * 8 });
       attrs(probeViews[edge.id].group, { opacity: 0 });
@@ -320,7 +320,7 @@ function initializeDijkstraDemo() {
             transform: `translate(${(i % 2 ? 1 : -1) * p * 19},${(i < 2 ? -1 : 1) * p * 16}) rotate(${(i % 2 ? 1 : -1) * p * 12})` });
         });
       } else v.shards.forEach(({ piece }) => attrs(piece, { opacity: 0 }));
-      attrs(v.value, { y: 1 + lift, fill: fillProgress > .55 ? '#FFFFFF' : finite ? '#466A97' : '#9A9F96', opacity: valueOpacity });
+      attrs(v.value, { y: 1 + lift, fill: fillProgress > .55 ? '#FFFFFF' : finite ? '#466A97' : '#8C9189', opacity: valueOpacity });
       attrs(v.check, { opacity: initial ? range(local, .6, .9) : selected ? range(local, .98, 1.2) : settled ? 1 : 0 });
       const flip = probe && probe.improved ? compareProgress(probe, probeIndex) : 0;
       attrs(v.tray, { opacity: state.prev[node.id] ? 1 : 0, transform: `translate(0,56) scale(1,${flip > 0 && flip < 1 ? Math.max(.04, Math.abs(Math.cos(Math.PI * flip))) : 1})` });
@@ -329,7 +329,7 @@ function initializeDijkstraDemo() {
       if (selected) {
         attrs(b.action, { opacity: bell(local, .4, .8, 1.65), transform: `translate(${node.x},${node.y - 100})` });
         setText(b.actionText, '最短锁定');
-        attrs(b.actionText, { fill: '#39856B' });
+        attrs(b.actionText, { fill: '#377F67' });
       }
     });
 
@@ -349,7 +349,7 @@ function initializeDijkstraDemo() {
       const actionOpacity = bell(local, 1.9 + i * .18, 2.35 + i * .18, 3.35 + i * .18);
       attrs(bubble.action, { opacity: actionOpacity, transform: `translate(${Math.min(916, to.x + 72)},${to.y - 126 - 5 * q})` });
       setText(bubble.actionText, p.improved ? '更近！' : '舍弃');
-      attrs(bubble.actionText, { fill: p.improved ? '#39856B' : '#8C9386' });
+      attrs(bubble.actionText, { fill: p.improved ? '#377F67' : '#6B7066' });
       if (!p.improved) {
         const smoke = range(q, .12, .9);
         attrs(bubble.smoke, { opacity: bell(smoke, 0, .25, 1), transform: `translate(${to.x},${to.y - 90})` });
