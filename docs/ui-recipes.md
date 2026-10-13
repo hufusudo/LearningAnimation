@@ -247,3 +247,70 @@ function runThreeStageTransition({
 ```
 
 控制器保存返回值，用 `.pause()` / `.play()` 暂停与恢复，用 `.timeScale()` 调速；切换与复位时 `.kill()` 并重绘。此示例只管理传入的视图转场，模块自己的 RAF、计时器、其他补间仍需控制器分别管理。
+
+---
+
+### 组件 7：起点 → 终点的完成时刻对比（Endpoint Compare）
+
+> **适用场景**：演示有两种方案的完成时刻、代价或结果需要对照，放在标题行右侧。只用于对比类演示（见 [设计原则 §6](../DESIGN_SYSTEM.md)）。
+
+```html
+<div class="compare" aria-label="完成时刻对比">
+  <span class="endpoint"><small>无假脱机</small><strong>62</strong></span>
+  <span class="route"><em>省 17t</em><span class="route-dots" aria-hidden="true">········→</span></span>
+  <span class="endpoint is-target"><small>有假脱机</small><strong>45</strong></span>
+</div>
+```
+
+```css
+.compare { display: flex; align-items: center; gap: 16px; flex-shrink: 0; }
+.endpoint { display: grid; gap: 3px; text-align: center; }
+.endpoint small { font-size: 11px; color: var(--muted); white-space: nowrap; }
+.endpoint strong { font: 500 26px var(--mono); font-variant-numeric: tabular-nums; color: var(--muted); }
+.endpoint.is-target strong { color: var(--green-deep); }
+.route { display: grid; justify-items: center; gap: 2px; }
+.route em { font-style: normal; font-size: 11px; color: var(--gold-deep); white-space: nowrap; }
+.route-dots { color: #AAA998; font: 15px var(--mono); letter-spacing: 3px; }
+```
+
+这两个数字是整段推演的结论，演示过程中不变；会变的"当前时刻"放在舞台左上角。
+
+---
+
+### 组件 8：舞台内的事件浮标（Event Tag）
+
+> **适用场景**：某个时刻发生的关键事件（井满、CPU 释放、全部完成）。浮标只在对应时刻出现，除"关键"类外不常驻。
+
+```js
+// t 为当前时刻；ev = { t: 事件时刻, life: 显示时长（节拍）, persist: 是否持续显示 }
+// 返回 null（不显示）或 { opacity, rise }，rise 为向上漂移的量（坐标单位）
+function tagState(ev, t) {
+  const age = t - ev.t;
+  if (age < 0) return null;
+  if (ev.persist) return { opacity: Math.min(1, age / 0.4), rise: 0 };
+  if (age > ev.life) return null;
+  return {
+    opacity: Math.min(1, age / 0.25) * Math.min(1, (ev.life - age) / 0.7),
+    rise: 6 * (age / ev.life),
+  };
+}
+```
+
+```js
+// 每帧只改 visibility / opacity / transform，不重建元素
+const s = tagState(ev, t);
+group.setAttribute('visibility', s ? 'visible' : 'hidden');
+if (s) {
+  group.setAttribute('opacity', s.opacity.toFixed(3));
+  group.setAttribute('transform', `translate(${x} ${(y - s.rise).toFixed(2)})`);
+}
+```
+
+```css
+.tag-bg { fill: rgba(255, 255, 255, 0.96); stroke-width: 1; }
+.tag-text { font-size: 12px; fill: var(--ink); dominant-baseline: central; }
+.tag.tone-key .tag-bg { stroke: var(--blue); }
+.tag.tone-key .tag-text { fill: var(--blue); font-weight: 600; }
+```
+
+浮标文字的 `text-anchor` 用属性设置，不在 CSS 里重复写（见 [设计原则 §10](../DESIGN_SYSTEM.md)）。宽度按字符估算：中文按字号计，其余按字号的约 0.6 计，再加 20 的内边距。
