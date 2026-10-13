@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="固定流水线演示假脱机：卡片输入机、输入井、用户进程、输出井与打印机同一时钟推进，对照无假脱机时 CPU 的等待。">
+  <title>假脱机技术 SPOOLing · 可视化实验室</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+</head>
+<body>
+  <header class="site-header">
+    <a class="back-link tactile" href="../index.html#os">← 返回计算机操作系统</a>
+    <span class="site-name">可视化实验室</span>
+    <span class="view-label">同一时钟 · 两种方式对照</span>
+  </header>
+
+  <main>
+    <div class="title-row">
+      <div class="title-block">
+        <h1>假脱机技术<span class="english-name">SPOOLing</span></h1>
+        <p class="subtitle">慢速设备与 CPU 之间隔着磁盘上的井。程序把数据写进井就继续计算，设备按自己的速度从井里取用。</p>
+      </div>
+      <div class="compare" aria-label="完成时刻对比">
+        <span class="endpoint"><small>无假脱机</small><strong id="cmp-direct">62</strong><em class="idle">CPU 空等 <b id="cmp-direct-idle">50</b>t</em></span>
+        <span class="route"><em id="cmp-saved">省 17t</em><span class="route-dots" aria-hidden="true">········→</span></span>
+        <span class="endpoint is-target"><small>有假脱机</small><strong id="cmp-spool">45</strong><em class="idle">CPU 空等 <b id="cmp-spool-idle">3</b>t</em></span>
+      </div>
+    </div>
+
+    <section class="stage" id="stage" aria-label="假脱机流水线动画">
+      <div class="stage-heading">
+        <div class="stage-status">
+          <i class="led" aria-hidden="true"></i>
+          <span class="clock"><span class="clock-unit">t</span><output id="clock" for="progress">0</output></span>
+          <span class="phase" id="phase">预读入井</span>
+        </div>
+        <div class="seg-group" role="radiogroup" aria-label="舞台视图">
+          <label class="seg"><input type="radio" name="view" value="spool" checked><span>有假脱机</span></label>
+          <label class="seg"><input type="radio" name="view" value="direct"><span>无假脱机</span></label>
+        </div>
+      </div>
+
+      <div class="sand" id="sand-wrap">
+        <svg id="sand" role="img" aria-labelledby="sand-title sand-desc">
+          <title id="sand-title">假脱机流水线</title>
+          <desc id="sand-desc">卡片输入机经输入井把数据交给用户进程，用户进程把结果写入输出井，输出进程再把输出井中的页送往打印机。无假脱机时 CPU 直接同步等待设备。</desc>
+        </svg>
+      </div>
+
+      <div class="stage-foot">
+        <p class="caption" id="caption" aria-live="polite"></p>
+        <span class="counts" id="counts"></span>
+      </div>
+    </section>
+
+    <section class="playback" aria-label="演示播放控制">
+      <div class="transport">
+        <button id="reset" class="tactile" type="button" title="重新开始（Home）"><span aria-hidden="true">↺</span><span>重播</span></button>
+        <button id="previous" class="tactile" type="button" title="上一步（←）"><span aria-hidden="true">‹</span><span>上一步</span></button>
+        <button id="play" class="beam-cta" type="button" title="播放或暂停（空格）"><span id="play-symbol" aria-hidden="true">▶</span><span id="play-label">播放</span></button>
+        <button id="next" class="tactile" type="button" title="下一步（→）"><span>下一步</span><span aria-hidden="true">›</span></button>
+      </div>
+      <div class="progress-control">
+        <label for="progress" class="sr-only">时刻进度</label>
+        <input id="progress" class="taste-slider" type="range" min="0" max="64" step="0.05" value="0">
+        <div class="progress-meta"><span>t 0</span><span id="progress-caption">t 0 / 64</span></div>
+      </div>
+      <label class="speed-control" for="speed">速度
+        <select id="speed">
+          <option value="0.5">0.5×</option>
+          <option value="1" selected>1×</option>
+          <option value="1.5">1.5×</option>
+          <option value="2">2×</option>
+        </select>
+      </label>
+      <label class="motion-control" for="reduce-motion">
+        <input id="reduce-motion" type="checkbox">
+        <span>减少动效</span>
+      </label>
+    </section>
+
+    <section class="timeline-card" aria-labelledby="timeline-title">
+      <div class="tl-head">
+        <h2 id="timeline-title">同一时钟下的两条时间线</h2>
+        <div class="settings">
+          <div class="seg-group" role="radiogroup" aria-label="打印机速度">
+            <span class="seg-label">打印机</span>
+            <label class="seg"><input type="radio" name="printer" value="4" checked><span>慢</span></label>
+            <label class="seg"><input type="radio" name="printer" value="2"><span>中</span></label>
+            <label class="seg"><input type="radio" name="printer" value="1"><span>快</span></label>
+          </div>
+          <div class="stepper" role="group" aria-label="井容量">
+            <span class="seg-label">井容量</span>
+            <button type="button" class="step" id="cap-minus" aria-label="井容量减一页">−</button>
+            <output id="cap-value" class="step-value">3 页</output>
+            <button type="button" class="step" id="cap-plus" aria-label="井容量加一页">+</button>
+          </div>
+        </div>
+      </div>
+      <div class="legend" aria-label="图例">
+        <span><i class="lg lg-in"></i>读入</span>
+        <span><i class="lg lg-cpu"></i>计算</span>
+        <span><i class="lg lg-out"></i>写出 · 打印</span>
+        <span><i class="lg lg-wait"></i>等待或阻塞</span>
+      </div>
+      <div class="timeline-wrap">
+        <div class="timeline" id="timeline"></div>
+      </div>
+      <p class="foot-note">示意：t 为抽象节拍，省略内存缓冲区与多道切换。</p>
+    </section>
+
+    <p id="dependency-notice" class="dependency-notice" hidden>动画引擎未加载。可用上一步、下一步、进度条或时间线逐拍查看；联网后刷新可恢复播放。</p>
+    <footer class="page-foot"><span id="jobs-summary"></span><span>空格播放 / 暂停 · ← → 逐步 · 点时间线跳转</span></footer>
+    <p class="sr-only" id="accessible-state" aria-live="polite"></p>
+  </main>
+
+  <script src="model.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
