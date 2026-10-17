@@ -1,1556 +1,821 @@
 /**
- * 硬链接与软链接工作机制可视化引擎 (Linux Inode Architecture Visualizer)
- * 遵循 Taste-Skill Light Editorial 浅色纸质美学与 60fps 平滑过渡规范
- * 包含：目录树、Inode 表、磁盘块网格、SVG 矢量箭头动态覆盖、节拍式步进流水线与对比模式
+ * 硬链接与软链接：同一剧本，上下两行各为一套文件系统，并排对照。
+ * 时钟 t 只推进时间；render(t) 每一帧由 t 直接算出两行的槽位、连线、探针、面包屑与浮标，
+ * 不依赖历史动画，因此拖动、倒退、暂停都能精确重绘。文件系统语义全部来自 model.js。
  */
-
-// ============================================================
-// 1. 全局数据结构与初始状态
-// ============================================================
-
-const State = {
-  mode: 'hard', // 'hard' | 'soft' | 'compare'
-  speed: 1.0,   // 0.5, 1.0, 2.0
-  isPlaying: false,
-  isPaused: false,
-  timer: null,
-
-  // 文件系统核心状态
-  files: {
-    orig: {
-      exists: true,
-      name: 'report.txt',
-      inode: 10,
-      path: '/home/user/report.txt'
-    },
-    hard: {
-      exists: false,
-      name: 'report-hard',
-      inode: 10,
-      path: '/home/user/report-hard'
-    },
-    soft: {
-      exists: false,
-      name: 'report-soft',
-      inode: 20,
-      path: '/home/user/report-soft',
-      targetPath: '/home/user/report.txt'
-    }
-  },
-
-  // Inode 表状态
-  inodes: {
-    10: {
-      allocated: true,
-      type: 'regular', // 'regular' | 'symlink'
-      nlink: 1,
-      blockPtr: 5,
-      status: 'active', // 'active' | 'free'
-      fileRef: ['report.txt']
-    },
-    20: {
-      allocated: false,
-      type: 'symlink',
-      nlink: 0,
-      blockPtr: null,
-      status: 'free',
-      fileRef: []
-    }
-  },
-
-  // 磁盘块状态 (0~15)
-  blocks: [],
-
-  // 打开目标选择
-  openTarget: 'report.txt',
-
-  // 删除链接选择 ('hard' | 'soft')
-  deleteLinkTarget: 'hard',
-
-  // 动作节拍执行流水线
-  activePipeline: null,
-  currentBeatIndex: 0,
-  
-  // 剧本演练队列
-  tourQueue: [],
-  tourRunning: false,
-
-  // 对比模式状态
-  comparison: {
-    stage: 'initial' // 'initial' | 'create' | 'open' | 'delete_orig' | 'delete_link'
-  }
-};
-
-// ============================================================
-// 2. 初始化与 DOM 构建
-// ============================================================
-
-document.addEventListener('DOMContentLoaded', () => {
-  initDiskBlocks();
-  renderDiskGrid();
-  renderAllViews();
-  bindEvents();
-  updateSvgArrows();
-
-  addLog('系统就绪', '文件系统初始化完毕。已创建初始普通文件 /home/user/report.txt (inode 10, 数据块 5)。');
-
-  // 自适应重绘连线
-  window.addEventListener('resize', debounce(updateSvgArrows, 80));
-  window.addEventListener('scroll', debounce(updateSvgArrows, 80));
-});
-
-/**
- * 初始化 16 个磁盘块数据
- */
-function initDiskBlocks() {
-  State.blocks = [];
-  for (let i = 0; i < 16; i++) {
-    let type = 'free';
-    let label = `Block #${i}`;
-    let content = '空闲 (Free)';
-    let isReserved = false;
-
-    if (i === 0) {
-      type = 'reserved';
-      label = 'Superblock';
-      content = '超级块 (元信息)';
-      isReserved = true;
-    } else if (i === 1) {
-      type = 'reserved';
-      label = 'Inode Bitmap';
-      content = 'inode 位图区';
-      isReserved = true;
-    } else if (i === 2) {
-      type = 'reserved';
-      label = 'Block Bitmap';
-      content = '块位图区';
-      isReserved = true;
-    } else if (i === 3) {
-      type = 'reserved';
-      label = 'Inode Table';
-      content = 'inode 数组表区';
-      isReserved = true;
-    } else if (i === 4) {
-      type = 'reserved';
-      label = 'Dir Block';
-      content = '/home/user/ 目录块';
-      isReserved = true;
-    } else if (i === 5) {
-      // 初始占用的数据块 5
-      type = 'occupied';
-      label = 'Block #5';
-      content = 'Hello';
-    }
-
-    State.blocks.push({
-      id: i,
-      type: type, // 'free' | 'occupied' | 'symlink' | 'reserved'
-      label: label,
-      content: content,
-      isReserved: isReserved,
-      owner: i === 5 ? 'report.txt' : null
-    });
-  }
-}
-
-/**
- * 渲染磁盘块网格 DOM
- */
-function renderDiskGrid() {
-  const container = document.getElementById('disk-grid-container');
-  if (!container) return;
-  container.innerHTML = '';
-
-  State.blocks.forEach(b => {
-    const card = document.createElement('div');
-    card.id = `disk-block-${b.id}`;
-    card.className = `relative p-2 rounded-xl border transition-all text-xs font-mono cursor-pointer flex flex-col justify-between h-20 ${getBlockClass(b.type)}`;
-    card.onclick = () => inspectBlock(b.id);
-
-    // 块标号与标签
-    const topRow = document.createElement('div');
-    topRow.className = 'flex items-center justify-between';
-    topRow.innerHTML = `
-      <span class="font-bold text-[11px]">${b.id < 10 ? '0' + b.id : b.id}#</span>
-      <span class="text-[9px] px-1 py-0.2 rounded ${getBlockBadgeClass(b.type)}">${getBlockShortType(b.type)}</span>
-    `;
-
-    // 块内容缩略
-    const contentRow = document.createElement('div');
-    contentRow.className = 'my-auto truncate text-[11px] font-bold text-center';
-    contentRow.textContent = b.type === 'free' ? '[空闲]' : b.content;
-
-    // 左侧锚点 (接入 Inode 指针连线)
-    const anchor = document.createElement('div');
-    anchor.id = `anchor-block-${b.id}-left`;
-    anchor.className = 'connect-anchor connect-anchor-left bg-emerald-600';
-    card.appendChild(anchor);
-
-    card.appendChild(topRow);
-    card.appendChild(contentRow);
-    container.appendChild(card);
-  });
-}
-
-function getBlockClass(type) {
-  switch (type) {
-    case 'free':
-      return 'block-free hover:border-emerald-400 bg-[#ECFDF5] border-[#A7F3D0] text-[#065F46]';
-    case 'occupied':
-      return 'block-occupied hover:border-rose-400 bg-[#FEF2F2] border-[#FECACA] text-[#991B1B]';
-    case 'symlink':
-      return 'block-symlink hover:border-amber-400 bg-[#FFF7ED] border-[#FDBA74] text-[#C2410C]';
-    case 'reserved':
-      return 'bg-stone-100 border-stone-200 text-stone-600 hover:border-stone-300';
-    default:
-      return 'bg-stone-50 border-stone-200';
-  }
-}
-
-function getBlockBadgeClass(type) {
-  switch (type) {
-    case 'free':
-      return 'bg-emerald-100 text-emerald-800';
-    case 'occupied':
-      return 'bg-rose-100 text-rose-800 font-bold';
-    case 'symlink':
-      return 'bg-amber-100 text-amber-800 font-bold';
-    case 'reserved':
-      return 'bg-stone-200 text-stone-700';
-    default:
-      return 'bg-stone-100 text-stone-600';
-  }
-}
-
-function getBlockShortType(type) {
-  switch (type) {
-    case 'free': return 'Free';
-    case 'occupied': return '数据块';
-    case 'symlink': return '路径块';
-    case 'reserved': return '系统';
-    default: return '';
-  }
-}
-
-/**
- * 盘块检视详情
- */
-function inspectBlock(blockId) {
-  const b = State.blocks[blockId];
-  if (!b) return;
-
-  const idEl = document.getElementById('inspect-block-id');
-  const typeEl = document.getElementById('inspect-block-type');
-  const contentEl = document.getElementById('inspect-block-content');
-  const descEl = document.getElementById('inspect-block-desc');
-  const sizeEl = document.getElementById('inspect-block-size');
-
-  idEl.textContent = `Block #${b.id}`;
-  
-  if (b.type === 'free') {
-    typeEl.textContent = '空闲盘块 (Free Block)';
-    typeEl.className = 'px-1.5 py-0.2 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 font-bold text-[10px]';
-    contentEl.textContent = '0x00 (全零未分配)';
-    descEl.textContent = '外存未分配空间，随时可供新文件或新数据写入';
-    sizeEl.textContent = '容量: 4 KB';
-  } else if (b.type === 'occupied') {
-    typeEl.textContent = '普通文件数据块 (Payload)';
-    typeEl.className = 'px-1.5 py-0.2 rounded bg-rose-50 text-rose-700 border border-rose-200 font-bold text-[10px]';
-    contentEl.textContent = `"${b.content}"`;
-    descEl.textContent = '存放用户写入文件的真实二进制/文本内容';
-    sizeEl.textContent = `占用: ${b.content.length} 字节`;
-  } else if (b.type === 'symlink') {
-    typeEl.textContent = '符号链接路径数据块 (Symlink Target)';
-    typeEl.className = 'px-1.5 py-0.2 rounded bg-amber-50 text-amber-800 border border-amber-300 font-bold text-[10px]';
-    contentEl.textContent = `"${b.content}"`;
-    descEl.textContent = '保存目标文件的路径文本，供内核路径解析器跳转读取';
-    sizeEl.textContent = `占用: ${b.content.length} 字节`;
-  } else {
-    typeEl.textContent = '文件系统保留管理块 (Metadata)';
-    typeEl.className = 'px-1.5 py-0.2 rounded bg-stone-100 text-stone-700 border border-stone-300 font-bold text-[10px]';
-    contentEl.textContent = b.content;
-    descEl.textContent = 'Linux Ext4/VFS 系统元数据存储区';
-    sizeEl.textContent = '固定开销';
-  }
-
-  // 触发卡片呼吸动效
-  gsap.fromTo('#block-inspector', { scale: 0.98 }, { scale: 1, duration: 0.2, ease: 'power2.out' });
-}
-
-// ============================================================
-// 3. 视图渲染与状态更新
-// ============================================================
-
-function renderAllViews() {
-  renderDirectoryTree();
-  renderInodeTable();
-  renderDiskGrid();
-  updateButtonStates();
-  setTimeout(updateSvgArrows, 50);
-}
-
-/**
- * 渲染左侧目录树
- */
-function renderDirectoryTree() {
-  const txtEntry = document.getElementById('dentry-report-txt');
-  const hardEntry = document.getElementById('dentry-report-hard');
-  const softEntry = document.getElementById('dentry-report-soft');
-
-  if (State.files.orig.exists) {
-    txtEntry.classList.remove('hidden');
-  } else {
-    txtEntry.classList.add('hidden');
-  }
-
-  if (State.files.hard.exists) {
-    hardEntry.classList.remove('hidden');
-  } else {
-    hardEntry.classList.add('hidden');
-  }
-
-  if (State.files.soft.exists) {
-    softEntry.classList.remove('hidden');
-  } else {
-    softEntry.classList.add('hidden');
-  }
-}
-
-/**
- * 渲染中间 Inode 表
- */
-function renderInodeTable() {
-  // Inode 10
-  const row10 = document.getElementById('inode-row-10');
-  const nlink10 = document.getElementById('inode-10-nlink');
-  const ptr10 = document.getElementById('inode-10-ptr');
-  const status10 = document.getElementById('inode-10-status-badge');
-
-  if (State.inodes[10].allocated) {
-    row10.classList.remove('opacity-40');
-    status10.textContent = '活跃 (Active)';
-    status10.className = 'text-[10px] px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-mono font-bold';
-    ptr10.textContent = 'Block #5';
-  } else {
-    row10.classList.add('opacity-40');
-    status10.textContent = '已释放 (Free)';
-    status10.className = 'text-[10px] px-2 py-0.5 rounded-full bg-stone-200 text-stone-600 font-mono font-bold';
-    ptr10.textContent = 'None (空)';
-  }
-  animateDigit('inode-10-nlink', State.inodes[10].nlink);
-
-  // Inode 20
-  const row20 = document.getElementById('inode-row-20');
-  const nlink20 = document.getElementById('inode-20-nlink');
-  const ptr20 = document.getElementById('inode-20-ptr');
-  const status20 = document.getElementById('inode-20-status-badge');
-
-  if (State.inodes[20].allocated) {
-    row20.classList.remove('hidden');
-    row20.classList.remove('opacity-40');
-    status20.textContent = '独立分配 (Active)';
-    status20.className = 'text-[10px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 font-mono font-bold';
-    ptr20.textContent = 'Block #6';
-    animateDigit('inode-20-nlink', State.inodes[20].nlink);
-  } else {
-    if (State.files.soft.exists) {
-      row20.classList.remove('hidden');
-      row20.classList.add('opacity-40');
-      status20.textContent = '已释放 (Free)';
-      status20.className = 'text-[10px] px-2 py-0.5 rounded-full bg-stone-200 text-stone-600 font-mono font-bold';
-      ptr20.textContent = 'None (空)';
-      animateDigit('inode-20-nlink', 0);
-    } else {
-      row20.classList.add('hidden');
-    }
-  }
-}
-
-/**
- * 链接计数平滑翻滚/缩放数字动效
- */
-function animateDigit(elemId, newValue) {
-  const el = document.getElementById(elemId);
-  if (!el) return;
-  const currentVal = parseInt(el.textContent, 10);
-  if (currentVal === newValue) return;
-
-  gsap.fromTo(el,
-    { scale: 1.4, color: '#2563EB', y: -2 },
-    { scale: 1, color: '#1C1917', y: 0, duration: 0.35 / State.speed, ease: 'back.out(2)', onStart: () => {
-      el.textContent = newValue;
-    }}
-  );
-}
-
-/**
- * 按钮可用性控制
- */
-function updateButtonStates() {
-  const btnCreateOrig = document.getElementById('btn-create-file');
-  const btnCreateHard = document.getElementById('btn-create-hard');
-  const btnCreateSoft = document.getElementById('btn-create-soft');
-  const btnDeleteOrig = document.getElementById('btn-delete-orig');
-  const btnDeleteLink = document.getElementById('btn-delete-link');
-  const deleteBadge = document.getElementById('delete-link-badge');
-
-  if (btnCreateOrig) btnCreateOrig.disabled = State.files.orig.exists;
-  if (btnCreateHard) btnCreateHard.disabled = State.files.hard.exists || !State.files.orig.exists;
-  if (btnCreateSoft) btnCreateSoft.disabled = State.files.soft.exists;
-  if (btnDeleteOrig) btnDeleteOrig.disabled = !State.files.orig.exists;
-
-  // 删除链接按钮提示
-  const hasHard = State.files.hard.exists;
-  const hasSoft = State.files.soft.exists;
-
-  if (btnDeleteLink) {
-    if (State.mode === 'hard') {
-      btnDeleteLink.disabled = !hasHard;
-      deleteBadge.textContent = '硬链接';
-    } else if (State.mode === 'soft') {
-      btnDeleteLink.disabled = !hasSoft;
-      deleteBadge.textContent = '软链接';
-    } else {
-      btnDeleteLink.disabled = !hasHard && !hasSoft;
-      deleteBadge.textContent = hasHard ? '硬链接' : (hasSoft ? '软链接' : '链接');
-    }
-  }
-}
-
-// ============================================================
-// 4. SVG 动态箭头绘制与更新 (核心视觉覆盖层)
-// ============================================================
-
-/**
- * 实时刷新所有当前激活的 SVG 箭头
- */
-function updateSvgArrows(immediate = true) {
-  const svg = document.getElementById('connection-svg-layer');
-  if (!svg) return;
-  
-  // 清理现有箭头
-  const existingArrows = svg.querySelectorAll('.dynamic-arrow-group');
-  existingArrows.forEach(el => el.remove());
-
-  if (State.mode === 'compare') {
-    return; // 对比模式有独立的内部沙盒连线
-  }
-
-  // 1. 目录项 report.txt -> inode 10 (蓝色实线)
-  if (State.files.orig.exists && State.inodes[10].allocated) {
-    drawSvgCurve(
-      'anchor-dentry-txt',
-      'anchor-inode-10-left',
-      '#2563EB',
-      'arrow-blue',
-      false,
-      0.15,
-      immediate
-    );
-  }
-
-  // 2. 目录项 report-hard -> inode 10 (蓝色实线)
-  if (State.files.hard.exists && State.inodes[10].allocated) {
-    drawSvgCurve(
-      'anchor-dentry-hard',
-      'anchor-inode-10-left',
-      '#2563EB',
-      'arrow-blue',
-      false,
-      -0.18,
-      immediate
-    );
-  }
-
-  // 3. inode 10 -> 数据块 5 (绿色实线)
-  if (State.inodes[10].allocated && State.inodes[10].blockPtr === 5) {
-    drawSvgCurve(
-      'anchor-inode-10-right',
-      'anchor-block-5-left',
-      '#059669',
-      'arrow-green',
-      false,
-      0.08,
-      immediate
-    );
-  }
-
-  // 4. 目录项 report-soft -> inode 20 (蓝色/琥珀实线)
-  if (State.files.soft.exists && State.inodes[20].allocated) {
-    drawSvgCurve(
-      'anchor-dentry-soft',
-      'anchor-inode-20-left',
-      '#2563EB',
-      'arrow-blue',
-      false,
-      0.15,
-      immediate
-    );
-  }
-
-  // 5. inode 20 -> 数据块 6 (绿色实线)
-  if (State.inodes[20].allocated && State.inodes[20].blockPtr === 6) {
-    drawSvgCurve(
-      'anchor-inode-20-right',
-      'anchor-block-6-left',
-      '#059669',
-      'arrow-green',
-      false,
-      0.12,
-      immediate
-    );
-  }
-}
-
-/**
- * 绘制两锚点之间的平滑三次贝塞尔贝塞尔曲线
- */
-function drawSvgCurve(anchorStartId, anchorEndId, color = '#2563EB', markerId = 'arrow-blue', dashed = false, curvature = 0.15, immediate = false, customClass = '') {
-  const el1 = document.getElementById(anchorStartId);
-  const el2 = document.getElementById(anchorEndId);
-  if (!el1 || !el2) return null;
-
-  // 确保元素可见
-  if (el1.offsetParent === null || el2.offsetParent === null) return null;
-
-  const r1 = el1.getBoundingClientRect();
-  const r2 = el2.getBoundingClientRect();
-
-  const svg = document.getElementById('connection-svg-layer');
-  if (!svg) return null;
-  const svgRect = svg.getBoundingClientRect();
-
-  const x1 = r1.left + r1.width / 2 - svgRect.left;
-  const y1 = r1.top + r1.height / 2 - svgRect.top;
-  const x2 = r2.left + r2.width / 2 - svgRect.left;
-  const y2 = r2.top + r2.height / 2 - svgRect.top;
-
-  const dx = x2 - x1;
-  const dy = y2 - y1;
-
-  // 控制点坐标 (横向平滑引导)
-  const cx1 = x1 + dx * 0.5;
-  const cy1 = y1 + dy * curvature;
-  const cx2 = x1 + dx * 0.5;
-  const cy2 = y2 - dy * curvature;
-
-  const group = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-  group.setAttribute('class', `dynamic-arrow-group ${customClass}`);
-
-  const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-  path.setAttribute('d', `M ${x1} ${y1} C ${cx1} ${cy1} ${cx2} ${cy2} ${x2} ${y2}`);
-  path.setAttribute('class', `flow-arrow-path ${dashed ? 'flow-arrow-dash' : ''}`);
-  path.setAttribute('stroke', color);
-  path.setAttribute('marker-end', `url(#${markerId})`);
-
-  group.appendChild(path);
-  svg.appendChild(group);
-
-  if (!immediate) {
-    const len = path.getTotalLength() || 150;
-    path.style.strokeDasharray = `${len} ${len}`;
-    path.style.strokeDashoffset = len;
-    gsap.to(path, {
-      strokeDashoffset: 0,
-      duration: 0.45 / State.speed,
-      ease: 'power2.out'
-    });
-  }
-
-  return group;
-}
-
-// ============================================================
-// 5. 核心动作节拍执行流水线 (Beats Architecture)
-// ============================================================
-
-/**
- * 切换模式 (硬链接 / 软链接 / 对比模式)
- */
-function switchMode(modeKey) {
-  if (State.isPlaying) stopAutoPlay();
-  State.mode = modeKey;
-
-  ['hard', 'soft', 'compare'].forEach(m => {
-    const btn = document.getElementById(`tab-${m}`);
-    if (btn) {
-      if (m === modeKey) btn.classList.add('active');
-      else btn.classList.remove('active');
-    }
-  });
-
-  const singleView = document.getElementById('single-mode-view');
-  const compView = document.getElementById('comparison-mode-view');
-
-  if (modeKey === 'compare') {
-    singleView.classList.add('hidden');
-    compView.classList.remove('hidden');
-    initComparisonView();
-  } else {
-    singleView.classList.remove('hidden');
-    compView.classList.add('hidden');
-    renderAllViews();
-  }
-
-  addLog('模式切换', `已进入：${modeKey === 'hard' ? '硬链接模式 (Hard Link)' : (modeKey === 'soft' ? '软链接模式 (Symbolic Link)' : '双侧并排对比模式')}`);
-}
-
-/**
- * 设置播放速率
- */
-function setSpeed(spd) {
-  State.speed = spd;
-  [0.5, 1.0, 2.0].forEach(s => {
-    const id = `spd-${s.toString().replace('.', '')}`;
-    const btn = document.getElementById(id);
-    if (!btn) return;
-    if (s === spd) {
-      btn.className = 'px-2 py-0.5 rounded bg-white font-bold text-stone-900 shadow-xs';
-    } else {
-      btn.className = 'px-2 py-0.5 rounded text-stone-600 hover:text-stone-900';
-    }
-  });
-  addLog('速率调节', `当前动画播放速率已设为 ${spd}x`);
-}
-
-/**
- * 节拍状态重置与高亮
- */
-function setBeatProgress(beatNum) {
-  for (let i = 1; i <= 5; i++) {
-    const dot = document.getElementById(`beat-dot-${i}`);
-    const box = document.getElementById(`beat-${i}`);
-    if (!dot || !box) continue;
-
-    if (i < beatNum) {
-      dot.className = 'step-dot step-dot-done';
-      box.className = 'flex items-center gap-1 text-stone-500 font-bold';
-    } else if (i === beatNum) {
-      dot.className = 'step-dot step-dot-active';
-      box.className = 'flex items-center gap-1 text-stone-900 font-bold';
-    } else {
-      dot.className = 'step-dot step-dot-pending';
-      box.className = 'flex items-center gap-1 text-stone-400';
-    }
-  }
-}
-
-/**
- * 清除所有临时高亮动效
- */
-function clearAllHighlights() {
-  document.querySelectorAll('.pulse-target-blue, .pulse-target-green, .pulse-target-orange, .broken-link-alert').forEach(el => {
-    el.classList.remove('pulse-target-blue', 'pulse-target-green', 'pulse-target-orange', 'broken-link-alert');
-  });
-  // 移除临时虚线/解析箭头
-  document.querySelectorAll('.temp-arrow-element').forEach(el => el.remove());
-}
-
-/**
- * 执行指定原子操作
- */
-function handleAction(actionType) {
-  if (State.isPlaying) stopAutoPlay();
-  clearAllHighlights();
-
-  switch (actionType) {
-    case 'create_file':
-      setupCreateFilePipeline();
-      break;
-    case 'create_hard':
-      setupCreateHardLinkPipeline();
-      break;
-    case 'create_soft':
-      setupCreateSoftLinkPipeline();
-      break;
-    case 'open_file':
-      setupOpenFilePipeline(State.openTarget);
-      break;
-    case 'delete_original':
-      setupDeleteOriginalPipeline();
-      break;
-    case 'delete_link':
-      if (State.mode === 'soft' || (State.files.soft.exists && !State.files.hard.exists)) {
-        setupDeleteSoftLinkPipeline();
-      } else {
-        setupDeleteHardLinkPipeline();
-      }
-      break;
-    default:
-      break;
-  }
-
-  // 立即执行第一步
-  stepForward();
-}
-
-/**
- * 单步前进 (Step)
- */
-function stepForward() {
-  if (!State.activePipeline) return;
-
-  if (State.currentBeatIndex < State.activePipeline.beats.length) {
-    const beatFn = State.activePipeline.beats[State.currentBeatIndex];
-    State.currentBeatIndex++;
-    setBeatProgress(State.currentBeatIndex);
-    beatFn();
-  } else {
-    // 流水线已全部完成
-    clearAllHighlights();
-    setBeatProgress(5);
-    State.activePipeline = null;
-    State.currentBeatIndex = 0;
-
-    // 若处于全流程剧本演练中，驱动下一个动作
-    if (State.tourRunning && State.tourQueue.length > 0) {
-      setTimeout(() => {
-        executeNextTourStep();
-      }, 700 / State.speed);
-    } else {
-      stopAutoPlay();
-    }
-  }
-}
-
-/**
- * 自动播放与暂停切换
- */
-function togglePlayPause() {
-  if (State.isPlaying) {
-    stopAutoPlay();
-  } else {
-    startAutoPlay();
-  }
-}
-
-function startAutoPlay() {
-  State.isPlaying = true;
-  document.getElementById('play-icon').textContent = '⏸';
-  document.getElementById('play-label').textContent = '暂停播放';
-
-  // 若当前无活跃动作，默认根据模式提供推荐动作
-  if (!State.activePipeline) {
-    if (!State.files.orig.exists) {
-      setupCreateFilePipeline();
-    } else if (State.mode === 'hard' && !State.files.hard.exists) {
-      setupCreateHardLinkPipeline();
-    } else if (State.mode === 'soft' && !State.files.soft.exists) {
-      setupCreateSoftLinkPipeline();
-    } else {
-      setupOpenFilePipeline(State.openTarget);
-    }
-  }
-
-  scheduleNextAutoBeat();
-}
-
-function stopAutoPlay() {
-  State.isPlaying = false;
-  State.tourRunning = false;
-  if (State.timer) {
-    clearTimeout(State.timer);
-    State.timer = null;
-  }
-  const icon = document.getElementById('play-icon');
-  const label = document.getElementById('play-label');
-  if (icon) icon.textContent = '▶';
-  if (label) label.textContent = '自动播放';
-}
-
-function scheduleNextAutoBeat() {
-  if (!State.isPlaying) return;
-  const interval = (900 / State.speed);
-  State.timer = setTimeout(() => {
-    if (!State.isPlaying) return;
-    stepForward();
-    if (State.activePipeline || State.tourQueue.length > 0) {
-      scheduleNextAutoBeat();
-    } else {
-      stopAutoPlay();
-    }
-  }, interval);
-}
-
-// ============================================================
-// 6. 各操作专属流水线规划 (严格遵循题意 5 大节拍)
-// ============================================================
-
-/**
- * 流水线 0：创建原文件 report.txt
- */
-function setupCreateFilePipeline() {
-  State.currentBeatIndex = 0;
-  State.activePipeline = {
-    name: '创建原文件 report.txt',
-    beats: [
-      // 1. 定位
-      () => {
-        addLog('节拍 1: 定位目录项', '检索 /home/user/ 目录，检查文件名 report.txt 是否已存在。');
-        document.getElementById('dir-node-user').classList.add('pulse-target-blue');
-      },
-      // 2. 查找/创建 Inode
-      () => {
-        clearAllHighlights();
-        addLog('节拍 2: 分配 Inode', '分配全新 Inode 10，标记类型为「普通文件」，数据块直接指针指向 Block #5。');
-        State.inodes[10].allocated = true;
-        State.inodes[10].nlink = 1;
-        State.inodes[10].blockPtr = 5;
-        renderInodeTable();
-        document.getElementById('inode-row-10').classList.add('pulse-target-green');
-      },
-      // 3. 状态变化 (占用盘块 5)
-      () => {
-        clearAllHighlights();
-        addLog('节拍 3: 数据块分配', '从外存位图中分配空闲块 Block #5，写入内容 "Hello"，状态标记为已占用。');
-        State.blocks[5].type = 'occupied';
-        State.blocks[5].content = 'Hello';
-        renderDiskGrid();
-        document.getElementById('disk-block-5').classList.add('pulse-target-green');
-      },
-      // 4. 更新连线
-      () => {
-        clearAllHighlights();
-        addLog('节拍 4: 构建映射连线', '在目录中新增 report.txt -> inode 10 映射，绘制蓝色实线与绿色实线。');
-        State.files.orig.exists = true;
-        renderDirectoryTree();
-        updateSvgArrows(false);
-      },
-      // 5. 写入日志
-      () => {
-        addLog('完成创建', '原文件 report.txt 创建成功！inode 10 链接计数 i_nlink = 1，数据块 5 内容为 "Hello"。');
-        updateButtonStates();
-      }
-    ]
+(function () {
+  'use strict';
+
+  const M = window.LinkModel;
+  const TICK = 0.25;                        // 1t 在 1× 速度下为 0.25 s
+  const OP_LEN = 20;                        // 每个操作占 20t，约 5 秒
+  const T = OP_LEN * 5;                     // 全程 100t
+  const BOUNDS = [0, 20, 40, 60, 80, 100];  // 上一步／下一步停靠的操作边界
+  const COMMIT = 0.45;                      // 计数与数值在操作进行到此处切换
+  const LIFE = 8;                           // 普通浮标的显示时长（t）
+  const EPS = 1e-6;
+  const NS = 'http://www.w3.org/2000/svg';
+  const STEP_SEC = 0.9;                     // 减少动效时，每个操作边界停留的秒数（1× 速度）
+  const LINK_DELAY = 300;                   // 地址栏写回的防抖时间（毫秒）
+  const motionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
+
+  const WORLDS = ['hard', 'soft'];
+  const ROW_Y = { hard: 0, soft: 200 };
+  const ROW_TITLE = { hard: '硬链接', soft: '软链接' };
+  const LINK_NAME = { hard: 'report-hard', soft: 'report-soft' };
+  const KEYS = ['d1', 'd2', 'i10', 'i20', 'b5', 'b6'];
+  const SLOT_H = 60;
+  const SLOT = {
+    d1: { x: 210, y: 46, w: 230 },
+    d2: { x: 210, y: 118, w: 230 },
+    i10: { x: 500, y: 46, w: 220 },
+    i20: { x: 500, y: 118, w: 220 },
+    b5: { x: 800, y: 46, w: 260 },
+    b6: { x: 800, y: 118, w: 260 }
   };
-}
-
-/**
- * 流水线 1：创建硬链接 report-hard
- */
-function setupCreateHardLinkPipeline() {
-  State.currentBeatIndex = 0;
-  State.activePipeline = {
-    name: '创建硬链接 report-hard',
-    beats: [
-      // 1. 定位
-      () => {
-        addLog('节拍 1: 定位原文件', '系统调用 link()：根据原路径 /home/user/report.txt 检索到目标对应 Inode 10。');
-        document.getElementById('dentry-report-txt').classList.add('pulse-target-blue');
-      },
-      // 2. 查找/创建 (不新建 Inode！)
-      () => {
-        clearAllHighlights();
-        addLog('节拍 2: 共享 Inode 核心特性', '重要机制：硬链接【绝不新建 Inode】！直接复用现有的 Inode 10。');
-        document.getElementById('inode-row-10').classList.add('pulse-target-blue');
-      },
-      // 3. 状态变化：计数 1 -> 2
-      () => {
-        clearAllHighlights();
-        State.inodes[10].nlink = 2;
-        State.inodes[10].fileRef.push('report-hard');
-        renderInodeTable();
-        addLog('节拍 3: 计数递增', 'Inode 10 物理引用计数递增：i_nlink 由 1 &rarr; 2。');
-      },
-      // 4. 画箭头
-      () => {
-        State.files.hard.exists = true;
-        renderDirectoryTree();
-        updateSvgArrows(false);
-        addLog('节拍 4: 画出新映射箭头', '在目录表中追加条目 report-hard，直接指向 Inode 10，绘制蓝色实线箭头。');
-      },
-      // 5. 总结
-      () => {
-        addLog('完成创建硬链接', '硬链接 report-hard 创建成功！磁盘不消耗任何新 inode 或新数据块。');
-        updateButtonStates();
-      }
-    ]
+  const FREE_TEXT = {
+    d1: '（空）',
+    d2: '（空）',
+    i10: 'inode 10 · 空闲',
+    i20: 'inode 20 · 空闲',
+    b5: '盘块 5 · 空闲',
+    b6: '盘块 6 · 空闲'
   };
-}
-
-/**
- * 流水线 2：打开文件/链接 (支持 report.txt / report-hard / report-soft)
- */
-function setupOpenFilePipeline(targetKey) {
-  State.currentBeatIndex = 0;
-
-  if (targetKey === 'report-soft') {
-    // 软链接打开 (逐段解析)
-    setupOpenSoftLinkPipeline();
-    return;
-  }
-
-  const isHard = (targetKey === 'report-hard');
-  const dentryId = isHard ? 'dentry-report-hard' : 'dentry-report-txt';
-  const targetLabel = isHard ? '硬链接 report-hard' : '原文件 report.txt';
-
-  State.activePipeline = {
-    name: `打开 ${targetLabel}`,
-    beats: [
-      // 1. 定位目录项
-      () => {
-        addLog('节拍 1: 定位目录项', `在目录 /home/user/ 中检索条目 ${targetLabel}。`);
-        const el = document.getElementById(dentryId);
-        if (el) el.classList.add('pulse-target-blue');
-      },
-      // 2. 查 Inode
-      () => {
-        clearAllHighlights();
-        addLog('节拍 2: 寻址 Inode', `沿蓝色实线直达 Inode 10，检查属性：普通文件 (-)，i_nlink = ${State.inodes[10].nlink}。`);
-        document.getElementById('inode-row-10').classList.add('pulse-target-blue');
-      },
-      // 3. 寻址数据块
-      () => {
-        clearAllHighlights();
-        addLog('节拍 3: 磁盘指针寻址', '读取 Inode 10 直接指针，直达 Block #5。');
-        document.getElementById('disk-block-5').classList.add('pulse-target-green');
-      },
-      // 4. 数据读取
-      () => {
-        clearAllHighlights();
-        inspectBlock(5);
-        addLog('节拍 4: I/O 数据读取', '磁盘控制器读取 Block #5 扇区数据："Hello" 并加载至内核页缓存。');
-      },
-      // 5. 成功打开
-      () => {
-        addLog('打开成功', `【${targetLabel}】打开成功！直接读取到内容 "Hello"。一步直达，无多级重定向损耗。`);
-      }
-    ]
+  const CARD_TEXT = {
+    i10: 'inode 10 · 普通文件',
+    i20: 'inode 20 · 符号链接',
+    b5: '盘块 5 · 数据',
+    b6: '盘块 6 · 路径'
   };
-}
-
-/**
- * 流水线 3：删除原文件 report.txt (硬链接存活演练)
- */
-function setupDeleteOriginalPipeline() {
-  State.currentBeatIndex = 0;
-  State.activePipeline = {
-    name: '删除原文件 report.txt',
-    beats: [
-      // 1. 定位
-      () => {
-        addLog('节拍 1: 定位待删除条目', '系统调用 unlink("report.txt")：在目录树中找到待删除项 report.txt。');
-        document.getElementById('dentry-report-txt').classList.add('pulse-target-blue');
-      },
-      // 2. 擦除目录项与箭头
-      () => {
-        clearAllHighlights();
-        State.files.orig.exists = false;
-        renderDirectoryTree();
-        updateSvgArrows(false);
-        addLog('节拍 2: 注销目录项', '从目录表中擦除 report.txt 映射条目，并移除其指向 Inode 10 的蓝色箭头。');
-      },
-      // 3. 链接计数递减
-      () => {
-        State.inodes[10].nlink = Math.max(0, State.inodes[10].nlink - 1);
-        renderInodeTable();
-        addLog('节拍 3: 计数递减', `Inode 10 链接计数递减为：i_nlink = ${State.inodes[10].nlink}。`);
-      },
-      // 4. 内核回收裁决
-      () => {
-        if (State.inodes[10].nlink > 0) {
-          addLog('节拍 4: 判断 i_nlink > 0', '关键机制：因为 i_nlink = 1 > 0，Inode 10 与数据块 5 完全保留，不释放！');
-          document.getElementById('inode-row-10').classList.add('pulse-target-green');
-        } else {
-          // 若无硬链接，直接释放
-          State.inodes[10].allocated = false;
-          State.blocks[5].type = 'free';
-          State.blocks[5].content = '空闲 (Free)';
-          renderInodeTable();
-          renderDiskGrid();
-          updateSvgArrows(false);
-          addLog('节拍 4: 计数归零触发释放', 'i_nlink = 0 且无打开句柄，内核正式释放 Inode 10 及数据块 5。');
-        }
-      },
-      // 5. 总结验证
-      () => {
-        clearAllHighlights();
-        if (State.files.hard.exists) {
-          addLog('验证硬链接可用性', '原文件 report.txt 已彻底被删，但 report-hard 依旧健在且能正常读写！');
-        } else {
-          addLog('删除完成', '文件及其底层 Inode 已完全销毁。');
-        }
-        updateButtonStates();
-      }
-    ]
+  const CARD_BODY = { b5: M.CONTENT, b6: M.TARGET };
+  const TONE = { b5: 'is-data', b6: 'is-path' };
+  // 行内锚点（行坐标）：探针与路径解析的落点
+  const ANCHOR = {
+    d1r: [440, 76],
+    d2r: [440, 148],
+    i1l: [500, 76],
+    i2l: [500, 148],
+    b1l: [800, 76],
+    b2l: [800, 148],
+    hdr: [372, 30]
   };
-}
+  // 浮标的锚点：只决定横向位置，同一锚点的并发浮标用 dx 错开
+  const TAG_X = { i1: 500, i2: 500, b1: 800, b2: 800, hdr: 210 };
+  const DEFAULT_APPEAR = [0.1, 0.35];
+  const DEFAULT_VANISH = [0.05, 0.3];
 
-/**
- * 流水线 4：删除最后一个硬链接 report-hard
- */
-function setupDeleteHardLinkPipeline() {
-  State.currentBeatIndex = 0;
-  State.activePipeline = {
-    name: '删除硬链接 report-hard',
-    beats: [
-      // 1. 定位
-      () => {
-        addLog('节拍 1: 定位硬链接条目', '系统调用 unlink("report-hard")：找到目录项 report-hard。');
-        document.getElementById('dentry-report-hard').classList.add('pulse-target-blue');
-      },
-      // 2. 擦除目录项
-      () => {
-        clearAllHighlights();
-        State.files.hard.exists = false;
-        renderDirectoryTree();
-        updateSvgArrows(false);
-        addLog('节拍 2: 移除硬链接目录项', '擦除 report-hard 映射条目，并消除其箭头。');
-      },
-      // 3. 计数归零
-      () => {
-        State.inodes[10].nlink = Math.max(0, State.inodes[10].nlink - 1);
-        renderInodeTable();
-        addLog('节拍 3: 计数递减至 0', `Inode 10 链接计数递减：i_nlink = ${State.inodes[10].nlink}。`);
-      },
-      // 4. 释放 Inode 与数据块
-      () => {
-        State.inodes[10].allocated = false;
-        State.inodes[10].blockPtr = null;
-        State.blocks[5].type = 'free';
-        State.blocks[5].content = '空闲 (Free)';
-        renderInodeTable();
-        renderDiskGrid();
-        updateSvgArrows(false);
-        addLog('节拍 4: 垃圾回收', 'i_nlink 归零！内核回收 Inode 10，并将 Block #5 标记回绿色空闲状态！');
-      },
-      // 5. 总结
-      () => {
-        addLog('彻底回收完毕', '最后一个硬链接删除完毕，原文件数据块与 Inode 已全部归还系统。');
-        updateButtonStates();
-      }
-    ]
-  };
-}
-
-/**
- * 流水线 5：创建软链接 report-soft
- */
-function setupCreateSoftLinkPipeline() {
-  State.currentBeatIndex = 0;
-  State.activePipeline = {
-    name: '创建软链接 report-soft',
-    beats: [
-      // 1. 定位
-      () => {
-        addLog('节拍 1: 发起 symlink 系统调用', '调用 symlink("/home/user/report.txt", "report-soft")。');
-        document.getElementById('dir-node-user').classList.add('pulse-target-orange');
-      },
-      // 2. 创建独立 Inode 20
-      () => {
-        clearAllHighlights();
-        State.inodes[20].allocated = true;
-        State.inodes[20].type = 'symlink';
-        State.inodes[20].nlink = 1;
-        State.inodes[20].blockPtr = 6;
-        renderInodeTable();
-        document.getElementById('inode-row-20').classList.add('pulse-target-orange');
-        addLog('节拍 2: 独立分配 Inode 20', '软链接【分配全新 Inode 20】，文件类型设为「符号链接 (l)」，独立拥有元数据！');
-      },
-      // 3. 分配数据块 6 存储路径字符串
-      () => {
-        clearAllHighlights();
-        State.blocks[6].type = 'symlink';
-        State.blocks[6].content = '/home/user/report.txt';
-        renderDiskGrid();
-        document.getElementById('disk-block-6').classList.add('pulse-target-orange');
-        inspectBlock(6);
-        addLog('节拍 3: 分配路径数据块', '分配全新磁盘块 Block #6，将目标绝对路径字符串 "/home/user/report.txt" 存入块中。');
-      },
-      // 4. 更新连线
-      () => {
-        clearAllHighlights();
-        State.files.soft.exists = true;
-        renderDirectoryTree();
-        updateSvgArrows(false);
-        addLog('节拍 4: 建立多级映射', '在目录中添加 report-soft -> inode 20 映射，并建立 inode 20 -> Block #6 指针。');
-      },
-      // 5. 总结
-      () => {
-        addLog('完成软链接创建', '软链接 report-soft 创建完毕！消耗独立 Inode 20 和独立数据块 6。');
-        updateButtonStates();
-      }
-    ]
-  };
-}
-
-/**
- * 流水线 6：打开软链接 report-soft (逐段路径解析与悬空检测)
- */
-function setupOpenSoftLinkPipeline() {
-  State.currentBeatIndex = 0;
-  const isTargetAlive = State.files.orig.exists;
-
-  State.activePipeline = {
-    name: '打开软链接 report-soft',
-    beats: [
-      // 1. 定位软链接并读取 Inode 20
-      () => {
-        addLog('节拍 1: 定位符号链接', '在目录中检索 report-soft，沿蓝色线直达其专属 Inode 20。');
-        const el = document.getElementById('dentry-report-soft');
-        if (el) el.classList.add('pulse-target-blue');
-        document.getElementById('inode-row-20').classList.add('pulse-target-orange');
-      },
-      // 2. 读取数据块 6 获取路径字符串
-      () => {
-        clearAllHighlights();
-        addLog('节拍 2: 提取路径文本', '发现文件类型为符号链接，读取 Block #6 获取路径文本："/home/user/report.txt"。');
-        document.getElementById('disk-block-6').classList.add('pulse-target-orange');
-        inspectBlock(6);
-      },
-      // 3. 逐段高亮路径解析 (Path Resolution)
-      () => {
-        clearAllHighlights();
-        addLog('节拍 3: 启动逐段路径解析', '内核路径解析器从根目录 / 递归遍历：/ &rarr; home/ &rarr; user/ ...');
-        highlightPathResolutionStep();
-      },
-      // 4. 判定目标是否存在
-      () => {
-        clearAllHighlights();
-        if (isTargetAlive) {
-          // 目标存在：成功命中
-          addLog('节拍 4: 成功匹配目标条目', '在 user/ 目录下成功匹配到 report.txt 目录项，重定向至 Inode 10！');
-          document.getElementById('dentry-report-txt').classList.add('pulse-target-green');
-          document.getElementById('inode-row-10').classList.add('pulse-target-green');
-          document.getElementById('disk-block-5').classList.add('pulse-target-green');
-          inspectBlock(5);
-        } else {
-          // 目标已被删除：悬空断链！红色闪烁！
-          addLog('节拍 4: 路径解析失败 (断链！)', '【悬空链接异常】user/ 目录下不存在 report.txt！目标文件已消失！');
-          document.getElementById('dentry-report-soft').classList.add('broken-link-alert');
-          drawBrokenArrow('anchor-dentry-soft', 'anchor-inode-10-left');
-        }
-      },
-      // 5. 结果反馈
-      () => {
-        clearAllHighlights();
-        if (isTargetAlive) {
-          addLog('成功读取内容', '软链接解析完毕：经多级重定向最终读取数据块 5 内容 "Hello"！');
-        } else {
-          addLog('系统报错', '❌ 错误: 悬空链接 (Dangling Symlink / Broken Link)！返回错误码 ENOENT: No such file or directory。');
-        }
-      }
-    ]
-  };
-}
-
-/**
- * 逐段高亮路径解析
- */
-function highlightPathResolutionStep() {
-  const steps = [
-    { id: 'dir-node-root', name: '/' },
-    { id: 'dir-node-home', name: 'home/' },
-    { id: 'dir-node-user', name: 'user/' }
+  const INITIAL = '原文件 report.txt 指向 inode 10，数据 Hello 存在盘块 5。';
+  const OPS = [
+    { phase: '① 建立链接', caption: '硬链接只加目录项、共用 inode 10；软链接新建 inode 20 存路径。' },
+    { phase: '② 访问', caption: '硬链接直接找到数据；软链接先读出路径，再从根逐段解析。' },
+    { phase: '③ 删除原文件', caption: '删 report.txt：硬链接 nlink 2→1，数据保留；软链接的目标已释放。' },
+    { phase: '④ 再次访问', caption: '硬链接仍读到 Hello；软链接解析到 report.txt 时找不到目标。' },
+    { phase: '⑤ 删除链接', caption: '删链接：硬链接 nlink 归零才释放数据；软链接只释放自身。' }
   ];
 
-  steps.forEach((s, idx) => {
-    setTimeout(() => {
-      const el = document.getElementById(s.id);
-      if (el) {
-        el.classList.add('bg-amber-100', 'text-amber-900', 'font-bold');
-        setTimeout(() => {
-          el.classList.remove('bg-amber-100', 'text-amber-900', 'font-bold');
-        }, 600 / State.speed);
+  // 每个操作、每一侧的动画编排（p 为操作内进度，0–1）。
+  // appear／vanish：对象出现与消失的窗口；reads：盘块的读取高亮；walk：路径面包屑的逐段高亮；
+  // miss：路径在某段找不到（之后该段变红）；probe：探针沿直线移动的路段；tags：浮标。
+  const PLAN = [
+    { // ① 建立链接
+      hard: {
+        appear: { d2: [0.1, 0.35] },
+        tags: [
+          { at: 0.45, tone: 'key', text: '共用 inode 10', anchor: 'i1', until: [2, 0.45] },
+          { at: 0.5, tone: 'note', text: '不新建 inode', anchor: 'hdr' }
+        ]
+      },
+      soft: {
+        appear: { i20: [0.1, 0.3], b6: [0.3, 0.5], d2: [0.5, 0.7] },
+        tags: [
+          { at: 0.3, tone: 'note', text: '新建 inode 20', anchor: 'i2' },
+          { at: 0.5, tone: 'note', text: '路径存入盘块 6', anchor: 'b2' }
+        ]
       }
-    }, idx * (250 / State.speed));
-  });
-
-  // 绘制一条由 Block 6 指向 user/ 目录的橙色虚线
-  setTimeout(() => {
-    drawSvgCurve(
-      'anchor-block-6-left',
-      'anchor-dentry-txt',
-      '#EA580C',
-      'arrow-orange',
-      true,
-      -0.35,
-      false,
-      'temp-arrow-element'
-    );
-  }, 350 / State.speed);
-}
-
-/**
- * 绘制断裂红色闪烁虚线
- */
-function drawBrokenArrow(fromAnchor, toAnchor) {
-  const arrow = drawSvgCurve(
-    fromAnchor,
-    toAnchor,
-    '#DC2626',
-    'arrow-red',
-    true,
-    -0.2,
-    false,
-    'temp-arrow-element broken-link-alert'
-  );
-}
-
-/**
- * 流水线 7：删除软链接 report-soft
- */
-function setupDeleteSoftLinkPipeline() {
-  State.currentBeatIndex = 0;
-  State.activePipeline = {
-    name: '删除软链接 report-soft',
-    beats: [
-      // 1. 定位
-      () => {
-        addLog('节拍 1: 定位软链接', '系统调用 unlink("report-soft")：在目录树中定位该条目。');
-        document.getElementById('dentry-report-soft').classList.add('pulse-target-blue');
+    },
+    { // ② 访问
+      hard: {
+        probe: [
+          { a: 0.05, b: 0.25, from: 'd2r', to: 'i1l' },
+          { a: 0.25, b: 0.5, from: 'i1l', to: 'b1l' }
+        ],
+        reads: { b5: [0.5, 0.62] },
+        tags: [{ at: 0.62, tone: 'note', text: '直达：读出 Hello', anchor: 'b1' }]
       },
-      // 2. 擦除条目
-      () => {
-        clearAllHighlights();
-        State.files.soft.exists = false;
-        renderDirectoryTree();
-        updateSvgArrows(false);
-        addLog('节拍 2: 移除软链接目录项', '注销 report-soft 映射记录，移除对应箭头。');
-      },
-      // 3. 释放 Inode 20
-      () => {
-        State.inodes[20].allocated = false;
-        State.inodes[20].nlink = 0;
-        State.inodes[20].blockPtr = null;
-        renderInodeTable();
-        addLog('节拍 3: 释放 Inode 20', '软链接自身引用计数降为 0，释放其独占的 Inode 20。');
-      },
-      // 4. 释放路径数据块 6
-      () => {
-        State.blocks[6].type = 'free';
-        State.blocks[6].content = '空闲 (Free)';
-        renderDiskGrid();
-        updateSvgArrows(false);
-        inspectBlock(6);
-        addLog('节拍 4: 释放路径数据块', '回收存储目标路径的 Block #6，归还为绿色空闲状态。');
-      },
-      // 5. 总结
-      () => {
-        addLog('删除软链接完成', '软链接及其自身 Inode 与数据块已彻底回收，对原文件毫无影响。');
-        updateButtonStates();
+      soft: {
+        probe: [
+          { a: 0.05, b: 0.14, from: 'd2r', to: 'i2l' },
+          { a: 0.14, b: 0.3, from: 'i2l', to: 'b2l', color: 'gold' },
+          { a: 0.74, b: 0.8, from: 'hdr', to: 'd1r' },
+          { a: 0.8, b: 0.83, from: 'd1r', to: 'i1l' },
+          { a: 0.83, b: 0.89, from: 'i1l', to: 'b1l' }
+        ],
+        reads: { b6: [0.3, 0.36], b5: [0.89, 0.96] },
+        walk: { '/': [0.36, 0.46], home: [0.46, 0.56], user: [0.56, 0.66], 'report.txt': [0.66, 0.74] },
+        tags: [
+          { at: 0.14, tone: 'note', text: '先读出路径', anchor: 'i2' },
+          { at: 0.36, tone: 'note', text: '再从根逐段解析', anchor: 'hdr' }
+        ]
       }
-    ]
-  };
-}
-
-// ============================================================
-// 7. 预设经典剧本演练 (Scenario Tours)
-// ============================================================
-
-/**
- * 运行全流程演练剧本
- */
-function playScenarioTour(tourType) {
-  if (State.isPlaying) stopAutoPlay();
-  resetToInitialState();
-
-  State.tourRunning = true;
-  State.isPlaying = true;
-  document.getElementById('play-icon').textContent = '⏸';
-  document.getElementById('play-label').textContent = '正在演练';
-
-  if (tourType === 'hard_lifecycle') {
-    // 硬链接全生命周期剧本：
-    // 1. 创建硬链接
-    // 2. 打开硬链接
-    // 3. 删除原文件
-    // 4. 再次打开硬链接 (验证仍然可访问)
-    // 5. 删除最后一个硬链接 (释放 Inode 10 和 Block 5)
-    State.tourQueue = [
-      () => { switchMode('hard'); setupCreateHardLinkPipeline(); },
-      () => { setupOpenFilePipeline('report-hard'); },
-      () => { setupDeleteOriginalPipeline(); },
-      () => { setupOpenFilePipeline('report-hard'); },
-      () => { setupDeleteHardLinkPipeline(); }
-    ];
-    addLog('剧本启动', '🎬 启动【硬链接全生命周期】连贯演练：创建 &rarr; 打开 &rarr; 删原文件 &rarr; 再次读取 &rarr; 删链接回收。');
-  } else if (tourType === 'soft_lifecycle') {
-    // 软链接与悬空断链剧本：
-    // 1. 创建软链接
-    // 2. 打开软链接 (正常逐段解析)
-    // 3. 删除原文件 (Inode 10 释放，软链接保留)
-    // 4. 再次打开软链接 (触发悬空断裂报错)
-    // 5. 删除软链接 (回收 Inode 20 和 Block 6)
-    State.tourQueue = [
-      () => { switchMode('soft'); setupCreateSoftLinkPipeline(); },
-      () => { setupOpenFilePipeline('report-soft'); },
-      () => { setupDeleteOriginalPipeline(); },
-      () => { setupOpenFilePipeline('report-soft'); },
-      () => { setupDeleteSoftLinkPipeline(); }
-    ];
-    addLog('剧本启动', '🎬 启动【软链接与悬空断链】连贯演练：创建 &rarr; 正常打开 &rarr; 删原文件 &rarr; 悬空断链警报 &rarr; 删除软链接。');
-  }
-
-  executeNextTourStep();
-}
-
-function executeNextTourStep() {
-  if (State.tourQueue.length > 0) {
-    const nextSetup = State.tourQueue.shift();
-    nextSetup();
-    scheduleNextAutoBeat();
-  } else {
-    State.tourRunning = false;
-    stopAutoPlay();
-    addLog('剧本完成', '🎉 剧本演练全部顺利完成！');
-  }
-}
-
-// ============================================================
-// 8. 对比模式专属逻辑 (五、对比模式)
-// ============================================================
-
-function initComparisonView() {
-  runComparisonScenario('create');
-}
-
-/**
- * 运行四组对比场景
- */
-function runComparisonScenario(scenarioKey) {
-  State.comparison.stage = scenarioKey;
-
-  const dentryHard1 = document.getElementById('comp-hard-dentry1');
-  const dentryHard2 = document.getElementById('comp-hard-dentry2');
-  const nlinkHard = document.getElementById('comp-hard-nlink');
-  const hardDataStatus = document.getElementById('comp-hard-data-status');
-  const hardAnalysis = document.getElementById('comp-hard-analysis');
-
-  const dentrySoft1 = document.getElementById('comp-soft-dentry1');
-  const dentrySoft2 = document.getElementById('comp-soft-dentry2');
-  const targetVal = document.getElementById('comp-soft-target-val');
-  const targetBadge = document.getElementById('comp-soft-target-badge');
-  const softAnalysis = document.getElementById('comp-soft-analysis');
-
-  switch (scenarioKey) {
-    case 'create':
-      // 1. 创建链接对比
-      dentryHard1.className = 'px-2 py-1 rounded bg-white border border-blue-200 text-stone-800 font-semibold';
-      dentryHard2.className = 'px-2 py-1 rounded bg-white border border-blue-200 text-blue-700 font-semibold';
-      nlinkHard.textContent = '2';
-      hardDataStatus.textContent = '正常共享';
-      hardDataStatus.className = 'text-[10px] font-semibold text-emerald-600';
-      hardAnalysis.innerHTML = `
-        <div class="font-bold text-blue-900 flex items-center gap-1"><span>📌 创建阶段：硬链接机制</span></div>
-        <p class="text-stone-600 leading-relaxed mt-1">
-          <b>不新建 Inode</b>：仅在目录表中新增一条 <code>report-hard &rarr; 10</code> 映射。Inode 10 链接计数从 1 增至 2。零新盘块消耗。
-        </p>
-      `;
-
-      dentrySoft1.className = 'px-2 py-1 rounded bg-white border border-stone-200 text-stone-800 font-semibold';
-      dentrySoft2.className = 'px-2 py-1 rounded bg-white border border-amber-300 text-amber-700 font-semibold';
-      targetVal.textContent = 'Inode 10 → Block 5 ("Hello")';
-      targetBadge.textContent = '映射就绪';
-      targetBadge.className = 'text-[10px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 font-semibold';
-      softAnalysis.innerHTML = `
-        <div class="font-bold text-amber-900 flex items-center gap-1"><span>📌 创建阶段：软链接机制</span></div>
-        <p class="text-stone-600 leading-relaxed mt-1">
-          <b>分配独立 Inode 20 与数据块 6</b>：写入目标路径文本 <code>"/home/user/report.txt"</code>。消耗文件系统元数据与磁盘存储空间。
-        </p>
-      `;
-      addLog('对比模式', '【对比 1：创建链接】硬链接不建 Inode，只加引用计数；软链接新建 Inode 20 与路径数据块 6。');
-      break;
-
-    case 'open':
-      // 2. 打开访问对比
-      hardAnalysis.innerHTML = `
-        <div class="font-bold text-emerald-900 flex items-center gap-1"><span>📌 访问阶段：一步直达</span></div>
-        <p class="text-stone-600 leading-relaxed mt-1">
-          <b>寻址步骤 (1步)</b>：<code>report-hard &rarr; Inode 10 &rarr; Block 5</code>。<br>
-          地位与原文件完全平等，没有任何间接重定向惩罚，I/O 速度极快。
-        </p>
-      `;
-
-      softAnalysis.innerHTML = `
-        <div class="font-bold text-amber-900 flex items-center gap-1"><span>📌 访问阶段：逐段间接解析</span></div>
-        <p class="text-stone-600 leading-relaxed mt-1">
-          <b>寻址步骤 (多步)</b>：<code>report-soft &rarr; Inode 20 &rarr; 读 Block 6 路径 &rarr; 内核由根遍历 /home/user/ &rarr; 定位 report.txt &rarr; Inode 10 &rarr; Block 5</code>。<br>
-          存在额外的磁盘寻道与目录检索开销。
-        </p>
-      `;
-      addLog('对比模式', '【对比 2：打开访问】硬链接 1 步直达数据块；软链接需先读路径，再从根逐级解析目录树。');
-      break;
-
-    case 'delete_orig':
-      // 3. 删除原文件对比
-      dentryHard1.className = 'px-2 py-1 rounded bg-stone-100 border border-stone-200 text-stone-400 line-through';
-      nlinkHard.textContent = '1';
-      hardDataStatus.textContent = '依然正常访问！';
-      hardDataStatus.className = 'text-[10px] font-semibold text-emerald-600';
-      hardAnalysis.innerHTML = `
-        <div class="font-bold text-emerald-900 flex items-center gap-1"><span>📌 删除原文件：硬链接完全无影响</span></div>
-        <p class="text-stone-600 leading-relaxed mt-1">
-          原文件 <code>report.txt</code> 目录项被删，Inode 10 计数从 2 降为 1。<br>
-          <b>因为 i_nlink > 0，数据块 5 不会被释放</b>，硬链接依然可以毫无阻碍地打开读取内容！
-        </p>
-      `;
-
-      dentrySoft1.className = 'px-2 py-1 rounded bg-stone-100 border border-stone-200 text-stone-400 line-through';
-      targetVal.textContent = '❌ 目标不存在 (ENOENT)';
-      targetBadge.textContent = '悬空断链 (Dangling)';
-      targetBadge.className = 'text-[10px] px-1.5 py-0.5 rounded bg-rose-100 text-rose-800 font-bold';
-      softAnalysis.innerHTML = `
-        <div class="font-bold text-rose-900 flex items-center gap-1"><span>📌 删除原文件：软链接瞬间悬空</span></div>
-        <p class="text-stone-600 leading-relaxed mt-1">
-          原文件 Inode 10 及其数据块 5 彻底释放。<br>
-          <b>软链接自身还在，但其记录的目标路径已成空</b>！再次访问时解析到 report.txt 发生断裂，报 <code>No such file or directory</code>。
-        </p>
-      `;
-      addLog('对比模式', '【对比 3：删除原文件】硬链接计数减 1，数据仍完好；软链接目标消失，沦为「悬空断链」！');
-      break;
-
-    case 'delete_link':
-      // 4. 删除链接本身对比
-      dentryHard2.className = 'px-2 py-1 rounded bg-stone-100 border border-stone-200 text-stone-400 line-through';
-      nlinkHard.textContent = '0 (彻底释放)';
-      hardDataStatus.textContent = '已回收';
-      hardDataStatus.className = 'text-[10px] font-semibold text-stone-400';
-      hardAnalysis.innerHTML = `
-        <div class="font-bold text-stone-900 flex items-center gap-1"><span>📌 删除硬链接本身</span></div>
-        <p class="text-stone-600 leading-relaxed mt-1">
-          删除了最后一个硬链接，Inode 10 计数降至 0。文件系统触发物理回收，释放 Inode 10 和数据块 5。
-        </p>
-      `;
-
-      dentrySoft2.className = 'px-2 py-1 rounded bg-stone-100 border border-stone-200 text-stone-400 line-through';
-      targetVal.textContent = 'None';
-      targetBadge.textContent = '已销毁';
-      targetBadge.className = 'text-[10px] px-1.5 py-0.5 rounded bg-stone-200 text-stone-600 font-bold';
-      softAnalysis.innerHTML = `
-        <div class="font-bold text-stone-900 flex items-center gap-1"><span>📌 删除软链接本身</span></div>
-        <p class="text-stone-600 leading-relaxed mt-1">
-          直接销毁 Inode 20 与 Block 6 路径数据块。对原文件 Inode 10 及其引用计数没有任何微小的影响。
-        </p>
-      `;
-      addLog('对比模式', '【对比 4：删除链接本身】硬链接使原 Inode 计数减 1；软链接销毁自身 Inode 20 与路径块，对原文件毫无影响。');
-      break;
-  }
-}
-
-// ============================================================
-// 9. 重置与交互下拉菜单
-// ============================================================
-
-/**
- * 重置恢复初始 report.txt 场景
- */
-function resetToInitialState() {
-  if (State.isPlaying) stopAutoPlay();
-  clearAllHighlights();
-
-  // 重置文件状态
-  State.files.orig.exists = true;
-  State.files.hard.exists = false;
-  State.files.soft.exists = false;
-
-  // 重置 Inode 10
-  State.inodes[10].allocated = true;
-  State.inodes[10].type = 'regular';
-  State.inodes[10].nlink = 1;
-  State.inodes[10].blockPtr = 5;
-  State.inodes[10].fileRef = ['report.txt'];
-
-  // 重置 Inode 20
-  State.inodes[20].allocated = false;
-  State.inodes[20].nlink = 0;
-  State.inodes[20].blockPtr = null;
-  State.inodes[20].fileRef = [];
-
-  // 重置磁盘块
-  initDiskBlocks();
-
-  // 清除流水线与对比
-  State.activePipeline = null;
-  State.currentBeatIndex = 0;
-  State.tourQueue = [];
-  State.tourRunning = false;
-  setBeatProgress(1);
-
-  renderAllViews();
-  inspectBlock(5);
-
-  addLog('系统重置', '🔄 已重置恢复至初始场景：/home/user/report.txt (inode 10, i_nlink = 1, 数据块 5 内容 "Hello")。');
-}
-
-/**
- * 切换打开目标下拉菜单
- */
-function toggleOpenMenu() {
-  const menu = document.getElementById('open-menu');
-  if (!menu) return;
-  menu.classList.toggle('hidden');
-}
-
-function selectOpenTarget(target) {
-  State.openTarget = target;
-  const label = document.getElementById('open-target-label');
-  if (label) label.textContent = `打开: ${target}`;
-  const menu = document.getElementById('open-menu');
-  if (menu) menu.classList.add('hidden');
-  addLog('目标选择', `已选择打开目标：${target}`);
-}
-
-/**
- * 绑定全局 UI 点击事件 (点击空白处收起下拉菜单)
- */
-function bindEvents() {
-  document.addEventListener('click', (e) => {
-    const container = document.getElementById('open-dropdown-container');
-    const menu = document.getElementById('open-menu');
-    if (container && menu && !container.contains(e.target)) {
-      menu.classList.add('hidden');
+    },
+    { // ③ 删除原文件
+      hard: {
+        vanish: { d1: [0.05, 0.3] },
+        tags: [{ at: 0.45, tone: 'note', text: 'nlink 2 → 1 · 数据保留', anchor: 'i1' }]
+      },
+      soft: {
+        vanish: { d1: [0.05, 0.3], i10: [0.45, 0.75], b5: [0.5, 0.8] },
+        tags: [
+          { at: 0.45, tone: 'key', text: '悬空：目标已删', anchor: 'hdr', until: [4, 0.45] },
+          { at: 0.45, tone: 'warn', text: 'inode 10 释放', anchor: 'i1' },
+          { at: 0.5, tone: 'quiet', text: '盘块 5 释放', anchor: 'b1' }
+        ]
+      }
+    },
+    { // ④ 再次访问
+      hard: {
+        probe: [
+          { a: 0.05, b: 0.25, from: 'd2r', to: 'i1l' },
+          { a: 0.25, b: 0.5, from: 'i1l', to: 'b1l' }
+        ],
+        reads: { b5: [0.5, 0.62] },
+        tags: [{ at: 0.62, tone: 'note', text: '仍读到 Hello', anchor: 'b1' }]
+      },
+      soft: {
+        probe: [
+          { a: 0.05, b: 0.14, from: 'd2r', to: 'i2l' },
+          { a: 0.14, b: 0.3, from: 'i2l', to: 'b2l', color: 'gold' }
+        ],
+        reads: { b6: [0.3, 0.36] },
+        walk: { '/': [0.36, 0.46], home: [0.46, 0.56], user: [0.56, 0.66], 'report.txt': [0.66, 0.74] },
+        miss: 0.66,
+        tags: [{ at: 0.74, tone: 'break', text: '找不到目标', anchor: 'hdr', dx: 150 }]
+      }
+    },
+    { // ⑤ 删除链接
+      hard: {
+        vanish: { d2: [0.05, 0.3], i10: [0.45, 0.75], b5: [0.5, 0.8] },
+        tags: [
+          { at: 0.45, tone: 'quiet', text: 'nlink → 0', anchor: 'i1' },
+          { at: 0.45, tone: 'key', text: '数据释放', anchor: 'b1' }
+        ]
+      },
+      soft: {
+        vanish: { d2: [0.05, 0.3], i20: [0.45, 0.75], b6: [0.5, 0.8] },
+        tags: [{ at: 0.45, tone: 'quiet', text: '只释放自身', anchor: 'i2' }]
+      }
     }
-  });
-}
+  ];
 
-// ============================================================
-// 10. 日志系统与辅助工具函数
-// ============================================================
-
-/**
- * 增加日志条目
- */
-function addLog(action, detail) {
-  const container = document.getElementById('log-container');
-  if (!container) return;
-
-  const now = new Date();
-  const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`;
-
-  const row = document.createElement('div');
-  row.className = 'flex items-start gap-2 p-1.5 rounded-lg hover:bg-stone-50 transition-colors text-[11px] leading-relaxed';
-  row.innerHTML = `
-    <span class="text-stone-400 font-mono flex-shrink-0">${timeStr}</span>
-    <span class="px-1.5 py-0.2 rounded bg-stone-100 text-stone-800 font-bold border border-stone-200 flex-shrink-0">${action}</span>
-    <span class="text-stone-600 flex-1">${detail}</span>
-  `;
-
-  container.appendChild(row);
-  container.scrollTop = container.scrollHeight;
-
-  const statusTag = document.getElementById('log-status-tag');
-  if (statusTag) {
-    statusTag.textContent = action;
-  }
-}
-
-/**
- * 清空日志
- */
-function clearLogs() {
-  const container = document.getElementById('log-container');
-  if (container) container.innerHTML = '';
-  addLog('日志已清空', '监控控制台重置完毕。');
-}
-
-/**
- * 防抖函数
- */
-function debounce(fn, delay) {
-  let timer = null;
-  return function(...args) {
-    clearTimeout(timer);
-    timer = setTimeout(() => fn.apply(this, args), delay);
+  // 时间线上每个操作的文字与颜色（两行同一套，便于同钟对照）
+  const BAR_TEXT = {
+    hard: ['nlink 1 → 2', '直达：读出 Hello', 'nlink 2 → 1', '仍读到 Hello', 'nlink → 0 · 释放'],
+    soft: ['新建 inode 20', '读路径后逐段解析', '释放 inode 10', '找不到目标', '只释放自身']
   };
-}
+  const BAR_CLASS = ['k-create', 'k-access', 'k-remove', 'k-access', 'k-release'];
+  // 时间线上的关键时刻按钮：点击跳到该事件发生的时刻
+  const KEY_CHIPS = [
+    { world: 'hard', text: '数据释放', k: 4, at: 0.45 },
+    { world: 'soft', text: '悬空', k: 2, at: 0.45 }
+  ];
+
+  const $ = (id) => document.getElementById(id);
+  const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+  const eventT = (k, p) => (k + p) * OP_LEN;
+  const ramp = (p, a, b) => {
+    if (p <= a) return 0;
+    if (p >= b) return 1;
+    const s = (p - a) / (b - a);
+    return s * s * (3 - 2 * s);
+  };
+  const inWindow = (win, p, staticHL) => Boolean(win) && (staticHL || (p >= win[0] && p <= win[1]));
+  const setText = (node, value) => {
+    const s = String(value);
+    if (node.textContent !== s) node.textContent = s;
+  };
+  const setAttr = (node, name, value) => {
+    const s = String(value);
+    if (node.getAttribute(name) !== s) node.setAttribute(name, s);
+  };
+  const setClass = (node, cls, on) => {
+    if (node.classList.contains(cls) !== on) node.classList.toggle(cls, on);
+  };
+  const svgEl = (tag, attrs, parent) => {
+    const node = document.createElementNS(NS, tag);
+    for (const [name, value] of Object.entries(attrs || {})) node.setAttribute(name, String(value));
+    if (parent) parent.appendChild(node);
+    return node;
+  };
+  const textWidth = (text) => [...text].reduce((sum, ch) => sum + (ch.charCodeAt(0) > 0x2e80 ? 12 : 7), 0);
+  const pathD = ([x1, y1], [x2, y2]) => (y1 === y2
+    ? `M${x1} ${y1} L${x2} ${y2}`
+    : `M${x1} ${y1} C${x1 + 30} ${y1} ${x2 - 30} ${y2} ${x2} ${y2}`);
+
+  const els = {
+    svg: $('sand'),
+    stage: document.querySelector('.stage'),
+    clock: $('clock'),
+    phase: $('phase'),
+    caption: $('caption'),
+    reset: $('reset'),
+    previous: $('previous'),
+    play: $('play'),
+    playSymbol: $('play-symbol'),
+    playLabel: $('play-label'),
+    next: $('next'),
+    progress: $('progress'),
+    progressCaption: $('progress-caption'),
+    speed: $('speed'),
+    motion: $('reduce-motion'),
+    timeline: $('timeline'),
+    notice: $('dependency-notice'),
+    playheadLabel: null
+  };
+
+  const state = {
+    t: 0,
+    playing: false,
+    speed: 1,
+    reduce: false,
+    tl: null,
+    stepper: null,
+    glide: null,
+    scrubbing: false,
+    linkTimer: 0,
+    linkReady: false,
+    snap: {},   // snap[w][i]：第 i 个状态中各对象的快照
+    sums: {},   // sums[w][i]：第 i 个状态的统计
+    refs: {},   // refs[w]：该行的 SVG 节点引用
+    bars: []    // 时间线上的操作条
+  };
+
+  // ───── 数据准备：模型推演一次，之后画面只读快照 ─────
+
+  function snapshot(w, fs) {
+    const entries = fs.inodes[M.USER].entries;
+    const dentry = (name) => (entries[name] === undefined ? null : { id: entries[name] });
+    const inode = (id) => (fs.inodes[id] ? { nlink: fs.inodes[id].nlink } : null);
+    const block = (id) => (fs.blocks[id] ? { data: fs.blocks[id].data } : null);
+    return {
+      d1: dentry('report.txt'),
+      d2: dentry(LINK_NAME[w]),
+      i10: inode(10),
+      i20: inode(20),
+      b5: block(5),
+      b6: block(6)
+    };
+  }
+
+  function prepare() {
+    for (const w of WORLDS) {
+      const run = M.simulate(w);
+      state.snap[w] = run.states.map((fs) => snapshot(w, fs));
+      state.sums[w] = run.states.map((fs) => M.summarize(fs));
+    }
+  }
+
+  // 时刻 → 操作序号 k（−1 为初始状态）与操作内进度 p
+  function locate(t) {
+    if (t <= EPS) return { k: -1, p: 0 };
+    const k = Math.min(4, Math.ceil(t / OP_LEN) - 1);
+    return { k, p: clamp((t - k * OP_LEN) / OP_LEN, 0, 1) };
+  }
+
+  // 对象在本步的可见度：只存在于之后的状态时淡入，只存在于之前的状态时淡出，两侧都有或都没有时保持
+  function usedAlpha(key, sb, sa, plan, p) {
+    const before = Boolean(sb[key]);
+    const after = Boolean(sa[key]);
+    if (before === after) return after ? 1 : 0;
+    if (after) return ramp(p, ...((plan && plan.appear && plan.appear[key]) || DEFAULT_APPEAR));
+    return 1 - ramp(p, ...((plan && plan.vanish && plan.vanish[key]) || DEFAULT_VANISH));
+  }
+
+  // 对象显示的内容：数值在 COMMIT 时切换；消失中的 inode 在切换后显示 nlink 0
+  function displayOf(key, sb, sa, p) {
+    const b = sb[key];
+    const a = sa[key];
+    if (b && a) return p >= COMMIT ? a : b;
+    if (b) return p >= COMMIT && key[0] === 'i' ? { ...b, nlink: 0 } : b;
+    return a;
+  }
+
+  // 探针位置：沿当前路段的起止锚点线性插值，不回弹
+  function probePos(plan, p, staticHL) {
+    if (!plan || !plan.probe || staticHL) return null;
+    const seg = plan.probe.find((s) => p >= s.a && p <= s.b);
+    if (!seg) return null;
+    const u = (p - seg.a) / (seg.b - seg.a);
+    const [x1, y1] = ANCHOR[seg.from];
+    const [x2, y2] = ANCHOR[seg.to];
+    return { x: x1 + (x2 - x1) * u, y: y1 + (y2 - y1) * u, color: seg.color || 'blue' };
+  }
+
+  // ───── 构建 SVG（只在启动时建一次，之后只改属性与文字） ─────
+
+  function arrow(defs, id, color) {
+    const marker = svgEl('marker', { id, viewBox: '0 0 10 10', refX: 9, refY: 5, markerWidth: 7, markerHeight: 7, orient: 'auto' }, defs);
+    svgEl('path', { d: 'M0 0 L10 5 L0 10 z', fill: color }, marker);
+  }
+
+  function buildCrumbs(g) {
+    const text = svgEl('text', { x: 210, y: 36, class: 'crumbs' }, g);
+    const span = (cls, label) => {
+      const node = svgEl('tspan', { class: cls }, text);
+      node.textContent = label;
+      return node;
+    };
+    const sep = (cls) => span(`sep ${cls || ''}`.trim(), ' › ');
+    const crumbs = {};
+    crumbs['/'] = span('crumb', '/');
+    sep();
+    crumbs.home = span('crumb', 'home');
+    sep();
+    crumbs.user = span('crumb', 'user');
+    crumbs.sepRT = sep('sep-rt');
+    crumbs['report.txt'] = span('crumb', 'report.txt');
+    return crumbs;
+  }
+
+  function buildSlot(g, w, key) {
+    const geo = SLOT[key];
+    const tone = TONE[key] || '';
+    const used = svgEl('g', { class: `slot ${tone}`.trim() }, g);
+    const card = svgEl('rect', { x: geo.x, y: geo.y, width: geo.w, height: SLOT_H, rx: 10, class: `card ${tone}`.trim() }, used);
+    const title = svgEl('text', { x: geo.x + 14, y: geo.y + 24, class: 'card-title' }, used);
+    const body = svgEl('text', { x: geo.x + 14, y: geo.y + 45, class: 'card-body' }, used);
+    const free = svgEl('g', { class: 'slot' }, g);
+    svgEl('rect', { x: geo.x, y: geo.y, width: geo.w, height: SLOT_H, rx: 10, class: 'free' }, free);
+    svgEl('text', { x: geo.x + 14, y: geo.y + 36, class: 'free-text' }, free).textContent = FREE_TEXT[key];
+    if (key === 'd1') title.textContent = 'report.txt';
+    else if (key === 'd2') title.textContent = LINK_NAME[w];
+    else title.textContent = CARD_TEXT[key];
+    if (CARD_BODY[key]) body.textContent = CARD_BODY[key];
+    return { key, used, card, title, body, free };
+  }
+
+  function buildTags(g, w) {
+    const layer = svgEl('g', { class: 'tags', 'aria-hidden': 'true' }, g);
+    const tags = [];
+    PLAN.forEach((step, k) => {
+      for (const ev of step[w].tags || []) {
+        const el = svgEl('g', { class: `tag tone-${ev.tone}` }, layer);
+        svgEl('rect', { x: 0, y: 0, width: textWidth(ev.text) + 20, height: 22, rx: 11, class: 'tag-bg' }, el);
+        svgEl('text', { x: 10, y: 11, class: 'tag-text' }, el).textContent = ev.text;
+        tags.push({
+          el,
+          x: (TAG_X[ev.anchor] ?? 210) + (ev.dx || 0),
+          te: eventT(k, ev.at),
+          key: ev.tone === 'key',
+          until: ev.until ? eventT(ev.until[0], ev.until[1]) : Infinity
+        });
+      }
+    });
+    return tags;
+  }
+
+  function buildRow(w) {
+    const g = svgEl('g', { class: 'row', 'data-world': w, transform: `translate(0 ${ROW_Y[w]})` }, els.svg);
+    const label = svgEl('g', { class: 'row-label' }, g);
+    svgEl('text', { x: 24, y: 40, class: 'row-title' }, label).textContent = ROW_TITLE[w];
+    svgEl('text', { x: 24, y: 62, class: 'row-sub' }, label).textContent = LINK_NAME[w];
+    const count = svgEl('text', { x: 24, y: 84, class: 'row-count' }, label);
+    const read = svgEl('text', { x: 24, y: 104, class: 'row-read' }, label);
+    const crumbs = buildCrumbs(g);
+    svgEl('text', { x: 500, y: 36, class: 'col-head' }, g).textContent = 'inode 表';
+    svgEl('text', { x: 800, y: 36, class: 'col-head' }, g).textContent = '数据块';
+    const links = svgEl('g', { class: 'links' }, g);
+    const lineDefs = [
+      { from: 'd1', to: 'i10', a: ANCHOR.d1r, b: ANCHOR.i1l, data: false },
+      { from: 'd2', to: w === 'hard' ? 'i10' : 'i20', a: ANCHOR.d2r, b: w === 'hard' ? ANCHOR.i1l : ANCHOR.i2l, data: false },
+      { from: 'i10', to: 'b5', a: [720, 76], b: ANCHOR.b1l, data: true },
+      { from: 'i20', to: 'b6', a: [720, 148], b: ANCHOR.b2l, data: true }
+    ];
+    const lines = lineDefs.map((ln) => ({
+      from: ln.from,
+      to: ln.to,
+      el: svgEl('path', {
+        d: pathD(ln.a, ln.b),
+        class: ln.data ? 'link-data' : 'link-line',
+        'marker-end': `url(#${ln.data ? 'arr-data' : 'arr-ink'})`
+      }, links)
+    }));
+    const slots = {};
+    for (const key of KEYS) slots[key] = buildSlot(g, w, key);
+    const probe = svgEl('circle', { r: 6, class: 'probe', opacity: 0 }, g);
+    return { w, count, read, crumbs, lines, slots, probe, tags: buildTags(g, w) };
+  }
+
+  function buildStage() {
+    const defs = svgEl('defs', {}, els.svg);
+    arrow(defs, 'arr-ink', '#8E9889');
+    arrow(defs, 'arr-data', '#3E9C78');
+    svgEl('line', { x1: 24, y1: 195, x2: 1076, y2: 195, class: 'divider' }, els.svg);
+    for (const w of WORLDS) state.refs[w] = buildRow(w);
+  }
+
+  function buildTimeline() {
+    const ticks = BOUNDS.map((x) => `<span class="axis-tick" style="left:${(x / T) * 100}%">${x}</span>`).join('');
+    const groups = WORLDS.map((w) => {
+      const chip = KEY_CHIPS.find((c) => c.world === w);
+      const chipT = eventT(chip.k, chip.at);
+      const bars = BAR_TEXT[w].map((text, k) => (
+        `<div class="bar ${BAR_CLASS[k]}" data-k="${k}" style="left:calc(${k * 20}% + 2px)">${text}</div>`
+      )).join('');
+      return `
+        <div class="tl-group" data-world="${w}">
+          <div class="tl-group-head">
+            <span class="tl-name"><i class="dot"></i>${ROW_TITLE[w]}</span>
+            <span class="tl-keys"><button type="button" class="key-chip" data-jump="${chipT}">${chip.text} · t ${Math.round(chipT)}</button></span>
+          </div>
+          <div class="tl-row">
+            <span class="tl-label">${LINK_NAME[w]}</span>
+            <div class="tl-track" data-world="${w}">${bars}</div>
+          </div>
+        </div>`;
+    }).join('');
+    els.timeline.innerHTML = `
+      <div class="tl-row tl-axis"><span class="tl-label"></span><div class="tl-track">${ticks}</div></div>
+      ${groups}
+      <div class="playhead" aria-hidden="true"><span class="playhead-label" id="playhead-label">t 0</span></div>`;
+    state.bars = [...els.timeline.querySelectorAll('.bar')];
+    els.playheadLabel = $('playhead-label');
+  }
+
+  // ───── 每帧渲染：只由 t 决定 ─────
+
+  function renderCrumbs(row, plan, p, staticHL) {
+    const c = row.crumbs;
+    for (const name of ['/', 'home', 'user']) {
+      setClass(c[name], 'is-on', inWindow(plan && plan.walk && plan.walk[name], p, staticHL));
+    }
+    const walking = inWindow(plan && plan.walk && plan.walk['report.txt'], p, staticHL);
+    const missing = Boolean(plan && plan.miss !== undefined && (staticHL || p >= plan.miss));
+    const show = walking || missing;
+    setClass(c['report.txt'], 'is-hidden', !show);
+    setClass(c.sepRT, 'is-hidden', !show);
+    setClass(c['report.txt'], 'is-miss', missing);
+    setClass(c['report.txt'], 'is-on', walking && !missing);
+    setText(c['report.txt'], missing ? 'report.txt ✗' : 'report.txt');
+  }
+
+  function renderWorld(w, k, p, staticHL) {
+    const row = state.refs[w];
+    const before = k < 0 ? 0 : k;
+    const after = k < 0 ? 0 : k + 1;
+    const sb = state.snap[w][before];
+    const sa = state.snap[w][after];
+    const plan = k < 0 ? null : PLAN[k][w];
+    const sum = state.sums[w][p >= COMMIT ? after : before];
+    const alpha = {};
+    for (const key of KEYS) alpha[key] = usedAlpha(key, sb, sa, plan, p);
+
+    for (const key of KEYS) {
+      const slot = row.slots[key];
+      setAttr(slot.used, 'opacity', alpha[key].toFixed(3));
+      setAttr(slot.free, 'opacity', (1 - alpha[key]).toFixed(3));
+      const disp = displayOf(key, sb, sa, p);
+      if (!disp || alpha[key] <= 0) continue;
+      if (key === 'd1' || key === 'd2') {
+        const broken = key === 'd2' && sum.dangling.includes(LINK_NAME[w]);
+        setText(slot.body, `→ inode ${disp.id}${broken ? ' · 目标缺失' : ''}`);
+        setClass(slot.card, 'is-broken', broken);
+      } else if (key === 'i10' || key === 'i20') {
+        setText(slot.body, `nlink ${disp.nlink} · → 盘块 ${key === 'i10' ? 5 : 6}`);
+        setClass(slot.card, 'is-shared', key === 'i10' && disp.nlink >= 2);
+      }
+      setClass(slot.card, 'is-read', inWindow(plan && plan.reads && plan.reads[key], p, staticHL));
+    }
+
+    for (const ln of row.lines) setAttr(ln.el, 'opacity', Math.min(alpha[ln.from], alpha[ln.to]).toFixed(3));
+
+    const pos = probePos(plan, p, staticHL);
+    setAttr(row.probe, 'opacity', pos ? 1 : 0);
+    if (pos) {
+      setAttr(row.probe, 'cx', pos.x.toFixed(2));
+      setAttr(row.probe, 'cy', pos.y.toFixed(2));
+      setClass(row.probe, 'is-gold', pos.color === 'gold');
+    }
+
+    renderCrumbs(row, plan, p, staticHL);
+    setText(row.count, `inode ${sum.inodes} · 盘块 ${sum.blocks}`);
+    const broken = sum.dangling.length ? ` · 悬空 ${sum.dangling.length}` : '';
+    setText(row.read, `${sum.readable.length} 个名字读到 Hello${broken}`);
+  }
+
+  function renderTags(row, t) {
+    for (const tg of row.tags) {
+      const age = t - tg.te;
+      let opacity = 0;
+      let rise = 0;
+      if (age >= 0 && tg.key) {
+        if (t < tg.until) opacity = Math.min(1, age / 0.25);
+      } else if (age >= 0 && age <= LIFE) {
+        opacity = Math.min(1, age / 0.25) * Math.min(1, (LIFE - age) / 0.7);
+        rise = 6 * (age / LIFE);
+      }
+      setAttr(tg.el, 'opacity', opacity.toFixed(3));
+      setAttr(tg.el, 'transform', `translate(${tg.x} ${(-rise).toFixed(2)})`);
+    }
+  }
+
+  function renderTimeline(t, k) {
+    for (const bar of state.bars) {
+      const idx = Number(bar.dataset.k);
+      const st = t >= OP_LEN * (idx + 1) - EPS ? 'done' : (idx === k ? 'active' : 'future');
+      if (bar.dataset.state !== st) bar.dataset.state = st;
+    }
+    els.timeline.style.setProperty('--p', (t / T).toFixed(4));
+    setText(els.playheadLabel, `t ${Math.floor(t + EPS)}`);
+  }
+
+  function render(t) {
+    const time = clamp(t, 0, T);
+    state.t = time;
+    const { k, p: raw } = locate(time);
+    const staticHL = state.reduce && k >= 0;   // 减少动效：本步的读取与解析直接以静态高亮显示
+    const p = staticHL ? 1 : raw;
+    for (const w of WORLDS) {
+      renderWorld(w, k, p, staticHL);
+      renderTags(state.refs[w], time);
+    }
+    setText(els.clock, Math.floor(time + EPS));
+    setText(els.phase, k < 0 ? '初始状态' : OPS[k].phase);
+    setText(els.caption, k < 0 ? INITIAL : OPS[k].caption);
+    renderTimeline(time, k);
+    updateControls();
+  }
+
+  // ───── 控件与时钟 ─────
+
+  function updateControls() {
+    const t = state.t;
+    const playing = state.playing;
+    els.stage.classList.toggle('is-running', playing);
+    els.previous.disabled = t <= EPS;
+    els.next.disabled = t >= T - EPS;
+    setText(els.playLabel, playing ? '暂停' : (t >= T - EPS ? '再播放' : '播放'));
+    setText(els.playSymbol, playing ? 'Ⅱ' : '▶');
+    els.play.dataset.running = String(playing);
+    els.play.disabled = !state.tl;
+    if (!state.scrubbing) els.progress.value = t.toFixed(2);
+    setText(els.progressCaption, `t ${Math.floor(t + EPS)} / ${T}`);
+  }
+
+  function cancelGlide() {
+    if (state.glide) {
+      state.glide.kill();
+      state.glide = null;
+    }
+  }
+
+  function stopStepper() {
+    if (state.stepper) {
+      state.stepper.kill();
+      state.stepper = null;
+    }
+  }
+
+  function syncClock() {
+    if (state.tl) state.tl.time(state.t * TICK);
+  }
+
+  // 直接跳到某一时刻（拖动、复位、时间线点击后使用）
+  function seek(t) {
+    cancelGlide();
+    const target = clamp(t, 0, T);
+    if (state.tl) {
+      state.tl.pause();
+      state.tl.time(target * TICK);
+    }
+    render(target);
+    syncLink(false);
+  }
+
+  // 单步：平滑滑到下一个操作边界，便于看清每一步的因果
+  function stepTo(target) {
+    cancelGlide();
+    pause();
+    const dest = clamp(target, 0, T);
+    const dist = Math.abs(dest - state.t);
+    if (!window.gsap || state.reduce || dist < EPS) {
+      seek(dest);
+      return;
+    }
+    const glide = { v: state.t };
+    state.glide = window.gsap.to(glide, {
+      v: dest,
+      duration: clamp(dist * 0.12, 0.25, 0.8),
+      ease: 'power1.inOut',
+      onUpdate: () => render(glide.v),
+      onComplete: () => {
+        state.glide = null;
+        render(dest);
+        syncClock();
+        syncLink(true);
+      }
+    });
+  }
+
+  function play() {
+    if (!state.tl) return;
+    cancelGlide();
+    if (state.t >= T - EPS) seek(0);
+    state.playing = true;
+    if (state.reduce) {
+      scheduleStep();
+    } else {
+      syncClock();
+      state.tl.play();
+    }
+    updateControls();
+  }
+
+  function pause() {
+    if (!state.tl) return;
+    state.playing = false;
+    stopStepper();
+    state.tl.pause();
+    updateControls();
+    syncLink(true);
+  }
+
+  function finishPlayback() {
+    state.playing = false;
+    stopStepper();
+    updateControls();
+    syncLink(true);
+  }
+
+  // 减少动效：不做补间，每个操作边界直接跳过去，停留一小段时间再跳下一个
+  function scheduleStep() {
+    state.stepper = window.gsap.delayedCall(STEP_SEC / state.speed, advanceStep);
+  }
+
+  function advanceStep() {
+    state.stepper = null;
+    if (!state.playing) return;
+    const target = nextBoundary();
+    seek(target);
+    if (target >= T - EPS) finishPlayback();
+    else scheduleStep();
+  }
+
+  // 直接定位到某一时刻并暂停（时间线点击、关键时刻按钮）
+  function jumpTo(t) {
+    pause();
+    seek(t);
+  }
+
+  // 减少动效跟随系统设置，页面上的开关可以改；正在播放时换一种方式从当前时刻续播
+  function applyMotion(reduce) {
+    state.reduce = reduce;
+    els.motion.checked = reduce;
+    document.body.dataset.motion = reduce ? 'reduce' : 'full';
+  }
+
+  function setMotion(reduce) {
+    const wasPlaying = state.playing;
+    pause();
+    applyMotion(reduce);
+    render(state.t);
+    if (wasPlaying) play();
+  }
+
+  function togglePlay() {
+    if (state.playing) pause();
+    else play();
+  }
+
+  function nextBoundary() {
+    return BOUNDS.find((x) => x > state.t + EPS) ?? T;
+  }
+
+  function prevBoundary() {
+    const earlier = BOUNDS.filter((x) => x < state.t - EPS);
+    return earlier.length ? earlier[earlier.length - 1] : 0;
+  }
+
+  function killClock() {
+    cancelGlide();
+    stopStepper();
+    state.playing = false;
+    if (state.tl) {
+      state.tl.kill();
+      state.tl = null;
+    }
+  }
+
+  function buildClock() {
+    killClock();
+    if (!window.gsap) {
+      els.notice.hidden = false;
+      return;
+    }
+    els.notice.hidden = true;
+    const tl = window.gsap.timeline({
+      paused: true,
+      onUpdate: () => render(tl.time() / TICK),
+      onComplete: finishPlayback
+    });
+    tl.to({}, { duration: T * TICK, ease: 'none' });
+    tl.timeScale(state.speed);
+    state.tl = tl;
+  }
+
+  // ───── 地址栏状态：#t=…，只用 replaceState，不增加历史记录 ─────
+
+  function readLink() {
+    const params = new URLSearchParams(window.location.hash.slice(1));
+    const t = Number(params.get('t'));
+    return params.has('t') && Number.isFinite(t) ? clamp(t, 0, T) : 0;
+  }
+
+  function writeLink() {
+    state.linkTimer = 0;
+    try {
+      history.replaceState(null, '', `#t=${Number(state.t.toFixed(2))}`);
+    } catch {
+      // 某些本地文件环境不允许改写地址，演示照常可用
+    }
+  }
+
+  // 暂停或停下时立即写回；拖动与逐步过程中合并为一次写入
+  function syncLink(now) {
+    if (!state.linkReady) return;
+    clearTimeout(state.linkTimer);
+    if (now) writeLink();
+    else state.linkTimer = setTimeout(writeLink, LINK_DELAY);
+  }
+
+  // ───── 事件绑定 ─────
+
+  function bindControls() {
+    els.motion.addEventListener('change', () => setMotion(els.motion.checked));
+    motionQuery.addEventListener('change', (event) => setMotion(event.matches));
+
+    els.speed.addEventListener('change', () => {
+      state.speed = Number(els.speed.value);
+      if (state.tl) state.tl.timeScale(state.speed);
+    });
+
+    els.play.addEventListener('click', togglePlay);
+    els.next.addEventListener('click', () => stepTo(nextBoundary()));
+    els.previous.addEventListener('click', () => stepTo(prevBoundary()));
+    els.reset.addEventListener('click', () => {
+      pause();
+      seek(0);
+    });
+
+    const scrub = els.progress;
+    scrub.addEventListener('pointerdown', () => { state.scrubbing = true; pause(); });
+    scrub.addEventListener('keydown', () => { state.scrubbing = true; pause(); });
+    scrub.addEventListener('input', () => seek(Number(scrub.value)));
+    scrub.addEventListener('change', () => { state.scrubbing = false; });
+    scrub.addEventListener('pointerup', () => { state.scrubbing = false; });
+    scrub.addEventListener('blur', () => { state.scrubbing = false; });
+
+    els.timeline.addEventListener('click', (event) => {
+      const target = event.target instanceof Element ? event.target : null;
+      if (!target) return;
+      const jump = target.closest('[data-jump]');
+      if (jump) {
+        jumpTo(Number(jump.dataset.jump));
+        return;
+      }
+      const track = target.closest('.tl-track');
+      if (!track) return;
+      const rect = track.getBoundingClientRect();
+      if (rect.width <= 0) return;
+      jumpTo(clamp((event.clientX - rect.left) / rect.width, 0, 1) * T);
+    });
+
+    document.addEventListener('keydown', (event) => {
+      const target = event.target;
+      if (target instanceof Element && target.closest('input, select, textarea, button, a')) return;
+      if (event.ctrlKey || event.metaKey || event.altKey) return;
+      if (event.code === 'Space') { event.preventDefault(); togglePlay(); }
+      if (event.code === 'ArrowRight') { event.preventDefault(); stepTo(nextBoundary()); }
+      if (event.code === 'ArrowLeft') { event.preventDefault(); stepTo(prevBoundary()); }
+      if (event.code === 'Home') { event.preventDefault(); pause(); seek(0); }
+    });
+
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) pause();
+    });
+  }
+
+  function init() {
+    state.speed = Number(els.speed.value);
+    els.progress.max = String(T);
+    applyMotion(motionQuery.matches);
+    prepare();
+    buildStage();
+    buildTimeline();
+    buildClock();
+    bindControls();
+    seek(readLink());
+    state.linkReady = true;
+  }
+
+  init();
+})();

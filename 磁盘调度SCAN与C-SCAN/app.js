@@ -9,12 +9,17 @@
  *     不依赖一次性回调，倒带天然可逆。
  *  3. 补间只负责 transform / opacity / 颜色 / SVG 几何，一律 fromTo（显式起止），
  *     初始态用 gsap.set 预置，保证任意 seek 结果一致。
- *  4. 重建（换组）前 timeline.kill() + gsap.killTweensOf('*')（AGENTS.md §3.5 防呆铁律）。
+ *  4. 重建前只销毁本控制器的 master，不影响页面其他动画。
  */
 (function () {
   'use strict';
 
   /* ══════════════════ 1. 数据与算法 ══════════════════ */
+
+  var gsap = window.gsap;
+  var reducedMotion = null;
+  var reducedCall = null;
+  var colors = {};
 
   var MAX = 199;           // 最大磁道号
   var HEAD_START = 53;      // 初始磁头
@@ -127,6 +132,12 @@
 
   function collectUi() {
     ui.stage = document.getElementById('stage-container');
+    ui.stagePhase = document.getElementById('stage-phase');
+    ui.stageStep = document.getElementById('stage-step');
+    ui.narration = document.getElementById('stage-narration');
+    ui.progress = document.getElementById('slider-progress');
+    ui.progressLabel = document.getElementById('label-progress');
+    ui.compare = document.getElementById('compare-panel');
     ui.rail = ui.stage.querySelector('.axis-rail');
     ui.head = document.getElementById('head');
     ui.headArrow = document.getElementById('head-arrow');
@@ -329,7 +340,7 @@
         });
         // 新簇与当前入场进度保持一致
         var ref = items[0].el.querySelector('.flag__body');
-        gsap.set(el.querySelector('.flag__body'), { opacity: parseFloat(getComputedStyle(ref).opacity) || 0 });
+        if (gsap) gsap.set(el.querySelector('.flag__body'), { opacity: parseFloat(getComputedStyle(ref).opacity) || 0 });
       } else {
         // 单体：高低两档，同档间距 ≥ 标签宽 + 4px；跨档遮挡由 z-index 解决
         g.forEach(function (it) {
@@ -428,7 +439,7 @@
       m.fromTo(['.hud-row', '.dot-card__foot', '.controls'], { opacity: 0 },
         { opacity: 1, duration: 0.2, ease: 'power1.inOut', immediateRender: false }, t0);
       m.fromTo('.legend__item', { opacity: 0, y: 6 },
-        { opacity: 1, y: 0, duration: 0.2, ease: 'power1.out', stagger: 0.04, immediateRender: false }, t0);
+        { opacity: 1, y: 0, duration: 0.2, ease: 'power1.out', immediateRender: false }, t0);
     }, null, 0.2);
 
     // 就绪时刻：落在 P1 最后一拍的拍窗内（否则会踩到 P2 第一拍的状态）
@@ -447,7 +458,7 @@
       m.fromTo('#callout-turn', { opacity: 0, y: -6 },
         { opacity: 1, y: 0, duration: 0.2, ease: 'power1.out', immediateRender: false }, t0);
       m.fromTo('#axis-cap-199', { backgroundColor: '#FFFFFF' },
-        { backgroundColor: '#D97706', duration: 0.35, ease: 'power2.out', immediateRender: false }, t0);
+        { backgroundColor: colors.edge, duration: 0.35, ease: 'power2.out', immediateRender: false }, t0);
     }, { target: null, next: '—', head: seg.at }, 0.2);
 
     beat('turn-flip', function (t0) {
@@ -480,7 +491,7 @@
       m.fromTo('#callout-jump', { opacity: 0, y: -6 },
         { opacity: 1, y: 0, duration: 0.2, ease: 'power1.out', immediateRender: false }, t0);
       m.fromTo('#axis-cap-199', { backgroundColor: '#FFFFFF' },
-        { backgroundColor: '#D97706', duration: 0.35, ease: 'power2.out', immediateRender: false }, t0);
+        { backgroundColor: colors.edge, duration: 0.35, ease: 'power2.out', immediateRender: false }, t0);
     }, { target: null, head: seg.from }, 0.2);
 
     beat('jump-anticipate', function (t0) {
@@ -505,7 +516,7 @@
       m.fromTo('#callout-jump', { opacity: 1, y: 0 },
         { opacity: 0, y: -6, duration: 0.2, ease: 'power2.in', immediateRender: false }, t0);
       m.fromTo('#axis-cap-0', { backgroundColor: '#FFFFFF' },
-        { backgroundColor: '#A8A29E', duration: 0.4, ease: 'power2.out', immediateRender: false }, t0);
+        { backgroundColor: colors.axis, duration: 0.4, ease: 'power2.out', immediateRender: false }, t0);
     }, {
       dist: data.state.dist + d, head: seg.to, headFrom: seg.to, headTo: seg.to,
       skipping: false, next: '—'
@@ -578,7 +589,7 @@
       m.fromTo(chip, { opacity: 1 },
         { opacity: 0.35, duration: 0.32, ease: 'power2.inOut', immediateRender: false }, t0);
       m.fromTo(flag.querySelector('.flag__dot'), { backgroundColor: '#FFFFFF' },
-        { backgroundColor: '#2563EB', duration: 0.3, ease: 'power2.out', immediateRender: false }, t0);
+        { backgroundColor: colors.action, duration: 0.3, ease: 'power2.out', immediateRender: false }, t0);
       m.fromTo(flag.querySelector('.flag__label'), { opacity: 1 },
         { opacity: 0.45, duration: 0.3, ease: 'power2.out', immediateRender: false }, t0);
     }, {
@@ -670,7 +681,7 @@
       m.fromTo(data.reqs.map(function (c) { return ui.chip[c]; }), { opacity: 0.35 },
         { opacity: 1, duration: 0.4, ease: 'power4.out', stagger: 0.02, immediateRender: false }, t0);
       data.reqs.forEach(function (c) {
-        m.fromTo(ui.flag[c].querySelector('.flag__dot'), { backgroundColor: '#2563EB' },
+        m.fromTo(ui.flag[c].querySelector('.flag__dot'), { backgroundColor: colors.action },
           { backgroundColor: '#FFFFFF', duration: 0.4, ease: 'power4.out', immediateRender: false }, t0);
         m.fromTo(ui.flag[c].querySelector('.flag__label'), { opacity: 0.45 },
           { opacity: 1, duration: 0.4, ease: 'power4.out', immediateRender: false }, t0);
@@ -730,6 +741,61 @@
 
   /* ══════════════════ 5. 时间 → 界面（纯函数，可倒带） ══════════════════ */
 
+  function narrationFor(b) {
+    var st = b.state;
+    if (st.phase === 0) return '磁头位于 53，先向大号磁道扫描。';
+    if (st.phase === 3) return '比较两种路径；C-SCAN 的回跳也计入寻道距离。';
+    if (b.kind.indexOf('trans-') === 0) return '恢复相同请求与起点，接下来观察 C-SCAN。';
+    if (b.kind.indexOf('turn-') === 0) return '到达端点 199，SCAN 掉头服务小号磁道。';
+    if (b.kind.indexOf('jump-') === 0) return 'C-SCAN 回跳至 0：途中不服务，距离仍累加。';
+    if (b.kind === 'run-finish') return '本轮请求全部完成，寻道距离已定格。';
+    if (b.kind === 'svc-land' || b.kind === 'svc-confirm') return '服务磁道 ' + st.head + '，已完成 ' + st.servedIdx + ' / ' + data.reqs.length + ' 个请求。';
+    if (st.target === null) return '前方没有待服务请求，先扫描至端点 199。';
+    if (b.kind === 'svc-move') return '磁头移向 ' + st.target + '，移动距离同步计入寻道总量。';
+    return '在当前方向中，选择距离磁头最近的请求 ' + st.target + '。';
+  }
+
+  // 无 CDN 时仍构建相同的拍窗与快照，只停止补间，不复制调度算法。
+  function staticTimeline() {
+    var time = 0;
+    return {
+      fromTo: function () {}, to: function () {}, kill: function () {},
+      pause: function () {}, timeScale: function () {},
+      time: function () { return time; },
+      duration: function () { return cursor + 0.001; },
+      seek: function (t) { time = Math.max(0, Math.min(t, cursor + 0.001)); }
+    };
+  }
+
+  function renderStatic(b, head, dist, served) {
+    var st = b.state;
+    ui.head.style.left = xPct(head) + '%';
+    ui.headArrow.style.transform = st.dir > 0 ? '' : 'rotateY(180deg)';
+    data.reqs.forEach(function (c) {
+      var done = served.indexOf(c) >= 0;
+      ui.chip[c].style.opacity = done ? '.35' : '1';
+      ui.flag[c].querySelector('.flag__dot').style.backgroundColor = done ? colors.action : '#FFFFFF';
+    });
+    ['scan', 'cscan'].forEach(function (run) {
+      var complete = st.phase === 3 || (run === 'scan' && st.run === 'cscan');
+      var amount = complete ? data[run + 'Dist'] : (run === st.run ? dist : 0);
+      var used = 0;
+      ui.trailLine[run].forEach(function (item) {
+        var seg = item.seg;
+        var cost = seg.type === 'turn' ? 0 : Math.abs(seg.to - seg.from);
+        var p = cost ? clamp01((amount - used) / cost)
+          : (complete || amount > used || (amount === used && st.dir < 0) ? 1 : 0);
+        item.el.setAttribute('x2', tX(seg.from + (seg.type === 'turn' ? 0 : seg.to - seg.from) * p));
+        item.el.setAttribute('y2', seg.type === 'move' ? item.rows[seg.row] : item.rows[0] + (item.rows[1] - item.rows[0]) * p);
+        used += cost;
+      });
+    });
+    document.getElementById('callout-turn').style.opacity = b.kind.indexOf('turn-') === 0 ? '1' : '0';
+    document.getElementById('callout-jump').style.opacity = b.kind.indexOf('jump-') === 0 ? '1' : '0';
+    document.getElementById('callout-pivot').style.opacity = b.kind.indexOf('trans-') === 0 ? '1' : '0';
+    ui.stage.querySelectorAll('.trail-tag').forEach(function (el) { el.style.opacity = st.phase === 3 ? '1' : '0'; });
+  }
+
   function put(key, value, apply) {
     if (cache[key] === value) return;
     cache[key] = value;
@@ -763,14 +829,29 @@
     put('dir', st.dir, function (v) { ui.hudDir.innerHTML = v > 0 ? '&rarr;' : '&larr;'; });
     put('seg', st.seg, function (v) { ui.hudSeg.textContent = v; });
     put('next', st.next, function (v) { ui.hudNext.textContent = v; });
-    put('step', i, function (v) { ui.hudStep.textContent = 'STEP #' + (v < 10 ? '0' + v : v); });
+    put('step', i, function (v) {
+      ui.hudStep.textContent = 'STEP #' + (v < 10 ? '0' + v : v);
+      ui.stageStep.textContent = '第 ' + (v < 10 ? '0' + v : v) + ' 拍';
+    });
+    var percent = Math.round(t / master.duration() * 1000);
+    put('timelineProgress', percent, function (v) {
+      ui.progress.value = v;
+      ui.progressLabel.textContent = Math.round(v / 10) + '%';
+    });
+    put('narration', narrationFor(b), function (v) { ui.narration.textContent = v; });
     put('progress', st.servedIdx + '/' + data.reqs.length, function (v) {
       var txt = v.replace('/', ' / ');
       ui.hudProgress.textContent = txt;
       ui.seqMeta.textContent = txt;
     });
     put('phase', st.phase, function (v) {
-      ui.phaseBadges.forEach(function (el, k) { el.classList.toggle('is-active', k === v); });
+      ui.phaseBadges.forEach(function (el, k) {
+        el.classList.toggle('is-active', k === v);
+        if (k === v) el.setAttribute('aria-current', 'step');
+        else el.removeAttribute('aria-current');
+      });
+      ui.stagePhase.textContent = ['初始状态', 'SCAN · 端点折返', 'C-SCAN · 单向回跳', '结果对比'][v];
+      ui.compare.classList.toggle('is-ready', v === 3);
     });
     put('run', st.run, function (v) {
       ui.algoScan.classList.toggle('is-active', v === 'scan');
@@ -786,7 +867,12 @@
     var order = st.run === 'scan' ? data.scanOrder : data.cscanOrder;
     var served = order.slice(0, st.servedIdx);
     put('servedSet', st.run + ':' + st.servedIdx, function () {
-      data.reqs.forEach(function (c) { ui.chip[c].classList.toggle('is-served', served.indexOf(c) >= 0); });
+      data.reqs.forEach(function (c) {
+        var done = served.indexOf(c) >= 0;
+        ui.chip[c].classList.toggle('is-served', done);
+        ui.seqScan[c].hidden = !done;
+        ui.seqCscan[c].hidden = !done;
+      });
       ui.seqEmpty.hidden = st.servedIdx > 0;
       if (st.servedIdx > 0) {
         var list = st.run === 'scan' ? ui.seqScanList : ui.seqCscanList;
@@ -857,7 +943,7 @@
       });
       // HUD：方向内候选
       ui.hudCand.textContent = unservedList.length === 0 ? '—'
-        : (candList.length === 0 ? '前方无请求 → 扫到端点'
+        : (candList.length === 0 ? '无请求 · 扫到端点'
           : candList.length + ' 个 · 最近 +' + minDist);
     });
 
@@ -882,10 +968,12 @@
       ui.cmpNumCscan.textContent = Math.round(cscanN * cnt);
       ui.cmpDeltaNum.textContent = Math.round(dN * cnt);
     });
+    if (!gsap) renderStatic(b, head, dist, served);
   }
 
   function updatePlayBtn() {
     if (!master) return;
+    document.body.classList.toggle('is-playing', State.isPlaying);
     var atEnd = master.time() >= master.duration() - 0.002;
     var text = State.isPlaying ? '暂停演进' : (atEnd ? '↺ 重放对比' : '自动演进');
     var icon = State.isPlaying ? '⏸' : '▶';
@@ -922,6 +1010,7 @@
 
   /** 时间轴初始态：所有会被补间触碰的属性都在这里归零/定位 */
   function setInitialDom() {
+    if (!gsap) return;
     gsap.set('.axis-line', { scaleX: 0 });
     gsap.set(['.tick', '.axis-cap', '.cap-label'], { opacity: 0 });
     gsap.set('.flag__body', { opacity: 0 });
@@ -938,18 +1027,17 @@
     gsap.set(['.trail-scan', '.trail-cscan'], { opacity: 1 });
     gsap.set(['#algo-scan', '#algo-cscan'], { rotationY: 0 });
     gsap.set('#hud-dir', { rotationY: 0 });
-    gsap.set('#axis-cap-199', { backgroundColor: '#D97706' });
-    gsap.set('#axis-cap-0', { backgroundColor: '#A8A29E' });
+    gsap.set('#axis-cap-199', { backgroundColor: colors.edge });
+    gsap.set('#axis-cap-0', { backgroundColor: colors.axis });
     gsap.set('#dot-halo', { scale: 0.4, opacity: 0 });
   }
 
   function build() {
+    if (master) master.kill();
     data = deriveData(GROUPS[State.groupIndex]);
     buildDom(GROUPS[State.groupIndex]);
     layoutFlags();
 
-    if (master) master.kill();
-    gsap.killTweensOf('*');           // 铁律：重建前彻底清理前序补间
     setInitialDom();
 
     beats = [];
@@ -957,7 +1045,7 @@
     cache = {};
     meta = { phaseStart: {} };
 
-    master = gsap.timeline({
+    master = gsap ? gsap.timeline({
       paused: true,
       onComplete: function () {          // 播到结尾交回「↺ 重放对比」
         State.isPlaying = false;
@@ -979,7 +1067,7 @@
           updatePlayBtn();
         }
       }
-    });
+    }) : staticTimeline();
 
     addP1();
     data.state.phase = 1;
@@ -994,6 +1082,7 @@
 
   /** seek 后必须手动 render：gsap.seek() 默认不派发 onUpdate */
   function seekTo(t) {
+    if (reducedCall) { reducedCall.kill(); reducedCall = null; }
     master.seek(t);
     render(master.time());
     updatePlayBtn();
@@ -1009,20 +1098,39 @@
 
   /* —— 控制器 —— */
   function play() {
-    if (!master) return;
+    if (!master || !gsap) return;
     State.autoIntro = false;
     if (master.time() >= master.duration() - 0.002) seekTo(0);
     State.isPlaying = true;
     master.timeScale(State.speed);
-    master.play();
+    if (reducedMotion.matches) {
+      if (reducedCall) reducedCall.resume();
+      else playReducedStep();
+    } else {
+      if (reducedCall) { reducedCall.kill(); reducedCall = null; }
+      master.play();
+    }
     updatePlayBtn();
   }
   function pause() {
     State.isPlaying = false;
+    if (reducedCall) reducedCall.pause();
     if (master) master.pause();
     updatePlayBtn();
   }
   function toggle() { State.isPlaying ? pause() : play(); }
+
+  function playReducedStep() {
+    if (!State.isPlaying) return;
+    var i = beatIndexAt(master.time());
+    if (i >= beats.length - 1) {
+      seekTo(master.duration());
+      pause();
+      return;
+    }
+    seekTo(beats[i + 1].t);
+    reducedCall = gsap.delayedCall(0.9, playReducedStep).timeScale(State.speed);
+  }
 
   function step(dir) {
     State.autoIntro = false;
@@ -1035,7 +1143,6 @@
   function reset() {
     State.autoIntro = false;
     pause();
-    gsap.killTweensOf('.ghost, #ghost-layer *');   // 铁律：复位前清理幽灵残留
     seekTo(meta.readyT);
   }
 
@@ -1049,6 +1156,7 @@
   function setSpeed(v) {
     State.speed = v;
     if (master) master.timeScale(v);
+    if (reducedCall) reducedCall.timeScale(v);
     var el = document.getElementById('label-speed');
     if (el) el.textContent = v.toFixed(1) + 'x';
   }
@@ -1076,32 +1184,60 @@
     document.getElementById('slider-speed').addEventListener('input', function (e) {
       setSpeed(parseFloat(e.target.value));
     });
+    ui.progress.addEventListener('input', function (e) {
+      State.autoIntro = false;
+      pause();
+      seekTo(Number(e.target.value) / 1000 * master.duration());
+    });
     ui.phaseBadges.forEach(function (el) {
       el.addEventListener('click', function () { gotoPhase(parseInt(el.dataset.phase, 10)); });
     });
+    document.addEventListener('visibilitychange', function () { if (document.hidden) pause(); });
+    reducedMotion.addEventListener('change', function () {
+      var wasPlaying = State.isPlaying;
+      pause();
+      if (wasPlaying) play();
+    });
     window.addEventListener('resize', onResize);
     window.addEventListener('keydown', function (e) {
-      if (e.target && /INPUT|TEXTAREA/.test(e.target.tagName)) return;
+      if (e.ctrlKey || e.metaKey || e.altKey || e.target.closest('input, textarea, select, button, a, [contenteditable]')) return;
       if (e.key === 'ArrowRight') { step(1); e.preventDefault(); }
       else if (e.key === 'ArrowLeft') { step(-1); e.preventDefault(); }
       else if (e.key === ' ') { toggle(); e.preventDefault(); }
+      else if (e.key === 'Home') { reset(); e.preventDefault(); }
     });
   }
 
   function init() {
+    reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+    var css = getComputedStyle(document.documentElement);
+    colors = {
+      action: css.getPropertyValue('--accent-blue').trim(),
+      edge: css.getPropertyValue('--accent-amber').trim(),
+      axis: '#8F998C'
+    };
     collectUi();
     build();
     bind();
 
-    // 开场自动播一遍 P1 布景
-    master.seek(0);
-    State.isPlaying = true;
-    master.timeScale(State.speed);
-    master.play();
-    updatePlayBtn();
-
-    console.log('🚀 [磁盘调度SCAN与C-SCAN] 时间轴就绪：' + beats.length + ' 拍 · ' +
-      'SCAN ' + data.scanDist + ' 柱道 / C-SCAN ' + data.cscanDist + ' 柱道 · 组 ' + GROUPS[State.groupIndex].key);
+    if (!gsap) {
+      var notice = document.getElementById('engine-notice');
+      notice.hidden = false;
+      notice.textContent = '动画引擎未加载，可用上一拍、下一拍、进度条和阶段导航查看。';
+      ui.btnPlay.disabled = true;
+      ui.btnPlay.title = '动画引擎未加载';
+      seekTo(meta.readyT);
+    } else if (reducedMotion.matches) {
+      State.autoIntro = false;
+      seekTo(meta.readyT);
+    } else {
+      // 保留原有开场节奏，布景完成后停在就绪态。
+      master.seek(0);
+      State.isPlaying = true;
+      master.timeScale(State.speed);
+      master.play();
+      updatePlayBtn();
+    }
   }
 
   window.addEventListener('DOMContentLoaded', init);

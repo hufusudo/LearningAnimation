@@ -1,81 +1,97 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="zh-CN">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>操作系统引导流程 · ROM→MBR→分区引导→内核调入主存</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/MotionPathPlugin.min.js"></script>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Newsreader:opsz,wght@6..72,500;6..72,600;6..72,700&display=swap">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="按考研考法重做的操作系统引导流程：ROM 中的 BIOS、MBR、活动分区的引导扇区、启动管理器与内核依次接力，并同步展示中断向量表与分区表的变化。">
+  <title>操作系统引导流程 · 可视化实验室</title>
   <link rel="stylesheet" href="style.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
 </head>
-<body class="min-h-screen antialiased flex flex-col">
-
-  <!-- Header -->
-  <header class="border-b border-[#E5E4DC] bg-[#FAF9F5]/90 backdrop-blur px-6 py-4">
-    <div class="max-w-6xl mx-auto flex items-center justify-between">
-      <div>
-        <h1 class="font-serif text-xl font-semibold text-stone-900">操作系统引导流程演示</h1>
-        <p class="text-xs text-stone-500 font-mono mt-0.5">
-          ROM(BIOS) → 磁盘引导(MBR) → 分区引导(DBR) → OS 内核调入主存 · Boot Chain Visualization
-        </p>
-      </div>
-      <a href="../index.html" class="text-xs font-mono text-stone-400 hover:text-stone-700 transition-colors">← 返回展厅</a>
-    </div>
+<body>
+  <header class="site-header">
+    <a class="back-link tactile" href="../index.html#os">← 返回计算机操作系统</a>
+    <span class="site-name">可视化实验室</span>
+    <span class="view-label">三阶段 · 十步接力</span>
   </header>
 
-  <!-- 主体 -->
-  <main class="flex-1 max-w-6xl w-full mx-auto px-6 py-6 flex flex-col gap-4">
-
-    <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
-      <!-- 画布 -->
-      <div class="lg:col-span-2 card-panel rounded-2xl p-4">
-        <svg id="boot-svg" viewBox="0 0 1040 620" class="w-full h-auto"></svg>
-      </div>
-
-      <!-- 讲解面板 -->
-      <div class="flex flex-col gap-4">
-        <div class="card-panel rounded-2xl p-5 flex-1">
-          <div id="step-badge" class="inline-block px-2.5 py-1 rounded-md text-[11px] font-mono font-semibold bg-blue-50 text-blue-700 border border-blue-200 mb-3">
-            STEP 0 / 6
-          </div>
-          <h2 id="step-title" class="font-serif text-lg font-semibold text-stone-900 mb-2">加电复位：从 ROM 开始</h2>
-          <p id="step-desc" class="text-[13px] text-stone-600 leading-relaxed mb-3"></p>
-          <div class="bg-stone-50 border border-[#E5E4DC] rounded-lg px-3 py-2">
-            <p id="step-micro" class="font-mono text-[11.5px] text-stone-700 leading-relaxed"></p>
-          </div>
-        </div>
-
-        <!-- 步骤节点 -->
-        <div class="card-panel rounded-2xl p-4">
-          <p class="text-[11px] font-mono font-bold uppercase tracking-wider text-stone-500 mb-2">引导链 (Boot Chain)</p>
-          <div id="step-list" class="flex flex-wrap gap-1.5"></div>
-        </div>
+  <main>
+    <div class="title-row">
+      <div class="title-block">
+        <h1>操作系统引导流程<span class="english-name">Boot Chain</span></h1>
+        <p class="subtitle">开机时 CPU 先执行 ROM 中的 BIOS；控制权再依次经过 MBR、活动分区的引导扇区和启动管理器，最后把内核装入内存。</p>
       </div>
     </div>
 
-    <!-- 控制条 -->
-    <div class="card-panel rounded-2xl px-5 py-3.5 flex items-center gap-4 flex-wrap">
-      <button id="btn-play" class="px-4 py-1.5 rounded-lg text-sm font-medium bg-stone-900 text-white hover:bg-stone-700 transition-colors">▶ 播放</button>
-      <button id="btn-prev" class="ctl-btn">⏮ 上一阶段</button>
-      <button id="btn-next" class="ctl-btn">下一阶段 ⏭</button>
-      <button id="btn-restart" class="ctl-btn">↺ 复位</button>
-
-      <div id="scrubber" class="flex-1 min-w-[180px] h-8 flex items-center cursor-pointer touch-none select-none">
-        <div class="relative w-full h-1.5 bg-[#E5E4DC] rounded-full">
-          <div id="scrub-fill" class="absolute inset-y-0 left-0 bg-blue-600 rounded-full" style="width:0%"></div>
-          <div id="scrub-knob" class="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-3.5 h-3.5 bg-white border-2 border-blue-600 rounded-full" style="left:0%"></div>
-        </div>
+    <section class="stage" id="stage" aria-label="操作系统引导动画">
+      <div class="stage-status">
+        <i class="led" aria-hidden="true"></i>
+        <output class="clock" id="clock" for="progress">0.0 s</output>
+        <span class="phase" id="phase">初始引导</span>
+        <span class="step-title" id="step-title">加电复位</span>
+        <span class="step-index" id="step-index">第 1 / 10 步</span>
       </div>
-      <span id="time-label" class="font-mono text-xs text-stone-400 tabular-nums">0.0s</span>
-    </div>
 
-    <p class="text-center font-mono text-[11px] text-stone-400">
-      提示：拖动底部进度条可 60fps 连续 scrub 整个引导过程 · 点击引导链节点可平滑跳转
-    </p>
+      <div class="sand" id="sand-wrap">
+        <svg id="boot" role="img" aria-labelledby="boot-title boot-desc">
+          <title id="boot-title">操作系统引导流程示意</title>
+          <desc id="boot-desc">左侧是主存：上方为 BIOS 所在的 ROM 映射区，中间为启动管理器与内核区，下方为中断向量表。中间是 CPU 与 ROM 芯片。右侧是引导磁盘：扇区 0 为 MBR，下面两个分区各有引导扇区、根目录中的启动管理器与内核镜像。数据块沿线路从磁盘读入主存。</desc>
+        </svg>
+      </div>
+
+      <div class="stage-foot">
+        <p class="caption" id="caption" aria-live="polite"></p>
+        <span class="counts" id="counts"></span>
+      </div>
+      <p class="scroll-hint">舞台较宽，可左右滑动查看。</p>
+    </section>
+
+    <nav class="track" id="track" aria-label="步骤导航"></nav>
+
+    <section class="playback" aria-label="演示播放控制">
+      <div class="transport">
+        <button id="reset" class="tactile" type="button" title="重新开始（Home）"><span aria-hidden="true">↺</span><span>重播</span></button>
+        <button id="previous" class="tactile" type="button" title="上一步（←）"><span aria-hidden="true">‹</span><span>上一步</span></button>
+        <button id="play" class="beam-cta" type="button" title="播放或暂停（空格）"><span id="play-symbol" aria-hidden="true">▶</span><span id="play-label">播放</span></button>
+        <button id="next" class="tactile" type="button" title="下一步（→）"><span>下一步</span><span aria-hidden="true">›</span></button>
+      </div>
+
+      <div class="progress-control">
+        <label for="progress" class="sr-only">时刻进度</label>
+        <input id="progress" class="taste-slider" type="range" min="0" max="26" step="0.05" value="0">
+        <div class="progress-meta"><span>0.0 s</span><span id="progress-caption">0.0 / 26.0 s</span></div>
+      </div>
+
+      <label class="speed-control" for="speed">速度
+        <select id="speed">
+          <option value="0.5">0.5×</option>
+          <option value="1" selected>1×</option>
+          <option value="1.5">1.5×</option>
+          <option value="2">2×</option>
+        </select>
+      </label>
+
+      <fieldset class="seg-group">
+        <legend class="seg-label">活动分区</legend>
+        <label class="seg"><input type="radio" name="active" value="1" checked><span>系统 A（分区 1）</span></label>
+        <label class="seg"><input type="radio" name="active" value="2"><span>系统 B（分区 2）</span></label>
+      </fieldset>
+
+      <label class="motion-control" for="reduce-motion">
+        <input id="reduce-motion" type="checkbox">
+        <span>减少动效</span>
+      </label>
+    </section>
+
+    <p id="dependency-notice" class="dependency-notice" hidden>动画引擎未加载。可用上一步、下一步、进度条或步骤导航逐步查看；联网后刷新可恢复播放。</p>
+
+    <footer class="page-foot">
+      <p class="foot-note">示意：扇区各段不按比例；内核装入 1 MiB 起为 Linux 示例；不展示 UEFI 与 GPT。</p>
+      <span>空格播放 / 暂停 · ← → 逐步 · Home 重播</span>
+    </footer>
   </main>
 
+  <script src="model.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
