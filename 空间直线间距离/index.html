@@ -34,11 +34,6 @@
   <!-- GSAP -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
 
-  <!-- KaTeX -->
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
-  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
-  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
-
   <link rel="stylesheet" href="style.css">
 </head>
 <body class="h-screen flex flex-col bg-[#FAF9F5] text-stone-900 selection:bg-amber-100 selection:text-amber-900 overflow-hidden">
@@ -46,7 +41,7 @@
   <!-- ===== Header ===== -->
   <header class="h-14 flex-shrink-0 bg-[#FAF9F5]/90 backdrop-blur border-b border-[#E5E4DC] px-4 lg:px-6 flex items-center justify-between gap-3 z-30">
     <div class="flex items-center gap-3 min-w-0">
-      <a href="../index.html" class="flex items-center gap-1.5 text-xs font-mono text-stone-500 hover:text-stone-900 transition-colors py-1 px-2 rounded-md hover:bg-stone-200/60">
+      <a href="../index.html" class="flex items-center gap-1.5 whitespace-nowrap text-xs font-mono text-stone-500 hover:text-stone-900 transition-colors py-1 px-2 rounded-md hover:bg-stone-200/60">
         <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path></svg>
         <span>展厅门户</span>
       </a>
@@ -73,7 +68,6 @@
         <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
         <span>重置视角</span>
       </button>
-      <button id="btn-toggle-explain" class="lg:hidden px-2.5 py-1.5 rounded-lg border border-[#E5E4DC] bg-white text-xs font-medium text-stone-700">笔记看板</button>
     </div>
   </header>
 
@@ -144,14 +138,18 @@
             <div><strong id="story-title">观察两条直线</strong><p id="story-detail">先看两条直线及各自的方向。</p></div>
             <span id="story-count" class="story-count">0 / 4</span>
           </div>
+          <div id="story-track" class="story-track" aria-hidden="true">
+            <span id="story-fill" class="story-fill"></span>
+          </div>
           <div class="story-actions">
             <div id="story-steps" class="story-steps" aria-label="推导步骤"></div>
             <div class="story-buttons">
               <button id="story-prev" type="button" aria-label="上一步">上一步</button>
+              <button id="story-play" type="button" class="story-play" aria-label="播放或暂停">播放</button>
               <button id="story-next" type="button" aria-label="下一步">下一步</button>
-              <button id="story-play" type="button" class="story-play">重播动画</button>
             </div>
           </div>
+          <p id="story-notice" class="story-notice hidden">动画引擎未加载：播放与速度不可用，单步与进度仍可用。</p>
         </div>
         <div class="editorial-card px-4 py-3 bg-white/95 backdrop-blur shadow-md flex flex-col gap-2.5">
 
@@ -219,36 +217,33 @@
           </div>
 
           <!-- Shared footer row -->
-          <div class="flex items-center justify-between pt-2 border-t border-[#EFEFE9] text-[11px] font-mono text-stone-500">
-            <button id="btn-min" class="px-3 py-1.5 rounded-lg bg-stone-900 text-white font-medium hover:bg-stone-800 transition-colors flex items-center gap-1.5 shadow-sm">
-              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"></path></svg>
-              <span id="btn-min-text">捕捉距离最小值</span>
-            </button>
+          <div class="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-[#EFEFE9] text-[11px] font-mono text-stone-500">
+            <div class="flex flex-wrap items-center gap-2">
+              <button id="btn-min" class="px-3 py-1.5 rounded-lg bg-stone-900 text-white font-medium hover:bg-stone-800 transition-colors flex items-center gap-1.5 shadow-sm">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"></path></svg>
+                <span id="btn-min-text">捕捉距离最小值</span>
+              </button>
+              <div id="story-speed" class="story-speed" role="group" aria-label="播放速度">
+                <button type="button" data-speed="0.5">0.5×</button>
+                <button type="button" data-speed="1" class="active">1×</button>
+                <button type="button" data-speed="2">2×</button>
+              </div>
+              <button id="story-motion" type="button" class="story-motion" aria-pressed="false">减少动效</button>
+            </div>
             <div class="flex items-center gap-2">
               <span class="flex items-center gap-1"><span class="legend-dot bg-blue-600"></span>L₁</span>
               <span class="flex items-center gap-1"><span class="legend-dot bg-rose-600"></span>L₂</span>
               <span class="flex items-center gap-1"><span class="legend-dot bg-amber-500"></span>拖拽手柄</span>
-              <span class="hidden md:inline text-stone-400">· 拖动球体可实时改变直线</span>
             </div>
           </div>
+          <p class="text-[11px] text-stone-400">示意：距离与投影按构造顺序给出，数值随参数实时变化。</p>
         </div>
       </div>
     </section>
-
-    <!-- ===== Notes / derivation panel ===== -->
-    <aside id="explain-panel" class="w-full lg:w-[470px] xl:w-[500px] flex-shrink-0 bg-white border-l border-[#E5E4DC] flex flex-col h-full overflow-hidden shadow-sm z-20">
-      <div class="p-3.5 border-b border-[#E5E4DC] bg-[#FAF9F5] flex items-center justify-between">
-        <div>
-          <h2 id="panel-title" class="text-sm font-bold text-stone-900">两直线间距离的几何理解</h2>
-          <p id="panel-subtitle" class="text-[11px] text-stone-500 mt-0.5">平行 · 相交 · 重合 · 异面 的统一判别与计算</p>
-        </div>
-        <span class="text-[10px] font-mono text-stone-500 bg-stone-100 px-2 py-0.5 rounded border border-stone-200">考点同步</span>
-      </div>
-      <div id="derivation-content" class="flex-1 overflow-y-auto p-4 space-y-3 text-stone-700 text-xs leading-relaxed"></div>
-    </aside>
   </main>
 
   <script src="construction.js"></script>
+  <script src="choreo.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

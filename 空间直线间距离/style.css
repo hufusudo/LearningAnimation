@@ -181,3 +181,13 @@ input[type="range"]::-webkit-slider-thumb:hover { transform: scale(1.15); }
   .story-buttons { justify-content: flex-end; margin-top: 0.45rem; }
   .story-head p { max-width: 21rem; }
 }
+.story-track { position: relative; height: 5px; margin: 0 0 0.55rem; border-radius: 3px; background: #E5E4DC; cursor: pointer; }
+.story-fill { position: absolute; left: 0; top: 0; bottom: 0; width: 0; border-radius: 3px; background: #1C1917; }
+.story-notice { margin-top: 0.4rem; font-size: 0.68rem; color: #854D0E; }
+.story-speed { display: inline-flex; padding: 0.15rem; border-radius: 8px; background: #F4F3EE; border: 1px solid #E5E4DC; }
+.story-speed button { padding: 0.2rem 0.5rem; border-radius: 6px; font-size: 0.66rem; color: #57534E; }
+.story-speed button.active { background: #292524; color: #FFFFFF; }
+.story-motion { padding: 0.25rem 0.55rem; border: 1px solid #D6D3CD; border-radius: 7px; font-size: 0.66rem; color: #57534E; background: #FFFFFF; }
+.story-motion[aria-pressed="true"] { background: #292524; color: #FFFFFF; border-color: #292524; }
+.story-speed button:focus-visible, .story-motion:focus-visible, .story-buttons button:focus-visible, .story-steps button:focus-visible { outline: 2px solid #2563EB; outline-offset: 2px; }
+.story-speed button:disabled, .story-motion:disabled, .story-buttons button:disabled, #btn-min:disabled { opacity: 0.4; cursor: not-allowed; }
