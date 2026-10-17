@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>偏导与可微的几何辨析 · 可视化实验室</title>
+  <meta name="description" content="沿一条直线切开曲面，看 P=(0,0) 处的截线、切线与误差；五个样本的四个概念真值由集合图给出。">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="site-header">
+    <a class="back-link" href="../index.html#math">← 返回高等数学</a>
+    <span class="site-name">可视化实验室</span>
+  </header>
+
+  <main class="page">
+    <div class="title-row">
+      <h1>偏导与可微的几何辨析</h1>
+      <p class="subtitle">同一个点 P = (0, 0)，沿一条直线切开曲面：看截线、切线与误差</p>
+    </div>
+
+    <section class="stage" id="stage" aria-labelledby="stageTitle">
+      <h2 class="sr-only" id="stageTitle">截线、切线与集合判定</h2>
+
+      <div class="col-plot">
+        <p class="formula" id="formula" aria-live="polite"></p>
+        <svg id="plot" class="plot" viewBox="0 0 520 520" role="img" aria-labelledby="plotTitle plotDesc">
+          <title id="plotTitle">沿所选直线的截线</title>
+          <desc id="plotDesc">横轴是离 P 的距离，纵轴是曲面高度，两轴同一尺度。黑线是截线，蓝线是割线，虚线是切线，金色带是所有方向的误差范围。</desc>
+          <defs>
+            <clipPath id="clipWin"><rect x="34" y="34" width="452" height="452"></rect></clipPath>
+          </defs>
+          <rect class="win" x="34" y="34" width="452" height="452"></rect>
+          <g clip-path="url(#clipWin)">
+            <polygon id="band" class="band" hidden></polygon>
+            <path id="secR" class="sec"></path>
+            <path id="secL" class="sec"></path>
+            <line id="tangent" class="tangent" hidden></line>
+            <path id="curveR" class="curve"></path>
+            <path id="curveL" class="curve"></path>
+          </g>
+          <line class="baseline" x1="34" y1="260" x2="486" y2="260"></line>
+          <line class="axis-p" x1="260" y1="34" x2="260" y2="486"></line>
+          <circle id="limit" class="limit" cx="260" cy="260" r="6" hidden></circle>
+          <circle id="origin" class="origin" cx="260" cy="260" r="5"></circle>
+          <text class="tick" x="34" y="506">−ρ</text>
+          <text class="tick" x="486" y="506" text-anchor="end">+ρ</text>
+          <text class="tick" x="268" y="252">P</text>
+          <text id="edge" class="edge" x="478" y="58" text-anchor="end" hidden></text>
+        </svg>
+        <p class="axis-note">横轴：离 P 的距离（沿所选直线，负值为反方向）。纵轴：高度。两轴同一尺度。</p>
+      </div>
+
+      <aside class="col-side">
+        <svg id="sets" class="sets" viewBox="0 0 360 260" role="img" aria-labelledby="setsTitle">
+          <title id="setsTitle">四个概念的嵌套关系</title>
+          <ellipse class="set" cx="140" cy="140" rx="118" ry="112"></ellipse>
+          <ellipse class="set" cx="220" cy="140" rx="118" ry="112"></ellipse>
+          <ellipse class="set set-d" cx="180" cy="140" rx="56" ry="84"></ellipse>
+          <ellipse class="set set-c" cx="180" cy="140" rx="28" ry="46"></ellipse>
+          <text class="set-name" x="62" y="176" text-anchor="middle">偏导存在</text>
+          <text class="set-name" x="298" y="176" text-anchor="middle">连续</text>
+          <text class="set-name" x="180" y="76" text-anchor="middle">可微</text>
+          <text class="set-name" x="180" y="118" text-anchor="middle">偏导</text>
+          <text class="set-name" x="180" y="134" text-anchor="middle">连续</text>
+          <g id="dot" class="dot" hidden>
+            <circle r="6"></circle>
+            <text class="dot-label" x="10" y="4">F1</text>
+          </g>
+        </svg>
+
+        <ul class="verdicts" id="verdicts" aria-label="四个概念的判定">
+          <li data-c="A"><span class="glyph" aria-hidden="true">?</span><span class="cname">偏导存在</span><span class="sr-only state">未测</span></li>
+          <li data-c="B"><span class="glyph" aria-hidden="true">?</span><span class="cname">连续</span><span class="sr-only state">未测</span></li>
+          <li data-c="D"><span class="glyph" aria-hidden="true">?</span><span class="cname">可微</span><span class="sr-only state">未测</span></li>
+          <li data-c="C"><span class="glyph" aria-hidden="true">?</span><span class="cname">偏导连续</span><span class="sr-only state">未测</span></li>
+        </ul>
+
+        <dl class="readout">
+          <div><dt>距离 ρ</dt><dd id="rhoRead">—</dd></div>
+          <div><dt>正向割线</dt><dd id="secP">—</dd></div>
+          <div><dt>反向割线</dt><dd id="secN">—</dd></div>
+          <div><dt>切线斜率</dt><dd id="tanRead">—</dd></div>
+          <div><dt>误差比</dt><dd id="errRead">—</dd></div>
+        </dl>
+
+        <figure class="spark-wrap">
+          <svg id="spark" class="spark" viewBox="0 0 280 120" role="img" aria-labelledby="sparkTitle">
+            <title id="sparkTitle">切线斜率随靠近 P 的取值</title>
+            <line class="spark-base" x1="16" y1="60" x2="264" y2="60"></line>
+            <line id="sparkTan" class="spark-tan" x1="16" y1="60" x2="264" y2="60" hidden></line>
+            <g id="sparkDots"></g>
+          </svg>
+          <figcaption class="spark-cap"><span class="key key-r">正向</span><span class="key key-l">反向</span>切线斜率，由远及近</figcaption>
+        </figure>
+      </aside>
+
+      <p class="hint" id="hint" aria-live="polite"></p>
+
+      <div class="tour" role="group" aria-label="导览控制">
+        <button type="button" class="btn btn-primary" id="tourPlay" aria-pressed="false">播放导览</button>
+        <button type="button" class="btn" id="tourPrev">上一步</button>
+        <button type="button" class="btn" id="tourNext">下一步</button>
+        <button type="button" class="btn" id="tourReplay">重播</button>
+        <div class="seg" id="tourKind" role="group" aria-label="导览内容">
+          <button type="button" data-kind="entry" aria-pressed="true">入门：F1、F2</button>
+          <button type="button" data-kind="advanced" aria-pressed="false">进阶：F3、F4、F0</button>
+        </div>
+        <div class="seg" id="tourSpeed" role="group" aria-label="导览速度">
+          <button type="button" data-speed="0.5" aria-pressed="false">0.5×</button>
+          <button type="button" data-speed="1" aria-pressed="true">1×</button>
+          <button type="button" data-speed="2" aria-pressed="false">2×</button>
+        </div>
+      </div>
+      <div class="progress" aria-hidden="true"><span id="progressFill"></span></div>
+
+      <div class="keys" id="keys" hidden>
+        <p class="keys-title">键盘操作</p>
+        <ul>
+          <li><b>1–5</b> 或 <b>← →</b> 切换样本</li>
+          <li><b>Shift + ← →</b> 转动方向 5°　<b>↑ ↓</b> 缩放距离 ρ</li>
+          <li><b>空格</b> 自动缩放　<b>G</b> 入门导览　<b>T</b> 进阶导览</li>
+          <li><b>R</b> 盲测　<b>Z</b> 复位　<b>F</b> 全屏　<b>+ / −</b> 字号　<b>?</b> 本表</li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="controls" aria-label="演示控制">
+      <div class="ctl">
+        <span class="ctl-label" id="sampleLabel">样本</span>
+        <div class="seg" id="samples" role="group" aria-labelledby="sampleLabel">
+          <button type="button" data-id="F1" aria-pressed="true">F1</button>
+          <button type="button" data-id="F2" aria-pressed="false">F2</button>
+          <button type="button" data-id="F3" aria-pressed="false">F3</button>
+          <button type="button" data-id="F4" aria-pressed="false">F4</button>
+          <button type="button" data-id="F0" aria-pressed="false">F0</button>
+        </div>
+      </div>
+      <div class="ctl ctl-range">
+        <label for="theta">方向 θ</label>
+        <input type="range" id="theta" min="0" max="180" step="1" value="20">
+        <output id="thetaVal" for="theta">20°</output>
+      </div>
+      <div class="ctl ctl-range">
+        <label for="zoom">距离 ρ</label>
+        <input type="range" id="zoom" min="0" max="9" step="0.01" value="0">
+        <output id="zoomVal" for="zoom">ρ = 1.2000</output>
+      </div>
+      <div class="ctl ctl-buttons">
+        <button type="button" class="btn" id="auto" aria-pressed="false">自动缩放（空格）</button>
+        <button type="button" class="btn" id="blind" aria-pressed="false">盲测（R）</button>
+        <button type="button" class="btn" id="motion" aria-pressed="false">减少动效</button>
+        <button type="button" class="btn" id="fontDown" aria-label="字号缩小">A−</button>
+        <button type="button" class="btn" id="fontUp" aria-label="字号放大">A+</button>
+        <button type="button" class="btn" id="helpBtn" aria-pressed="false">键盘（?）</button>
+      </div>
+      <p class="notice" id="notice" hidden></p>
+    </section>
+
+    <p class="caption">示意说明：函数为教学示例，只沿直线检验；完整证明需对所有路径与方向成立。</p>
+  </main>
+
+  <script src="vendor/gsap.min.js"></script>
+  <script src="model.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
