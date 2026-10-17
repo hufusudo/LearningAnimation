@@ -1,23 +1,19 @@
 /**
  * 时钟页面置换算法的离散推演模型（纯计算，不碰 DOM）。
- * 每一步只做一件事：指针转一格、检查一个页框、翻一位、淘汰、装入、写操作或前移。
- * 界面用 sampleAt(run, 步号, 步内进度) 取画面，任意步都能直接跳转与倒退，不依赖历史动画。
+ * 每一步只推进一个状态变化：指针转一格、检查一个页框、翻一位、选中淘汰、淘汰、装入、写操作或前移。
+ * 每一步都记录变化前后的完整快照；界面用 sampleAt 取得位置，再由 choreo.js 决定每个元素的画面。
  */
 (function (root) {
   'use strict';
 
   const FRAMES = 4;
   const MAX_PAGE = 9;
-  const HAND_END = 0.4;   // 指针转动占步长的前 40%
-  const MARK_AT = 0.45;   // 状态变化与浮标出现的时刻
-  const FADE_IN = 0.15;   // 浮标淡入占步长
-  const FADE_OUT = 0.25;  // 上一步的浮标与外环在本步开头淡出
-  const PULSE = 0.25;     // 变化时的强调脉冲长度
+  const HAND_END = 0.4;   // 指针转动占步长的前 40%（与 choreo.js 一致）
 
-  // 每种步的基准时长（秒，1× 速度）
+  // 每种步的基准时长（秒，1× 速度）：主动作与回执都在这段时间内完成
   const DUR = Object.freeze({
-    access: 0.8, lookup: 0.9, hit: 1.0, check: 0.9, clear: 1.1,
-    select: 1.0, evict: 1.1, load: 1.2, write: 1.0, advance: 0.9
+    access: 0.9, lookup: 1.1, hit: 1.1, check: 0.9, clear: 1.2,
+    select: 1.1, evict: 1.6, load: 1.6, write: 1.1, advance: 1.0
   });
 
   // 改进型四轮的目标类别（第 2、4 轮的 (0,1) 与第 1、3 轮的 (0,0)）
@@ -131,6 +127,8 @@
     run.steps.push({
       req: spec.req,
       kind: spec.kind,
+      outcome: spec.outcome || null,   // 查表步：'hit' 或 'fault'
+      dirty: Boolean(spec.dirty),      // 淘汰步：被淘汰的页是否为脏页
       round: spec.round || 0,
       phase: spec.phase,
       narr: spec.narr,
@@ -232,7 +230,7 @@
     const hit = state.frames.findIndex((c) => c.page === request.page);
     if (hit !== -1) {
       emit(run, state, {
-        req: j, kind: 'lookup', phase: '命中', focus: hit,
+        req: j, kind: 'lookup', outcome: 'hit', phase: '命中', focus: hit,
         narr: `${pg} 在 F${hit} 中，命中；指针不动。`,
         tag: { frame: hit, text: '命中', tone: 'hit' },
         apply: (s) => { s.stats.total++; s.stats.hits++; }
@@ -255,12 +253,14 @@
           apply: (s) => { s.frames[hit].m = 1; }
         });
       }
+      run.evictStep[j] = Infinity;
+      run.loadStep[j] = Infinity;
       run.results[j] = { hit: true, frame: hit, victimPage: null, dirty: false, round: 0 };
       return;
     }
 
     emit(run, state, {
-      req: j, kind: 'lookup', phase: '缺页', focus: -1,
+      req: j, kind: 'lookup', outcome: 'fault', phase: '缺页', focus: -1,
       narr: `${pg} 不在驻留集中：缺页，从指针所在的 F${state.hand} 开始扫描。`,
       apply: (s) => { s.stats.total++; s.stats.faults++; }
     });
@@ -269,14 +269,19 @@
     const f = found.frame;
     const victimPage = state.frames[f].page;
     const dirty = enhanced && state.frames[f].m === 1;
+    run.evictStep[j] = run.steps.length;
     emit(run, state, {
-      req: j, kind: 'evict', round: found.round, phase: '淘汰', focus: f,
+      req: j, kind: 'evict', round: found.round, phase: '淘汰', focus: f, dirty,
       narr: !enhanced ? `P${victimPage} 直接覆盖（简单 Clock 不记修改位）。`
         : dirty ? `P${victimPage} 是脏页（M=1），必须先写回外存。`
           : `P${victimPage} 是干净页（M=0），无需写回，直接覆盖。`,
       tag: dirty ? { frame: f, text: '写回磁盘', tone: 'fault' } : { frame: f, text: '直接覆盖', tone: 'quiet' },
-      apply: (s) => { if (dirty) s.stats.writes++; }
+      apply: (s) => {
+        if (dirty) s.stats.writes++;
+        s.frames[f] = { page: null, r: 0, m: 0 };   // 页框空出，等待装入
+      }
     });
+    run.loadStep[j] = run.steps.length;
     emit(run, state, {
       req: j, kind: 'load', round: found.round, phase: '装入', focus: f,
       narr: enhanced ? `P${request.page} 调入 F${f}：R=1，M=0（刚调入，尚未写）。` : `P${request.page} 调入 F${f}：R=1。`,
@@ -305,7 +310,8 @@
    * 推演整段访问序列。
    * options: { mode: 'enhanced' | 'basic', frames: [{page,r,m}×4], pointer: 0–3, requests: [{page,op}] }
    * 返回 run：steps 为逐步记录；reqStart / reqEnd 为每次访问在 steps 中的区间；
-   * lookupStep 为每次访问查表的步号；results 为每次访问的结果。
+   * lookupStep / evictStep / loadStep 为每次访问查表、淘汰、装入所在的步号（未发生时为 Infinity）；
+   * results 为每次访问的结果。
    */
   function buildRun(options) {
     const opt = options || {};
@@ -329,6 +335,8 @@
       reqStart: [],
       reqEnd: [],
       lookupStep: [],
+      evictStep: [],
+      loadStep: [],
       results: [],
       init: snapshot(state),
       initDeg: state.deg
@@ -347,64 +355,28 @@
   }
 
   /**
-   * 取得第 index 步在进度 progress（0–1）时的画面。只依赖两个数，与播放历史无关。
-   * 返回：snap（页框、指针、统计）、deg（指针累计角度）、current（当前步，无则为 null）、
-   * req（当前访问序号）、rings（外环）、tags（浮标）、pulse（变化强调）。
+   * 取得演示在第 index 步、步内进度 progress（0–1）时的位置，只依赖这两个数。
+   * step 为正在进行（或刚停住）的那一步，prev 为它之前的一步；p = 0 表示这一步尚未开始。
+   * 每个元素画成什么样，由 choreo.js 按 (step, prev, p) 算出。
    */
   function sampleAt(run, index, progress) {
     const N = run.N;
-    const i = clamp(Math.floor(Number(index)) || 0, 0, N);
     const p = clamp(Number(progress) || 0, 0, 1);
-
+    if (N === 0) return { index: 0, p: 0, done: true, step: null, prev: null, req: 0 };
+    const i = clamp(Math.floor(Number(index)) || 0, 0, N);
     if (i >= N) {
-      const last = N > 0 ? run.steps[N - 1] : null;
-      return {
-        snap: last ? last.after : run.init,
-        deg: last ? last.handTo : run.initDeg,
-        index: N,
-        done: true,
-        current: last,
-        req: last ? last.req : 0,
-        rings: last && last.focus >= 0 ? [{ frame: last.focus, alpha: 1 }] : [],
-        tags: last && last.tag ? [{ ...last.tag, alpha: 1 }] : [],
-        pulse: null
-      };
+      const last = run.steps[N - 1];
+      return { index: N, p: 1, done: true, step: last, prev: N >= 2 ? run.steps[N - 2] : null, req: last.req };
     }
-
     const step = run.steps[i];
     const prev = i > 0 ? run.steps[i - 1] : null;
-    const rings = [];
-    const tags = [];
-    const ringStart = step.moves ? HAND_END : 0;
-    if (step.focus >= 0) rings.push({ frame: step.focus, alpha: clamp((p - ringStart) / 0.2, 0, 1) });
-    if (step.tag) tags.push({ ...step.tag, alpha: clamp((p - MARK_AT) / FADE_IN, 0, 1) });
-    if (prev && p < FADE_OUT) {
-      const out = 1 - p / FADE_OUT;
-      if (prev.focus >= 0) rings.push({ frame: prev.focus, alpha: out });
-      if (prev.tag) tags.push({ ...prev.tag, alpha: out });
-    }
-    const pulse = step.change && p >= MARK_AT && p < MARK_AT + PULSE
-      ? { frame: step.change.frame, what: step.change.what, s: Math.sin((Math.PI * (p - MARK_AT)) / PULSE) }
-      : null;
-
-    return {
-      snap: p >= MARK_AT ? step.after : step.before,
-      deg: step.handFrom + (step.handTo - step.handFrom) * clamp(p / HAND_END, 0, 1),
-      index: i,
-      done: false,
-      current: p > 0 ? step : prev,
-      req: p > 0 ? step.req : (prev ? prev.req : 0),
-      rings,
-      tags,
-      pulse
-    };
+    return { index: i, p, done: false, step, prev, req: p > 0 || !prev ? step.req : prev.req };
   }
 
   const api = {
     FRAMES,
     MAX_PAGE,
     HAND_END,
-    MARK_AT,
     DUR,
     ROUND_RULES,
     SCENARIOS,

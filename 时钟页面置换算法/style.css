@@ -182,15 +182,21 @@ input[type="number"] { width: 64px; }
   min-width: 0;
 }
 
-.track {
+.track-scroll {
   position: relative;
   flex: 1 1 320px;
   min-width: 0;
+  overflow-x: auto;
+}
+
+.track {
+  position: relative;
   display: flex;
+  width: max-content;
   gap: 8px;
   list-style: none;
-  padding: 4px 2px 6px;
-  overflow-x: auto;
+  margin: 0;
+  padding: 4px 2px 10px;
 }
 
 .track li { flex: 0 0 auto; }
@@ -345,23 +351,8 @@ input[type="number"] { width: 64px; }
   stroke-dasharray: 2 7;
 }
 
-.card-body {
-  fill: #FFFFFF;
-  stroke: var(--border-strong);
-  stroke-width: 1.4;
-}
-
-.card-body.is-victim {
-  fill: var(--red-soft);
-  stroke: var(--red);
-  stroke-width: 2;
-}
-
-.card-ring {
-  fill: none;
-  stroke: var(--blue);
-  stroke-width: 2;
-}
+/* 页框本体、外环的 fill / stroke 由脚本写成属性（选中染色、焦点颜色都要随状态过渡）。
+ * 这里不能再写 CSS 声明，否则会覆盖属性，染色就看不见。 */
 
 .card-f {
   font: 600 12px var(--mono);
@@ -750,3 +741,115 @@ body.is-reduced .btn-main::before {
 
   .rounds { grid-template-columns: minmax(0, 1fr); }
 }
+
+/* ---------- 视觉引导：过渡、回执与外存托盘（配合 choreo.js） ----------
+ * 注意：凡是由 JS 通过 opacity 属性或 style 控制的元素，这里都不写 opacity，
+ * 否则 CSS 会覆盖脚本算出的透明度。 */
+
+.track-cursor {
+  position: absolute;
+  left: 0;
+  top: 0;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--blue);
+  pointer-events: none;
+  transition: left 0.45s cubic-bezier(0.2, 0.7, 0.2, 1), width 0.45s cubic-bezier(0.2, 0.7, 0.2, 1),
+    top 0.45s ease, opacity 0.3s ease;
+}
+
+.tok {
+  transition: border-color 0.3s ease, box-shadow 0.3s ease, background-color 0.3s ease, opacity 0.3s ease;
+}
+
+.tok-res,
+.tok-sub {
+  min-height: 1.3em;
+}
+
+.round {
+  transition: background-color 0.35s ease, border-color 0.35s ease, color 0.35s ease, box-shadow 0.35s ease;
+}
+
+.round.is-done .round-no::after {
+  display: inline-block;
+  animation: check-pop 0.35s ease both;
+}
+
+@keyframes check-pop {
+  from { transform: scale(0.3); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+
+.stats dd.num {
+  position: relative;
+  height: 1.3em;
+  overflow: hidden;
+}
+
+.stats .n-main {
+  display: block;
+}
+
+.stats .n-ghost {
+  position: absolute;
+  left: 0;
+  top: 0;
+}
+
+.trail {
+  fill: none;
+  stroke: var(--blue);
+  stroke-width: 6;
+  stroke-linecap: round;
+}
+
+.connector {
+  fill: none;
+  stroke: var(--blue);
+  stroke-width: 1.6;
+  stroke-linecap: round;
+}
+
+.card-empty {
+  font: 600 14px var(--sans);
+  fill: var(--wait);
+  dominant-baseline: central;
+}
+
+.tray-box {
+  fill: #F3F2EC;   /* 描边由脚本写成属性，脏页到达时发光 */
+}
+
+.tray-title {
+  font: 600 12px var(--sans);
+  fill: var(--muted);
+}
+
+.tray-count {
+  font: 700 14px var(--mono);
+  fill: var(--ink);
+}
+
+.ghost-box {
+  stroke-width: 1.4;
+}
+
+.ghost-out .ghost-box {
+  fill: var(--red-soft);
+  stroke: var(--red);
+}
+
+.ghost-in .ghost-box {
+  fill: var(--blue-soft);
+  stroke: var(--blue);
+}
+
+.ghost-text {
+  font: 700 13px var(--mono);
+  dominant-baseline: central;
+}
+
+.ghost-out .ghost-text { fill: var(--red); }
+
+.ghost-in .ghost-text { fill: #1D4ED8; }
