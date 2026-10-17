@@ -5,11 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="theme-color" content="#FAF9F5">
   <title>TCP 拥塞控制演示系统</title>
-  <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Newsreader:ital,opsz,wght@0,6..72,500;0,6..72,600;1,6..72,400&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -20,17 +19,17 @@
         <span class="title-kicker">TRANSMISSION CONTROL PROTOCOL</span>
         <h1>TCP 拥塞控制</h1>
       </div>
-      <span class="model-tag">慢开始 · 拥塞避免 · Reno</span>
+      <span class="model-tag">慢开始 · 拥塞避免 · 快重传 · 快恢复</span>
     </div>
   </header>
 
-  <section class="control-deck" aria-label="演进控制">
+  <section class="control-deck" aria-label="演示控制">
     <div class="control-row">
       <div class="control-cluster transport-controls">
         <button id="btn-play" class="key-button primary-button" type="button">
-          <span id="play-icon">▶</span><span id="play-label">播放</span>
+          <span id="play-icon" aria-hidden="true">▶</span><span id="play-label">播放</span>
         </button>
-        <button id="btn-step" class="key-button" type="button">单步推进 <span aria-hidden="true">›</span></button>
+        <button id="btn-step" class="key-button" type="button">下一步 <span aria-hidden="true">›</span></button>
         <button id="btn-reset" class="key-button" type="button">重新开始 <span aria-hidden="true">↺</span></button>
         <label class="speed-control" for="speed-slider">
           <span>速度</span>
@@ -40,16 +39,27 @@
       </div>
 
       <div class="control-cluster incident-controls">
-        <button id="btn-timeout" class="key-button danger-button" type="button">💥 模拟超时丢包 <span class="button-en">(Timeout)</span></button>
-        <button id="btn-fast-loss" class="key-button warning-button" type="button">⚡ 模拟个别丢包 <span class="button-en">(快重传)</span></button>
+        <button id="btn-timeout" class="key-button danger-button" type="button">模拟超时丢包 <span class="button-en">Timeout</span></button>
+        <button id="btn-fast-loss" class="key-button warning-button" type="button">模拟个别丢包 <span class="button-en">快重传</span></button>
       </div>
     </div>
+
+    <div class="progress-row">
+      <label class="progress-label" for="progress-slider">轮次进度</label>
+      <input id="progress-slider" class="taste-slider progress-slider" type="range" min="0" max="1" step="0.01" value="0">
+      <output id="progress-value" for="progress-slider">第 1 轮</output>
+      <label class="motion-toggle" for="motion-toggle">
+        <input id="motion-toggle" type="checkbox">
+        <span>减少动态效果</span>
+      </label>
+    </div>
+
     <div class="status-row" aria-live="polite">
-      <div class="status-pill phase-pill"><span class="status-led"></span><span>阶段</span><strong id="phase-value">慢开始</strong></div>
+      <div class="status-pill phase-pill" id="phase-pill"><span class="status-led"></span><span>阶段</span><strong id="phase-value">慢开始</strong></div>
       <div class="status-pill"><span class="mono-label">cwnd</span><strong id="cwnd-value">1 MSS</strong></div>
-      <div class="status-pill"><span class="mono-label">ssthresh</span><strong id="ssthresh-value">16 MSS</strong></div>
-      <div class="status-pill round-pill"><span class="mono-label">RTT</span><strong id="round-value">0</strong></div>
-      <div class="status-note" id="status-note">等待开始 · 每轮 RTT 完成后更新窗口</div>
+      <div class="status-pill"><span class="mono-label">ssthresh</span><strong id="ssthresh-value">8 MSS</strong></div>
+      <div class="status-pill round-pill"><span class="mono-label">RTT</span><strong id="round-value">1</strong></div>
+      <div class="status-note" id="status-note">等待开始 · 每个 RTT 结束后，窗口按阶段规则更新</div>
     </div>
   </section>
 
@@ -57,9 +67,9 @@
     <section class="intro-row">
       <div>
         <p class="eyebrow">CONGESTION WINDOW · RTT LOOP</p>
-        <h2>窗口发多少，确认回来后再决定下一轮</h2>
+        <h2>窗口决定一个 RTT 发多少，确认回来才决定下一轮</h2>
       </div>
-      <p class="intro-copy">自动播放依次展示：慢开始 → 拥塞避免 → 超时重传 → 再增长 → 快重传与快恢复。播放中点击丢包按钮，可预约本轮结束后演示。</p>
+      <p class="intro-copy">按顺序看三件事：窗口里的报文同时发出；每个 ACK 回来，窗口格子就随之增长；丢包后，超时把窗口收回到 1，快重传只把窗口减半。</p>
     </section>
 
     <section class="panel network-panel" aria-labelledby="network-title">
@@ -67,70 +77,84 @@
         <div class="heading-title">
           <span class="section-marker blue-marker"></span>
           <div>
-            <h2 id="network-title">物理信道 · 连发与确认</h2>
-            <p class="panel-subtitle">数据包向右，累计 ACK 沿反向信道返回</p>
+            <h2 id="network-title">一个 RTT 的窗口：发出、确认、更新</h2>
+            <p class="panel-subtitle">报文沿信道向右，ACK 沿反向车道返回；格子的颜色表示它处在哪一步</p>
           </div>
         </div>
-        <div class="capacity-pill"><span class="capacity-led"></span>链路承载极限 <b>16 包 / RTT</b></div>
+        <div class="policy-pill" id="policy-pill" aria-live="polite"><span class="status-led"></span><span id="policy-text">慢开始：每个 ACK +1，一轮翻倍</span></div>
       </div>
 
       <div class="event-banner" id="event-banner" role="status" aria-live="assertive" hidden></div>
-      <ol class="event-steps" id="event-steps" aria-label="当前丢包演示进度" hidden>
+      <ol class="event-steps" id="event-steps" aria-label="丢包恢复进度" hidden>
         <li id="event-step-0"></li><li id="event-step-1"></li><li id="event-step-2"></li><li id="event-step-3"></li><li id="event-step-4"></li>
       </ol>
 
-      <div class="network-stage">
-        <article class="host-card sender-card" id="sender-host">
-          <div class="host-heading">
-            <span class="host-icon sender-icon">S</span>
-            <div><strong>发送端</strong><small>TCP Sender</small></div>
-          </div>
-          <div class="host-divider"></div>
-          <div class="host-stat"><span>待确认窗口</span><b id="sender-window">1 包</b></div>
-          <div class="host-stat"><span>正在飞行</span><b id="sender-flight">0 包</b></div>
-          <div class="sender-timer">
-            <svg class="timer-ring" viewBox="0 0 40 40" aria-hidden="true">
-              <circle class="timer-track" cx="20" cy="20" r="16"></circle>
-              <circle class="timer-progress" id="timer-progress" cx="20" cy="20" r="16"></circle>
-            </svg>
-            <div><small>重传计时器</small><strong id="timer-label">空闲</strong></div>
-          </div>
-        </article>
+      <div class="stage-frame">
+        <svg id="tcp-stage" class="tcp-stage" viewBox="0 0 1100 330" role="img" aria-labelledby="stage-title stage-desc">
+          <title id="stage-title">TCP 发送窗口与信道</title>
+          <desc id="stage-desc">发送端按拥塞窗口连发报文，接收端逐个返回 ACK。窗口随 ACK 增长；超时把窗口收回到 1，快重传把窗口减半。</desc>
 
-        <div class="channel" aria-label="双向网络信道">
-          <div class="channel-caption">
-            <span>双向通信信道</span><span id="channel-caption-detail">拥塞窗口决定本轮发送量</span>
-          </div>
-          <div class="lane lane-data" id="data-lane">
-            <div class="lane-line"></div>
-            <span class="lane-label">DATA <span>→</span></span>
-          </div>
-          <div class="lane lane-ack" id="ack-lane">
-            <div class="lane-line"></div>
-            <span class="lane-label">← <span>ACK</span></span>
-          </div>
-          <div class="channel-endpoints"><span>发送方</span><span>接收方</span></div>
-          <div class="duplicate-counter" id="duplicate-counter" hidden>重复 ACK <b id="duplicate-value">0</b> / 3</div>
-        </div>
+          <circle id="led" class="led" cx="26" cy="30" r="5"></circle>
+          <text class="kicker" x="40" y="34">RTT 轮次</text>
+          <text id="round-number" class="round-number" x="22" y="86">01</text>
+          <text id="phase-label" class="phase-label" x="132" y="72">慢开始</text>
+          <text id="phase-sub" class="phase-sub" x="132" y="93">发出 1 个报文</text>
 
-        <article class="host-card receiver-card" id="receiver-host">
-          <div class="host-heading">
-            <span class="host-icon receiver-icon">R</span>
-            <div><strong>接收端</strong><small>TCP Receiver</small></div>
-          </div>
-          <div class="host-divider"></div>
-          <div class="host-stat"><span>累计确认</span><b id="receiver-ack">&lt;ack=1&gt;</b></div>
-          <div class="host-stat"><span>已收到数据</span><b id="receiver-count">0 包</b></div>
-          <div class="receiver-ready"><span class="pulse-dot"></span><span id="receiver-state">就绪，等待数据</span></div>
-        </article>
+          <g class="node" id="sender-node">
+            <rect x="24" y="116" width="180" height="120" rx="14"></rect>
+            <text class="node-title" x="40" y="141">发送端 S</text>
+            <text id="sender-state" class="node-state" x="40" y="165">等待窗口</text>
+            <text id="sender-sub" class="node-sub" x="40" y="184">未确认 0 包</text>
+            <circle class="ring-track" cx="46" cy="211" r="9"></circle>
+            <circle id="timer-arc" class="ring-arc" cx="46" cy="211" r="9"></circle>
+            <text id="timer-text" class="node-sub" x="62" y="215">计时器 —</text>
+          </g>
+
+          <g class="node" id="receiver-node">
+            <rect x="896" y="116" width="180" height="120" rx="14"></rect>
+            <text class="node-title" x="912" y="141">接收端 R</text>
+            <text id="receiver-state" class="node-state" x="912" y="165">就绪</text>
+            <text id="receiver-sub" class="node-sub" x="912" y="184">期望 ack = 1</text>
+          </g>
+
+          <g id="channel">
+            <line class="lane data-lane" x1="226" x2="874" y1="150" y2="150"></line>
+            <line class="lane ack-lane" x1="226" x2="874" y1="192" y2="192"></line>
+            <text class="lane-label" x="226" y="140">DATA →</text>
+            <text class="lane-label ack-label" x="226" y="212">← ACK</text>
+            <g id="packets"></g>
+            <g id="acks"></g>
+            <text id="dup-counter" class="dup-counter" x="874" y="230" text-anchor="end" visibility="hidden">重复 ACK 0 / 3</text>
+          </g>
+
+          <g id="window-row">
+            <text class="row-label" x="24" y="268">发送窗口</text>
+            <text id="window-value" class="window-value" x="24" y="300">1 MSS</text>
+            <text id="next-label" class="next-label" x="1076" y="322" text-anchor="end"></text>
+            <g id="window-cells"></g>
+          </g>
+
+          <g id="stage-tags"></g>
+        </svg>
+        <p class="stage-narration" id="narration" aria-live="polite"></p>
       </div>
 
-      <div class="round-toast" id="round-toast" aria-live="polite"></div>
+      <div class="loss-summary" id="loss-summary" hidden aria-live="polite">
+        <div class="loss-summary-heading"><strong id="loss-title"></strong><span id="loss-progress"></span></div>
+        <div class="loss-values">
+          <div><span>丢包前窗口</span><strong id="loss-before"></strong></div>
+          <div><span>慢开始门限 ssthresh</span><strong id="loss-threshold"></strong><small id="loss-formula"></small></div>
+          <div><span>拥塞窗口 cwnd</span><strong id="loss-window"></strong></div>
+        </div>
+      </div>
+
       <div class="network-footnote">
-        <span><i class="legend-square data-legend"></i>数据包</span>
-        <span><i class="legend-square ack-legend"></i>ACK 确认包</span>
-        <span><i class="legend-square lost-legend"></i>丢失 / 超时</span>
-        <span class="footnote-right" id="flight-note">下一事件：cwnd 超过 16 时，演示超时重传</span>
+        <span><i class="legend-square data-legend"></i>在途报文</span>
+        <span><i class="legend-square acked-legend"></i>已确认</span>
+        <span><i class="legend-square lost-legend"></i>丢失</span>
+        <span><i class="legend-square retrans-legend"></i>重传</span>
+        <span><i class="legend-square ghost-legend"></i>下一轮新增</span>
+        <span class="footnote-right" id="flight-note">预约后，下一轮自动演示丢包</span>
       </div>
     </section>
 
@@ -140,55 +164,52 @@
           <span class="section-marker amber-marker"></span>
           <div>
             <h2 id="chart-title">拥塞窗口变化 · cwnd 对 RTT</h2>
-            <p class="panel-subtitle">每轮确认完成后落点；丢包时在当前 RTT 处显示垂直回落</p>
+            <p class="panel-subtitle">与上方舞台同一时钟：每个轮次结束后落点，丢包处标出回落</p>
           </div>
         </div>
         <div class="chart-legend">
-          <span><i class="legend-line cwnd-legend"></i>cwnd</span>
+          <span><i class="legend-line ss-legend"></i>慢开始</span>
+          <span><i class="legend-line ca-legend"></i>拥塞避免</span>
+          <span><i class="legend-line loss-legend"></i>丢包</span>
           <span><i class="legend-line threshold-legend"></i>ssthresh</span>
         </div>
       </div>
-      <div class="loss-summary" id="loss-summary" hidden aria-live="polite">
-        <div class="loss-summary-heading"><strong id="loss-title"></strong><span id="loss-progress"></span></div>
-        <div class="loss-values">
-          <div><span>丢包前 cwnd</span><strong id="loss-before"></strong></div>
-          <div><span>慢开始门限 ssthresh</span><strong id="loss-threshold"></strong><small id="loss-formula"></small></div>
-          <div><span>拥塞窗口 cwnd</span><strong id="loss-window"></strong></div>
-        </div>
-      </div>
       <div class="chart-wrap">
-        <svg id="cwnd-chart" viewBox="0 0 960 320" role="img" aria-label="TCP 拥塞窗口随 RTT 变化折线图">
-          <defs><marker id="threshold-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#BE123C"></path></marker></defs>
+        <svg id="cwnd-chart" viewBox="0 0 960 300" role="img" aria-label="TCP 拥塞窗口随 RTT 轮次变化折线图">
+          <defs>
+            <clipPath id="chart-clip"><rect id="chart-clip-rect" x="60" y="0" width="0" height="300"></rect></clipPath>
+          </defs>
           <g id="chart-grid"></g>
-          <g id="chart-x-labels"></g>
-          <text class="axis-title y-axis-title" x="18" y="32">cwnd</text>
-          <text class="axis-title x-axis-title" x="886" y="307">RTT</text>
-          <line id="ssthresh-line" class="threshold-line" x1="74" x2="930" y1="180" y2="180"></line>
-          <line id="previous-threshold-line" class="previous-threshold-line" x1="74" x2="930" y1="22" y2="22" visibility="hidden"></line>
-          <text id="previous-threshold-label" class="grid-label" x="700" y="22" visibility="hidden"></text>
-          <line id="threshold-change-arrow" class="threshold-change-arrow" x1="907" x2="907" y1="22" y2="22" marker-end="url(#threshold-arrow)" visibility="hidden"></line>
-          <text id="ssthresh-label" class="threshold-label" x="84" y="174">ssthresh 16</text>
-          <line id="time-cursor" class="time-cursor" x1="74" x2="74" y1="22" y2="260"></line>
-          <path id="cwnd-path" class="cwnd-path" d=""></path>
-          <path id="cwnd-latest-segment" class="cwnd-latest-segment" d=""></path>
-          <g id="chart-points"></g>
+          <g id="chart-x"></g>
+          <text class="axis-title" x="18" y="10">cwnd (MSS)</text>
+          <text class="axis-title" x="888" y="289">RTT</text>
+          <g id="chart-plot" clip-path="url(#chart-clip)">
+            <path id="ssthresh-path" class="threshold-path" d=""></path>
+            <g id="chart-segments"></g>
+            <g id="chart-points"></g>
+          </g>
+          <g id="chart-losses"></g>
+          <line id="chart-cursor" class="chart-cursor" x1="70" x2="70" y1="18" y2="260"></line>
+          <circle id="chart-current" class="chart-current" r="6" cx="70" cy="260" visibility="hidden"></circle>
+          <text id="ssthresh-label" class="threshold-label" x="70" y="18" visibility="hidden"></text>
         </svg>
       </div>
       <div class="chart-caption">
-        <span><b class="formula-tag">慢开始</b> 每轮 ×2，直到 ssthresh</span>
-        <span><b class="formula-tag">拥塞避免</b> 每轮 +1</span>
-        <span><b class="formula-tag loss-tag">Timeout</b> ssthresh ← cwnd / 2，cwnd ← 1</span>
-        <span><b class="formula-tag fast-tag">3 个重复 ACK</b> cwnd ← cwnd / 2，快速补发</span>
+        <span><b class="formula-tag">慢开始</b> 每个 ACK +1，一轮翻倍，到门限为止</span>
+        <span><b class="formula-tag">拥塞避免</b> 每轮 +1 MSS</span>
+        <span><b class="formula-tag loss-tag">超时</b> 门限 = ⌊W / 2⌋，窗口回到 1</span>
+        <span><b class="formula-tag fast-tag">3 个重复 ACK</b> 门限 = 窗口 = ⌊W / 2⌋，直接拥塞避免</span>
       </div>
     </section>
 
     <section class="concept-note">
-      <span class="note-icon">i</span>
-      <p><strong>动画模型：</strong>门限按丢包前的 cwnd / 2 计算，整数 MSS 向下取整且至少为 2；超时后 cwnd 回到 1。快恢复按教材简化曲线显示折半窗口，省略 Reno 临时窗口膨胀，修复后直接继续拥塞避免。</p>
+      <span class="note-icon" aria-hidden="true">i</span>
+      <p><strong>示意说明：</strong>报文与 ACK 的时间是抽象单位，丢包位置由演示剧本给出（习题 5-38：门限 8，窗口到 12 超时）。快恢复按教材口径取 cwnd = ssthresh，省略 Reno 的临时窗口膨胀。</p>
     </section>
   </main>
 
   <footer class="page-footer">COMPUTER NETWORKS <span>·</span> TCP CONGESTION CONTROL</footer>
+  <script src="model.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

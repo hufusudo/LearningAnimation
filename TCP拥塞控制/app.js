@@ -1,812 +1,726 @@
 (() => {
-  const CAPACITY = 16;
-  const INITIAL_SSTHRESH = 16;
+  'use strict';
+
+  const model = window.TcpCongestionModel;
+  const svg = document.getElementById('tcp-stage');
+  if (!model || !svg) return;
+
+  // 1. 画面只由时刻 pos 决定：model.frameAt(scenario, pos) 给出完整状态，这里只写 DOM。
+  // 2. GSAP 只负责推进一个数值（clock.pos）；没有 GSAP 时播放禁用，单步、进度与预约仍可用。
+  // 3. 减少动态效果时不做补间，逐个关键时刻跳转并停留约 0.9 秒（按速度缩放）。
+  // 4. 本模块持有的时间线与计时器由自己清理；暂停只冻结当前时刻，不销毁推演。
+
+  const SVG_NS = 'http://www.w3.org/2000/svg';
   const $ = (id) => document.getElementById(id);
-  const phaseNames = {
-    slowStart: "慢开始",
-    congestionAvoidance: "拥塞避免",
-    fastRetransmit: "快重传",
-    fastRecovery: "快恢复"
-  };
+  const hasGsap = typeof window.gsap !== 'undefined';
+  const motionQuery = window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)') : null;
+  const SEMANTIC = { ss: 'ss', ca: 'ca', loss: 'loss' };
+  const LOSS_PHASES = ['超时等待', '超时重传', '快重传', '快恢复'];
+
+  const LANE = { x0: 226, x1: 874, data: 150, ack: 192, chipW: 34, chipH: 24, ackW: 54, ackH: 22 };
+  const ROW = { x0: 150, x1: 1060, y: 262, h: 34, maxStep: 34 };
+  const TAG = { x0: 300, y: 104, rowX: 1076, rowY: 250 };
+  const CHART = { left: 70, right: 930, top: 22, bottom: 262 };
+  const RING = 56.55;
+
   const state = {
-    cwnd: 1,
-    ssthresh: INITIAL_SSTHRESH,
-    phase: "slowStart",
-    rtt: 0,
+    events: model.DEFAULT_EVENTS.map((event) => ({ ...event })),
+    scenario: null,
+    keys: [],
+    chart: null,
+    frame: null,
+    pos: 0,
+    startPos: 0,
     speed: 1,
     playing: false,
-    busy: false,
-    incidentRunning: false,
-    pendingIncident: null,
-    nextAutomaticLoss: "timeout",
-    lastLoss: null,
-    playbackId: 0,
-    inFlight: 0,
-    received: 0,
-    duplicateAcks: 0,
-    points: [{ rtt: 0, cwnd: 1, kind: "start" }],
-    timelines: new Set(),
-    epoch: 0
+    reduced: false,
+    tween: null,
+    clock: null,
+    timer: null,
+    linkedAt: 0
   };
-  const dom = {
-    play: $("btn-play"),
-    playIcon: $("play-icon"),
-    playLabel: $("play-label"),
-    step: $("btn-step"),
-    reset: $("btn-reset"),
-    timeout: $("btn-timeout"),
-    fastLoss: $("btn-fast-loss"),
-    speed: $("speed-slider"),
-    speedValue: $("speed-value"),
-    phase: $("phase-value"),
-    phasePill: document.querySelector(".phase-pill"),
-    cwnd: $("cwnd-value"),
-    ssthresh: $("ssthresh-value"),
-    round: $("round-value"),
-    statusNote: $("status-note"),
-    senderHost: $("sender-host"),
-    receiverHost: $("receiver-host"),
-    senderWindow: $("sender-window"),
-    senderFlight: $("sender-flight"),
-    receiverAck: $("receiver-ack"),
-    receiverCount: $("receiver-count"),
-    receiverState: $("receiver-state"),
-    timerLabel: $("timer-label"),
-    timerProgress: $("timer-progress"),
-    dataLane: $("data-lane"),
-    ackLane: $("ack-lane"),
-    channelDetail: $("channel-caption-detail"),
-    eventBanner: $("event-banner"),
-    roundToast: $("round-toast"),
-    duplicateCounter: $("duplicate-counter"),
-    duplicateValue: $("duplicate-value"),
-    flightNote: $("flight-note"),
-    chartGrid: $("chart-grid"),
-    chartXLabels: $("chart-x-labels"),
-    thresholdLine: $("ssthresh-line"),
-    thresholdLabel: $("ssthresh-label"),
-    cursor: $("time-cursor"),
-    chartPath: $("cwnd-path"),
-    latestSegment: $("cwnd-latest-segment"),
-    chartPoints: $("chart-points")
-  };
-  Object.assign(dom, {
-    eventSteps: $("event-steps"),
-    lossSummary: $("loss-summary"),
-    lossTitle: $("loss-title"),
-    lossProgress: $("loss-progress"),
-    lossBefore: $("loss-before"),
-    lossThreshold: $("loss-threshold"),
-    lossFormula: $("loss-formula"),
-    lossWindow: $("loss-window"),
-    previousThresholdLine: $("previous-threshold-line"),
-    previousThresholdLabel: $("previous-threshold-label"),
-    thresholdArrow: $("threshold-change-arrow")
-  });
 
-  function showEventStep(kind, current) {
-    const labels = kind === "fast"
-      ? ["第 2 包丢失", "3 次重复 ACK", "立即快重传", "快恢复：保持半窗", "拥塞避免：每 RTT +1"]
-      : ["数据包滞留", "重传计时归零", "门限按半窗更新", "cwnd = 1 重传", "重新慢开始"];
-    dom.eventSteps.hidden = false;
-    labels.forEach((label, index) => {
-      const item = $("event-step-" + index);
-      item.textContent = label;
-      item.classList.toggle("is-current", index === current);
-      item.classList.toggle("is-complete", index < current);
+  const pools = { packets: [], acks: [], cells: [], tags: [] };
+  let cellKey = '';
+
+  const layers = {
+    packets: $('packets'),
+    acks: $('acks'),
+    cells: $('window-cells'),
+    tags: $('stage-tags')
+  };
+
+  function setText(el, value) {
+    const next = String(value);
+    if (el.textContent !== next) el.textContent = next;
+  }
+
+  function setAttr(el, name, value) {
+    const next = String(value);
+    if (el.getAttribute(name) !== next) el.setAttribute(name, next);
+  }
+
+  function setClass(el, value) {
+    if (el.getAttribute('class') !== value) el.setAttribute('class', value);
+  }
+
+  function setVisible(el, visible) {
+    setAttr(el, 'visibility', visible ? 'visible' : 'hidden');
+  }
+
+  function toggleClass(el, name, on) {
+    if (el.classList.contains(name) !== on) el.classList.toggle(name, on);
+  }
+
+  function create(tag, attrs, parent) {
+    const el = document.createElementNS(SVG_NS, tag);
+    Object.entries(attrs || {}).forEach(([key, value]) => el.setAttribute(key, String(value)));
+    if (parent) parent.appendChild(el);
+    return el;
+  }
+
+  function clamp(value, low, high) {
+    return Math.min(high, Math.max(low, value));
+  }
+
+  function tagWidth(text) {
+    let width = 22;
+    for (const char of text) width += /[一-鿿]/.test(char) ? 13 : 7.2;
+    return Math.round(width + 6);
+  }
+
+  // ---------- 舞台元素池：报文、ACK、窗口格子、浮标只在数量变化时新建 ----------
+
+  function makePacket() {
+    const g = create('g', { class: 'pkt', visibility: 'hidden' }, layers.packets);
+    create('rect', { x: 0, y: 0, width: LANE.chipW, height: LANE.chipH, rx: 6 }, g);
+    create('text', { x: LANE.chipW / 2, y: LANE.chipH / 2 }, g);
+    return g;
+  }
+
+  function makeAck() {
+    const g = create('g', { class: 'ack-chip', visibility: 'hidden' }, layers.acks);
+    create('rect', { x: 0, y: 0, width: LANE.ackW, height: LANE.ackH, rx: 7 }, g);
+    create('text', { x: LANE.ackW / 2, y: LANE.ackH / 2 }, g);
+    return g;
+  }
+
+  function buildCells(count, step) {
+    layers.cells.innerHTML = '';
+    pools.cells = [];
+    for (let i = 0; i < count; i += 1) {
+      const g = create('g', {
+        class: 'cell',
+        transform: `translate(${(ROW.x0 + i * step).toFixed(1)} ${ROW.y})`,
+        visibility: 'hidden'
+      }, layers.cells);
+      create('rect', { x: 0, y: 0, width: (step - 6).toFixed(1), height: ROW.h, rx: 7 }, g);
+      create('rect', { class: 'cell-fill', x: 1, y: ROW.h - 1, width: (step - 8).toFixed(1), height: 0 }, g);
+      create('text', { x: ((step - 6) / 2).toFixed(1), y: ROW.h / 2 }, g);
+      pools.cells.push(g);
+    }
+  }
+
+  function makeTag() {
+    const g = create('g', { class: 'tag tone-note', visibility: 'hidden' }, layers.tags);
+    create('rect', { class: 'tag-bg', x: 0, y: 0, height: 22, rx: 11 }, g);
+    create('text', { class: 'tag-text', x: 11, y: 11 }, g);
+    return g;
+  }
+
+  function renderPackets(frame) {
+    const list = frame.packets;
+    while (pools.packets.length < list.length) pools.packets.push(makePacket());
+    pools.packets.forEach((g, i) => {
+      const packet = list[i];
+      if (!packet) {
+        setVisible(g, false);
+        return;
+      }
+      const x = LANE.x0 + (LANE.x1 - LANE.x0) * packet.x - LANE.chipW / 2;
+      const y = LANE.data - LANE.chipH / 2;
+      setAttr(g, 'transform', `translate(${x.toFixed(2)} ${y})`);
+      const extra = packet.state === 'lost' ? ' is-lost' : packet.retrans ? ' is-retrans' : '';
+      setClass(g, `pkt${extra}`);
+      setText(g.lastChild, packet.index);
+      setVisible(g, true);
     });
   }
 
-  function showLossSummary(kind, before, previousThreshold) {
-    state.lastLoss = { kind, before, previousThreshold, threshold: state.ssthresh };
-    dom.lossSummary.hidden = false;
-    dom.lossTitle.textContent = kind === "timeout" ? "Timeout · 门限取丢包前半窗，cwnd 回到 1" : "快重传 / 快恢复 · 窗口折半";
-    dom.lossBefore.textContent = before + " MSS";
-    dom.lossThreshold.textContent = previousThreshold + " → " + state.ssthresh + " MSS";
-    dom.lossFormula.textContent = "ssthresh = max(2, ⌊" + before + " / 2⌋) = " + state.ssthresh;
-    dom.lossWindow.textContent = before + " → " + state.cwnd + " MSS";
-    dom.lossProgress.textContent = "门限依据丢包前的 cwnd 计算";
+  function renderAcks(frame) {
+    const list = frame.acks;
+    while (pools.acks.length < list.length) pools.acks.push(makeAck());
+    pools.acks.forEach((g, i) => {
+      const ack = list[i];
+      if (!ack) {
+        setVisible(g, false);
+        return;
+      }
+      const x = LANE.x0 + (LANE.x1 - LANE.x0) * ack.x - LANE.ackW / 2;
+      const y = LANE.ack - LANE.ackH / 2;
+      setAttr(g, 'transform', `translate(${x.toFixed(2)} ${y})`);
+      const extra = ack.dup ? ' is-dup' : ack.recovery ? ' is-recovery' : '';
+      setClass(g, `ack-chip${extra}`);
+      setText(g.lastChild, `ack=${ack.ackNo}`);
+      setVisible(g, true);
+    });
   }
 
-  function updateUpcomingEvent() {
-    dom.flightNote.textContent = state.nextAutomaticLoss === "timeout"
-      ? "下一事件：cwnd 超过 16 时，演示超时重传"
-      : "下一事件：cwnd 增长至 12 时，演示快重传与快恢复";
+  function renderCells(frame) {
+    const W = frame.window;
+    const slots = Math.max(W, frame.nextWindow) + 2;
+    const step = Math.min(ROW.maxStep, (ROW.x1 - ROW.x0) / slots);
+    const key = `${slots}|${step.toFixed(2)}`;
+    if (key !== cellKey) {
+      cellKey = key;
+      buildCells(slots, step);
+    }
+    pools.cells.forEach((g, i) => {
+      let cls = 'cell';
+      let label = '';
+      let visible = false;
+      let fill = 0;
+      if (i < W) {
+        const cellState = frame.cellStates[i] || 'idle';
+        cls = `cell is-${cellState}`;
+        if (frame.retransmission && cellState === 'flight') cls += ' is-retrans';
+        if (i >= frame.cells) cls += ' is-gone';
+        label = String(i + 1);
+        visible = true;
+      } else if (i < W + frame.ghosts) {
+        cls = 'cell is-ghost';
+        label = '+';
+        visible = true;
+      } else if (i === W && frame.partial > 0) {
+        cls = 'cell is-ghost';
+        fill = frame.partial;
+        visible = true;
+      }
+      setClass(g, cls);
+      setVisible(g, visible);
+      if (!visible) return;
+      const fillRect = g.children[1];
+      const height = fill * (ROW.h - 2);
+      setAttr(fillRect, 'height', height.toFixed(2));
+      setAttr(fillRect, 'y', (ROW.h - 1 - height).toFixed(2));
+      setText(g.lastChild, label);
+    });
   }
 
-  function phaseLabel(phase) {
-    return phaseNames[phase] || phaseNames.slowStart;
+  function renderTags(tags) {
+    while (pools.tags.length < 4) pools.tags.push(makeTag());
+    let channelX = TAG.x0;
+    let windowX = TAG.rowX;
+    pools.tags.forEach((g, i) => {
+      const tag = tags[i];
+      if (!tag) {
+        setVisible(g, false);
+        return;
+      }
+      const width = tagWidth(tag.text);
+      let x;
+      let y;
+      if (tag.at === 'window') {
+        windowX -= width + 8;
+        x = windowX;
+        y = TAG.rowY - 11;
+      } else {
+        x = channelX;
+        y = TAG.y - 11;
+        channelX += width + 8;
+      }
+      setAttr(g, 'transform', `translate(${x} ${y})`);
+      setClass(g, `tag tone-${tag.tone === 'alert' ? 'alert' : tag.tone === 'quiet' ? 'quiet' : 'note'}`);
+      setAttr(g.firstChild, 'width', width);
+      setText(g.lastChild, tag.text);
+      setVisible(g, true);
+    });
   }
 
-  function updateStatus() {
-    dom.phase.textContent = phaseLabel(state.phase);
-    dom.phasePill.classList.toggle("phase-ca", state.phase === "congestionAvoidance");
-    dom.phasePill.classList.toggle("phase-fast", state.phase === "fastRetransmit" || state.phase === "fastRecovery");
-    dom.cwnd.textContent = state.cwnd + " MSS";
-    dom.ssthresh.textContent = state.ssthresh + " MSS";
-    dom.round.textContent = String(state.rtt);
-    dom.senderWindow.textContent = state.cwnd + " 包";
-    dom.senderFlight.textContent = state.inFlight + " 包";
-    dom.receiverCount.textContent = state.received + " 包";
-    dom.duplicateValue.textContent = String(state.duplicateAcks);
+  // ---------- 轨迹图：一次构建，逐帧只改裁剪宽度、光标与标签 ----------
+
+  function buildChart(sc) {
+    const H = sc.horizon;
+    const maxValue = Math.max(sc.initialSsthresh, 8, ...sc.rounds.map((R) => Math.max(R.window, R.nextWindow, R.ssthreshBefore)));
+    const yMax = Math.max(12, Math.ceil((maxValue + 2) / 4) * 4);
+    const unit = (CHART.right - CHART.left) / H;
+    const xFor = (c) => CHART.left + c * unit;
+    const yFor = (v) => CHART.bottom - (Math.max(0, v) / yMax) * (CHART.bottom - CHART.top);
+    state.chart = { unit, xFor, yFor };
+
+    let grid = '';
+    for (let i = 0; i <= 4; i += 1) {
+      const value = Math.round((yMax / 4) * i);
+      const y = yFor(value);
+      grid += `<line class="grid-line" x1="${CHART.left}" x2="${CHART.right}" y1="${y}" y2="${y}"></line>`;
+      grid += `<text class="grid-label" x="${CHART.left - 10}" y="${y + 3}" text-anchor="end">${value}</text>`;
+    }
+    $('chart-grid').innerHTML = grid;
+
+    const step = Math.max(1, Math.ceil(H / 12));
+    let labels = '';
+    for (let k = 1; k <= H; k += step) {
+      labels += `<text class="x-label" x="${xFor(k - 0.5).toFixed(2)}" y="282">${k}</text>`;
+    }
+    $('chart-x').innerHTML = labels;
+
+    let d = '';
+    sc.rounds.forEach((R) => {
+      const y = yFor(R.ssthreshBefore).toFixed(2);
+      const x0 = xFor(R.index - 1).toFixed(2);
+      const x1 = xFor(R.index).toFixed(2);
+      d += d ? ` L ${x0} ${y} L ${x1} ${y}` : `M ${x0} ${y} L ${x1} ${y}`;
+    });
+    setAttr($('ssthresh-path'), 'd', d);
+
+    let segments = '';
+    let points = '';
+    let losses = '';
+    sc.rounds.forEach((R, i) => {
+      const x = xFor(R.index - 0.5);
+      const y = yFor(R.window);
+      const kind = R.kind !== 'normal' ? SEMANTIC.loss : R.phase === 'slowStart' ? SEMANTIC.ss : SEMANTIC.ca;
+      if (i < sc.rounds.length - 1) {
+        const next = sc.rounds[i + 1];
+        segments += `<line class="seg-${kind}" x1="${x.toFixed(2)}" y1="${y.toFixed(2)}" x2="${xFor(next.index - 0.5).toFixed(2)}" y2="${yFor(next.window).toFixed(2)}"></line>`;
+      }
+      const radius = R.kind !== 'normal' ? 5 : 3.8;
+      points += `<circle class="pt pt-${kind}" cx="${x.toFixed(2)}" cy="${y.toFixed(2)}" r="${radius}"></circle>`;
+      if (R.kind !== 'normal') {
+        const text = R.kind === 'timeout' ? '超时' : '快重传';
+        losses += `<text class="loss-label" data-round="${R.index}" x="${(x + 9).toFixed(2)}" y="${(y - 9).toFixed(2)}" visibility="hidden">${text}</text>`;
+      }
+    });
+    $('chart-segments').innerHTML = segments;
+    $('chart-points').innerHTML = points;
+    $('chart-losses').innerHTML = losses;
+    setAttr($('chart-clip-rect'), 'x', CHART.left - 8);
+  }
+
+  function updateChart(frame) {
+    const { xFor, yFor } = state.chart;
+    const x = xFor((frame.round - 1) + frame.local / frame.length);
+    setAttr($('chart-clip-rect'), 'width', Math.max(0, x - (CHART.left - 8)).toFixed(2));
+    const cursor = $('chart-cursor');
+    setAttr(cursor, 'x1', x.toFixed(2));
+    setAttr(cursor, 'x2', x.toFixed(2));
+    const c = (frame.round - 1) + frame.local / frame.length;
+    Array.from($('chart-losses').children).forEach((el) => {
+      setVisible(el, c >= Number(el.dataset.round) - 0.5);
+    });
+    const current = $('chart-current');
+    setAttr(current, 'cx', xFor(frame.round - 0.5).toFixed(2));
+    setAttr(current, 'cy', yFor(frame.window).toFixed(2));
+    setVisible(current, true);
+    const label = $('ssthresh-label');
+    setAttr(label, 'x', (x + 8).toFixed(2));
+    setAttr(label, 'y', (yFor(frame.ssthresh) - 8).toFixed(2));
+    setText(label, `门限 ${frame.ssthresh}`);
+    setVisible(label, true);
+  }
+
+  // ---------- 文字与状态：只在内容变化时写入 ----------
+
+  function phaseSub(frame) {
+    if (frame.label === '超时等待') return '尾包未确认，计时器运行中';
+    if (frame.label === '超时重传') return '门限已减半，窗口回到 1';
+    if (frame.label === '快重传') return '立即补发第 2 包';
+    if (frame.label === '快恢复') return '累计 ACK 已补齐缺口';
+    if (frame.retransmission) return '重传丢失的报文';
+    if (frame.acked >= frame.window) return `本轮 ${frame.window} 个报文全部确认`;
+    return `发出 ${frame.window} 个报文，已确认 ${frame.acked}`;
+  }
+
+  function policyOf(frame) {
+    if (frame.kind === 'timeout') return { text: '超时：门限减半，窗口回到 1', cls: ' is-loss' };
+    if (frame.kind === 'fast' && (frame.label === '快重传' || frame.label === '快恢复')) {
+      return { text: '快重传：门限 = 窗口 = 一半，直接拥塞避免', cls: ' is-loss' };
+    }
+    if (frame.label === '拥塞避免') return { text: '拥塞避免：每轮 +1 MSS', cls: ' is-ca' };
+    if (frame.retransmission) return { text: '慢开始：从 1 重新增长，每个 ACK +1', cls: '' };
+    return { text: '慢开始：每个 ACK +1，一轮翻倍', cls: '' };
+  }
+
+  function senderStateOf(frame) {
+    if (frame.label === '超时等待') return '等待计时器';
+    if (frame.label === '超时重传') return '超时，窗口收回';
+    if (frame.label === '快重传') return '快重传第 2 包';
+    if (frame.label === '快恢复') return '快恢复中';
+    if (frame.retransmission) return '重传 1 包';
+    if (frame.acked >= frame.window) return '本轮全部确认';
+    return frame.acked > 0 ? `等待 ACK ${frame.acked}/${frame.window}` : `连续发送 ${frame.window} 包`;
+  }
+
+  function receiverStateOf(frame) {
+    if (frame.received === 0) return '就绪，等待数据';
+    if (frame.kind === 'fast' && frame.expect === 2) return '缺第 2 包，回重复 ACK';
+    if (frame.kind === 'timeout' && frame.received < frame.window) return '尾包未到';
+    return `收到 ${frame.received} 包`;
+  }
+
+  function nextEventText(frame) {
+    const next = state.events.find((event) => event.round >= frame.round);
+    if (!next) return '后续没有预约的丢包';
+    return `下一事件：第 ${next.round} 轮${next.kind === 'timeout' ? '超时丢包' : '个别丢包（快重传）'}`;
+  }
+
+  function paintStatus(frame) {
+    const phasePill = $('phase-pill');
+    const phaseCls = LOSS_PHASES.includes(frame.label) ? 'phase-fast' : frame.label === '拥塞避免' ? 'phase-ca' : '';
+    setClass(phasePill, `status-pill phase-pill${phaseCls ? ` ${phaseCls}` : ''}`);
+    setText($('phase-value'), frame.label);
+    setText($('cwnd-value'), `${frame.cwnd} MSS`);
+    setText($('ssthresh-value'), `${frame.ssthresh} MSS`);
+    setText($('round-value'), frame.round);
+    setText($('status-note'), hasGsap
+      ? `下一轮窗口 ${frame.nextWindow} MSS · ${model.PHASE_LABEL[frame.nextPhase]}`
+      : '没有动画引擎（GSAP 未加载）：播放不可用，单步、进度与预约仍可用');
+  }
+
+  function paintStage(frame) {
+    svg.classList.toggle('is-running', state.playing);
+    setText($('round-number'), String(frame.round).padStart(2, '0'));
+    setText($('phase-label'), frame.label);
+    setText($('phase-sub'), phaseSub(frame));
+    const policy = policyOf(frame);
+    setText($('policy-text'), policy.text);
+    setClass($('policy-pill'), `policy-pill${policy.cls}`);
+    setText($('window-value'), `${frame.window} MSS`);
+    setText($('next-label'), `下一轮窗口 ${frame.nextWindow} · ${model.PHASE_LABEL[frame.nextPhase]}`);
+    setText($('narration'), frame.narration);
+    setText($('flight-note'), nextEventText(frame));
+
+    const outstanding = frame.cellStates.filter((s) => s === 'flight' || s === 'lost' || s === 'retrans').length;
+    const sender = $('sender-node');
+    toggleClass(sender, 'is-alert', frame.kind !== 'normal');
+    toggleClass(sender, 'is-active', frame.kind === 'normal' && frame.acked < frame.window);
+    setText($('sender-state'), senderStateOf(frame));
+    setText($('sender-sub'), `未确认 ${outstanding} 包 · 窗口 ${frame.window}`);
+    const arc = $('timer-arc');
+    if (frame.timer) {
+      setVisible(arc, true);
+      arc.style.strokeDashoffset = (RING * frame.timer.progress).toFixed(2);
+      setText($('timer-text'), frame.timer.expired ? '计时器已归零' : `计时器 ${frame.timer.seconds.toFixed(1)} s`);
+    } else {
+      setVisible(arc, false);
+      setText($('timer-text'), '计时器 —');
+    }
+    const receiver = $('receiver-node');
+    toggleClass(receiver, 'is-receive', frame.received > 0 && frame.acked < frame.window);
+    setText($('receiver-state'), receiverStateOf(frame));
+    setText($('receiver-sub'), `期望 ack = ${frame.expect} · 已收 ${frame.received}`);
+    const dup = $('dup-counter');
+    if (frame.kind === 'fast' && frame.dupCount > 0) {
+      setVisible(dup, true);
+      setText(dup, `重复 ACK ${frame.dupCount} / 3`);
+    } else {
+      setVisible(dup, false);
+    }
+  }
+
+  function paintSteps(frame) {
+    const list = $('event-steps');
+    const steps = frame.steps;
+    if (!steps) {
+      list.hidden = true;
+      return;
+    }
+    list.hidden = false;
+    const key = steps.labels.join('|');
+    if (list.dataset.key !== key) {
+      list.dataset.key = key;
+      steps.labels.forEach((label, i) => setText($(`event-step-${i}`), label));
+    }
+    steps.labels.forEach((_, i) => {
+      const item = $(`event-step-${i}`);
+      toggleClass(item, 'is-current', i === steps.index);
+      toggleClass(item, 'is-complete', i < steps.index);
+    });
+  }
+
+  function paintBanner(frame) {
+    const banner = $('event-banner');
+    if (!frame.banner) {
+      banner.hidden = true;
+      return;
+    }
+    banner.hidden = false;
+    setClass(banner, `event-banner${frame.banner.tone === 'note' ? ' note-banner' : ''}`);
+    setText(banner, frame.banner.text);
+  }
+
+  function paintLoss(frame) {
+    const box = $('loss-summary');
+    const loss = frame.loss;
+    if (!loss) {
+      box.hidden = true;
+      return;
+    }
+    box.hidden = false;
+    setText($('loss-title'), loss.kind === 'timeout'
+      ? 'Timeout · 门限取丢包前窗口的一半，cwnd 回到 1 MSS'
+      : '快重传 / 快恢复 · 门限与窗口同为一半');
+    setText($('loss-progress'), '门限依据丢包前的窗口计算');
+    setText($('loss-before'), `${loss.before} MSS`);
+    setText($('loss-threshold'), `${loss.ssthreshBefore} → ${loss.ssthreshAfter} MSS`);
+    setText($('loss-formula'), loss.formula);
+    setText($('loss-window'), `${loss.before} → ${loss.cwndAfter} MSS`);
+  }
+
+  function paintProgress() {
+    const slider = $('progress-slider');
+    const duration = state.scenario.duration;
+    if (Math.abs(Number(slider.value) - state.pos) > 0.006) slider.value = state.pos.toFixed(2);
+    slider.style.setProperty('--pct', `${((state.pos / duration) * 100).toFixed(1)}%`);
+    setText($('progress-value'), `第 ${state.frame.round} 轮 / ${state.scenario.horizon}`);
   }
 
   function updateControls() {
-    dom.playIcon.textContent = state.playing ? "Ⅱ" : "▶";
-    dom.playLabel.textContent = state.playing ? "暂停" : "播放";
-    dom.play.disabled = (state.busy || state.incidentRunning) && !state.playing;
-    dom.step.disabled = state.busy || state.playing || state.incidentRunning;
-    dom.timeout.disabled = state.incidentRunning || Boolean(state.pendingIncident);
-    dom.fastLoss.disabled = state.incidentRunning || Boolean(state.pendingIncident);
+    setText($('play-icon'), state.playing ? 'Ⅱ' : '▶');
+    setText($('play-label'), state.playing ? '暂停' : '播放');
+    $('btn-play').disabled = !hasGsap;
+    const target = model.nextEventRound(state.scenario, state.pos);
+    $('btn-timeout').disabled = !target;
+    $('btn-fast-loss').disabled = !target;
   }
 
-  function setNote(message) {
-    dom.statusNote.textContent = message;
+  function paint(frame) {
+    state.frame = frame;
+    paintStatus(frame);
+    paintStage(frame);
+    renderPackets(frame);
+    renderAcks(frame);
+    renderCells(frame);
+    renderTags(frame.tags);
+    paintSteps(frame);
+    paintBanner(frame);
+    paintLoss(frame);
+    updateChart(frame);
+    paintProgress();
   }
 
-  function setBanner(message, type) {
-    gsap.killTweensOf(dom.eventBanner);
-    dom.eventBanner.hidden = false;
-    dom.eventBanner.className = "event-banner" + (type ? " " + type : "");
-    dom.eventBanner.textContent = message;
-    if (window.gsap) {
-      gsap.fromTo(dom.eventBanner, { autoAlpha: 0, y: -5, scale: 0.985 }, {
-        autoAlpha: 1, y: 0, scale: 1, duration: 0.34, ease: "power2.out"
-      });
-    }
+  // ---------- 时间：GSAP 推进 clock.pos；减少动态效果时逐个关键时刻跳转 ----------
+
+  function killTween() {
+    if (state.tween) state.tween.kill();
+    state.tween = null;
+    state.clock = null;
   }
 
-  function clearBanner() {
-    if (dom.eventBanner.hidden) return;
-    if (window.gsap) {
-      gsap.to(dom.eventBanner, {
-        autoAlpha: 0, y: -4, duration: 0.22, ease: "power2.in",
-        onComplete: () => { dom.eventBanner.hidden = true; dom.eventBanner.removeAttribute("style"); }
-      });
-    } else {
-      dom.eventBanner.hidden = true;
-    }
-  }
-
-  function showRoundToast(oldValue, nextValue) {
-    dom.roundToast.textContent = "✨ 1 个 RTT 轮次完成！cwnd: " + oldValue + " → " + nextValue + "（当前 RTT " + state.rtt + "）";
-    if (!window.gsap) return;
-    gsap.killTweensOf(dom.roundToast);
-    gsap.fromTo(dom.roundToast,
-      { autoAlpha: 0, y: 7, scale: 0.92 },
-      { autoAlpha: 1, y: 0, scale: 1, duration: 0.32, ease: "back.out(1.5)", onComplete: () => {
-        gsap.to(dom.roundToast, { autoAlpha: 0, y: -5, delay: 1.15, duration: 0.3, ease: "power2.in" });
-      } }
-    );
-  }
-
-  function makePointPath(points, xFor, yFor) {
-    if (!points.length) return "";
-    return points.map((point, index) => (index ? "L " : "M ") + xFor(point.rtt) + " " + yFor(point.cwnd)).join(" ");
-  }
-
-  function renderChart(animateLatest) {
-    const left = 74;
-    const right = 930;
-    const top = 22;
-    const bottom = 260;
-    const maxValue = Math.max(state.ssthresh, state.lastLoss?.previousThreshold || 0, ...state.points.map((point) => point.cwnd), 8);
-    const yMax = Math.max(12, Math.ceil((maxValue + 2) / 4) * 4);
-    const lastRtt = state.points.length ? state.points[state.points.length - 1].rtt : 0;
-    const xMax = Math.max(8, lastRtt + 3);
-    const xFor = (rtt) => left + (Math.max(0, rtt) / xMax) * (right - left);
-    const yFor = (value) => bottom - (Math.max(0, value) / yMax) * (bottom - top);
-    const gridParts = [];
-    for (let index = 0; index <= 4; index += 1) {
-      const value = Math.round((yMax / 4) * index);
-      const y = yFor(value);
-      gridParts.push('<line class="grid-line" x1="' + left + '" x2="' + right + '" y1="' + y + '" y2="' + y + '"></line>');
-      gridParts.push('<text class="grid-label" x="' + (left - 13) + '" y="' + (y + 3) + '" text-anchor="end">' + value + '</text>');
-    }
-    dom.chartGrid.innerHTML = gridParts.join("");
-
-    const tickStep = Math.max(1, Math.ceil(xMax / 10));
-    const ticks = [];
-    for (let tick = 0; tick <= xMax; tick += tickStep) ticks.push(tick);
-    if (ticks[ticks.length - 1] !== xMax) ticks.push(xMax);
-    dom.chartXLabels.innerHTML = ticks.map((tick) =>
-      '<text class="x-label" x="' + xFor(tick) + '" y="282">' + tick + '</text>'
-    ).join("");
-
-    const thresholdY = yFor(state.ssthresh);
-    const previousThresholdY = Number(dom.thresholdLine.getAttribute("y1")) || thresholdY;
-    dom.thresholdLabel.textContent = "ssthresh " + state.ssthresh;
-    const thresholdDuration = state.lastLoss ? 1.3 : 0.62;
-    if (animateLatest && window.gsap) {
-      gsap.killTweensOf([dom.thresholdLine, dom.thresholdLabel]);
-      gsap.fromTo(dom.thresholdLine,
-        { attr: { y1: previousThresholdY, y2: previousThresholdY } },
-        { attr: { y1: thresholdY, y2: thresholdY }, duration: thresholdDuration, ease: "power2.inOut" }
-      );
-      gsap.to(dom.thresholdLabel, { attr: { y: thresholdY - 7 }, duration: thresholdDuration, ease: "power2.inOut" });
-    } else {
-      dom.thresholdLabel.setAttribute("y", String(thresholdY - 7));
-      dom.thresholdLine.setAttribute("y1", String(thresholdY));
-      dom.thresholdLine.setAttribute("y2", String(thresholdY));
-    }
-    const changedThreshold = state.lastLoss && state.lastLoss.previousThreshold !== state.lastLoss.threshold;
-    [dom.previousThresholdLine, dom.previousThresholdLabel, dom.thresholdArrow].forEach((element) => {
-      element.setAttribute("visibility", changedThreshold ? "visible" : "hidden");
+  function createTween(pos) {
+    const duration = state.scenario.duration;
+    const clock = { pos: 0 };
+    state.clock = clock;
+    state.tween = window.gsap.fromTo(clock, { pos: 0 }, {
+      pos: duration,
+      duration: duration * model.SEC_PER_UNIT,
+      ease: 'none',
+      paused: true,
+      onUpdate: () => onTick(clock.pos),
+      onComplete: () => onEnded()
     });
-    if (changedThreshold) {
-      const oldY = yFor(state.lastLoss.previousThreshold);
-      dom.previousThresholdLine.setAttribute("y1", oldY);
-      dom.previousThresholdLine.setAttribute("y2", oldY);
-      dom.previousThresholdLabel.setAttribute("y", oldY - 7);
-      dom.previousThresholdLabel.textContent = "旧 ssthresh = " + state.lastLoss.previousThreshold;
-      dom.thresholdArrow.setAttribute("y1", oldY);
-      dom.thresholdArrow.setAttribute("y2", thresholdY);
+    state.tween.timeScale(state.speed);
+    state.tween.progress(clamp(pos / duration, 0, 1), true);
+  }
+
+  function onTick(pos) {
+    state.pos = pos;
+    paint(model.frameAt(state.scenario, pos));
+    if (Date.now() - state.linkedAt > 300) writeLink();
+  }
+
+  function jumpTo(pos) {
+    const duration = state.scenario.duration;
+    state.pos = clamp(pos, 0, duration);
+    if (state.tween) state.tween.progress(state.pos / duration, true);
+    paint(model.frameAt(state.scenario, state.pos));
+  }
+
+  function stepReduced() {
+    state.timer = null;
+    if (!state.playing) return;
+    const next = state.keys.find((key) => key > state.pos + 1e-6);
+    if (next === undefined) {
+      onEnded();
+      return;
     }
-
-    const cursorX = xFor(lastRtt);
-    if (animateLatest && window.gsap) {
-      gsap.to(dom.cursor, { attr: { x1: cursorX, x2: cursorX }, duration: 0.58, ease: "power2.inOut" });
-    } else {
-      dom.cursor.setAttribute("x1", String(cursorX));
-      dom.cursor.setAttribute("x2", String(cursorX));
-    }
-
-    const previousPoints = state.points.slice(0, -1);
-    const lastTwo = state.points.slice(-2);
-    dom.chartPath.setAttribute("d", makePointPath(previousPoints.length ? previousPoints : state.points.slice(0, 1), xFor, yFor));
-    const latestD = lastTwo.length === 2 ? makePointPath(lastTwo, xFor, yFor) : "";
-    dom.latestSegment.setAttribute("d", latestD);
-    const pointMarkup = state.points.map((point, index) => {
-      const isLatest = index === state.points.length - 1;
-      const isLoss = point.kind === "timeout" || point.kind === "fast";
-      const isAttempt = point.kind === "attempt";
-      const x = xFor(point.rtt);
-      const y = yFor(point.cwnd);
-      const className = "chart-point" + (isLoss ? " loss-point" : "") + (isAttempt ? " attempt-point" : "") + (isLatest && !isLoss && !isAttempt ? " latest-point" : "");
-      const label = isLatest || isLoss || isAttempt
-        ? '<text class="chart-point-label" x="' + (x + 7) + '" y="' + (y - 8) + '">' + point.cwnd + '</text>'
-        : "";
-      return '<circle class="' + className + '" cx="' + x + '" cy="' + y + '" r="' + (isLatest ? 5 : 3.7) + '"></circle>' + label;
-    }).join("");
-    dom.chartPoints.innerHTML = pointMarkup;
-
-    if (animateLatest && latestD && window.gsap) {
-      const length = dom.latestSegment.getTotalLength();
-      gsap.set(dom.latestSegment, { strokeDasharray: length, strokeDashoffset: length });
-      gsap.to(dom.latestSegment, { strokeDashoffset: 0, duration: 0.58, ease: "power2.out", clearProps: "strokeDasharray,strokeDashoffset" });
-      const latestPoint = dom.chartPoints.querySelector(".chart-point:last-of-type");
-      if (latestPoint) gsap.fromTo(latestPoint, { scale: 0.5, transformOrigin: "center center" }, { scale: 1, duration: 0.4, ease: "back.out(2)" });
-    } else if (window.gsap) {
-      gsap.set(dom.latestSegment, { clearProps: "strokeDasharray,strokeDashoffset" });
-    }
+    jumpTo(next);
+    writeLink();
+    state.timer = window.setTimeout(stepReduced, 900 / state.speed);
   }
 
-  function makePacket(lane, packetType, number, label, highlight) {
-    const packet = document.createElement("div");
-    packet.className = "packet packet-" + packetType + (highlight ? " is-highlight" : "");
-    packet.setAttribute("aria-label", label + " " + number);
-    packet.innerHTML = '<span class="packet-label">' + label + '</span><strong></strong>';
-    packet.querySelector("strong").textContent = String(number);
-    lane.appendChild(packet);
-    return packet;
+  function stopClock() {
+    state.playing = false;
+    if (state.tween) state.tween.pause();
+    if (state.timer) window.clearTimeout(state.timer);
+    state.timer = null;
+    svg.classList.remove('is-running');
   }
 
-  function trackedTimeline(resolve, delay) {
-    let settled = false;
-    let timeline;
-    const settle = () => {
-      if (settled) return;
-      settled = true;
-      if (timeline) state.timelines.delete(timeline);
-      resolve();
-    };
-    timeline = gsap.timeline({
-      delay: delay || 0,
-      onComplete: settle,
-      onInterrupt: settle
-    });
-    state.timelines.add(timeline);
-    return timeline;
-  }
-
-  function animatePacket(number, options) {
-    const opts = options || {};
-    const lane = dom.dataLane;
-    const distance = Math.max(90, lane.clientWidth - 48);
-    const packet = makePacket(lane, "data", number, opts.retransmission ? "RE-SEND" : "DATA", opts.highlight);
-    state.inFlight += 1;
-    updateStatus();
-
-    return new Promise((resolve) => {
-      const ack = opts.lost ? null : makePacket(dom.ackLane, "ack", opts.ackText || ("<ack=" + (number + 1) + ">"), "ACK", false);
-      if (ack) gsap.set(ack, { x: distance, yPercent: -50, autoAlpha: 0 });
-      const timeline = trackedTimeline(resolve, opts.delay || 0);
-      if (opts.lost) {
-        timeline.to(packet, { x: distance * 0.52, duration: 0.68, ease: "power1.inOut", onComplete: () => {
-          packet.classList.add(opts.keepStuck ? "is-lost" : "is-dropped");
-        } });
-        if (opts.keepStuck) {
-          timeline.call(() => packet.classList.add("timeout-stuck"));
-        } else {
-          timeline.to(packet, { scale: 1.15, duration: 0.2, repeat: 1, yoyo: true });
-          timeline.to(packet, { opacity: 0.22, scale: 0.64, rotation: -14, duration: 0.3, ease: "power2.in", onComplete: () => {
-            packet.remove();
-            state.inFlight = Math.max(0, state.inFlight - 1);
-            updateStatus();
-          } });
-        }
-        return;
-      }
-      timeline
-        .to(packet, { x: distance, duration: 0.66, ease: "power1.inOut", onComplete: () => {
-          packet.remove();
-          state.received += 1;
-          dom.receiverState.textContent = opts.retransmission ? "缺失段补齐，累计 ACK 前移" : "收到数据，生成累计 ACK";
-          dom.receiverHost.classList.add("is-receiving");
-          dom.receiverAck.textContent = opts.ackText || ("<ack=" + (number + 1) + ">");
-          gsap.delayedCall(0.32, () => dom.receiverHost.classList.remove("is-receiving"));
-          updateStatus();
-        } })
-        .set(ack, { autoAlpha: 1 })
-        .to(ack, { x: 0, duration: 0.66, ease: "power1.inOut", onComplete: () => {
-          ack.remove();
-          state.inFlight = Math.max(0, state.inFlight - 1);
-          dom.senderHost.classList.add("is-active");
-          gsap.delayedCall(0.28, () => dom.senderHost.classList.remove("is-active"));
-          if (typeof opts.onAck === "function") opts.onAck();
-          updateStatus();
-        } });
-    });
-  }
-
-  function animateStuckPacket(number, delay) {
-    const distance = Math.max(90, dom.dataLane.clientWidth - 48);
-    const packet = makePacket(dom.dataLane, "data", number, "DATA", false);
-    packet.classList.add("is-lost", "timeout-stuck");
-    state.inFlight += 1;
-    updateStatus();
-    return new Promise((resolve) => {
-      const timeline = trackedTimeline(resolve, delay || 0);
-      const stopAt = Math.min(distance - 44, distance * 0.45 + (number - 1) * 18);
-      timeline.to(packet, { x: stopAt, duration: 0.72, ease: "power1.inOut" });
-    }).then(() => packet);
-  }
-
-  function animateOneShot(element, vars) {
-    return new Promise((resolve) => {
-      const timeline = trackedTimeline(resolve, 0);
-      timeline.to(element, Object.assign({}, vars, { onComplete: resolve }));
-    });
-  }
-
-  function timerCountdown(seconds) {
-    dom.timerLabel.textContent = seconds.toFixed(1) + "s";
-    if (window.gsap) {
-      gsap.set(dom.timerProgress, { strokeDashoffset: 0 });
-      gsap.to(dom.timerProgress, {
-        strokeDashoffset: 100.53,
-        duration: seconds,
-        ease: "none",
-        onUpdate: function () {
-          const remaining = Math.max(0, seconds * (1 - this.progress()));
-          dom.timerLabel.textContent = remaining.toFixed(1) + "s";
-        }
-      });
-    }
-    return waitFor(seconds);
-  }
-
-  function recordPoint(kind, animate) {
-    state.points.push({ rtt: state.rtt, cwnd: state.cwnd, kind: kind || "normal" });
-    renderChart(Boolean(animate));
-  }
-
-  function applyLoss(kind) {
-    const before = state.cwnd;
-    const previousThreshold = state.ssthresh;
-    state.ssthresh = Math.max(2, Math.floor(before / 2));
-    state.cwnd = kind === "timeout" ? 1 : state.ssthresh;
-    state.phase = kind === "timeout" ? "slowStart" : "congestionAvoidance";
-    state.duplicateAcks = 0;
-    dom.duplicateCounter.hidden = true;
-    dom.timerLabel.textContent = "空闲";
-    gsap.set(dom.timerProgress, { strokeDashoffset: 0 });
-    dom.senderHost.classList.remove("is-loss");
-    showLossSummary(kind, before, previousThreshold);
-    state.nextAutomaticLoss = kind === "timeout" ? "fast" : "timeout";
-    updateUpcomingEvent();
-    updateStatus();
-    setNote(kind === "timeout"
-      ? "超时：ssthresh 取丢包前 cwnd 的一半，cwnd 回到 1 MSS"
-      : "快恢复结束：从折半窗口继续拥塞避免");
-    recordPoint(kind, true);
-  }
-
-  async function completeTimeout(reason) {
-    if (state.epoch !== reason.epoch) return;
-    dom.senderHost.classList.add("is-loss");
-    setBanner("数据包未获确认 · 等待重传计时器归零", "timeout-banner");
-    showEventStep("timeout", 1);
-    await timerCountdown(reason.duration || 1.45);
-    if (state.epoch !== reason.epoch) return;
-    dom.timerLabel.textContent = "Timeout";
-    setBanner(reason.message, "timeout-banner");
-    const stuck = Array.from(document.querySelectorAll(".timeout-stuck"));
-    await Promise.all(stuck.map((packet) => animateOneShot(packet, {
-      opacity: 0, scale: 0.58, rotation: -13, duration: 0.34, ease: "power2.in"
-    }).then(() => packet.remove())));
-    state.inFlight = Math.max(0, state.inFlight - stuck.length);
-    updateStatus();
-    if (state.epoch !== reason.epoch) return;
-    if (reason.networkRound) {
-      state.rtt += 1;
-      state.points.push({ rtt: state.rtt, cwnd: state.cwnd, kind: "attempt" });
-      renderChart(true);
-    }
-    applyLoss("timeout");
-    showEventStep("timeout", 2);
-    dom.lossProgress.textContent = "虚线移动到新的 ssthresh；曲线在同一 RTT 垂直降到 1";
-    await waitFor(1.5);
-    if (state.epoch !== reason.epoch) return;
-    const missingPacket = reason.packetNumber || 1;
-    showEventStep("timeout", 3);
-    dom.channelDetail.textContent = "超时重传：以 cwnd = 1 补发第 " + missingPacket + " 包";
-    setNote("Timeout：窗口回到 1 MSS，立即重传未确认的数据包");
-    await animatePacket(missingPacket, {
-      retransmission: true,
-      highlight: true,
-      ackText: "<ack=" + (missingPacket + 1) + ">"
-    });
-    if (state.epoch !== reason.epoch) return;
-    showEventStep("timeout", 4);
-    dom.lossProgress.textContent = "重传已确认：cwnd 保持 1，随后重新慢开始；门限保持 " + state.ssthresh;
-    dom.receiverState.textContent = "重传包已确认，下一轮重新慢开始";
-    setNote("超时重传完成：cwnd = 1 MSS，下一轮从慢开始恢复增长");
-    await waitFor(1.2);
-  }
-
-  async function runRound() {
-    if (state.busy || state.epoch < 0) return;
-    state.busy = true;
-    const epoch = state.epoch;
-    try {
-      clearBanner();
-      updateControls();
-      dom.senderHost.classList.add("is-active");
-      dom.channelDetail.textContent = "本轮发送 " + state.cwnd + " 个数据包";
-      dom.receiverState.textContent = "等待本轮数据与确认";
-      setNote("发送端按 cwnd 连续发包，接收端逐包返回 ACK");
-      const currentWindow = state.cwnd;
-      const overflow = currentWindow > CAPACITY;
-      if (overflow) showEventStep("timeout", 0);
-      const count = Math.min(currentWindow, CAPACITY + 1);
-      const flights = [];
-      for (let number = 1; number <= count; number += 1) {
-        const lost = overflow && number > CAPACITY;
-        flights.push(animatePacket(number, {
-          lost,
-          keepStuck: lost,
-          delay: (number - 1) * 0.075,
-          ackText: "<ack=" + (number + 1) + ">"
-        }));
-      }
-      await Promise.all(flights);
-      if (state.epoch !== epoch) return;
-      dom.senderHost.classList.remove("is-active");
-      if (overflow) {
-        dom.channelDetail.textContent = "第 " + (CAPACITY + 1) + " 包超过承载极限，等待重传计时器";
-        dom.receiverState.textContent = "有包丢失，缺口未补齐";
-        setNote("链路容量为 16 包；超出承载能力的包没有 ACK");
-        await completeTimeout({
-          epoch,
-          networkRound: true,
-          packetNumber: CAPACITY + 1,
-          duration: 1.4,
-          message: "网络承载极限已达到 · 超时计时器归零，触发 Timeout"
-        });
-        if (state.epoch !== epoch) return;
-        dom.channelDetail.textContent = "拥塞窗口决定本轮发送量";
-      } else {
-        const oldValue = state.cwnd;
-        const completedPhase = state.phase;
-        state.rtt += 1;
-        if (completedPhase === "slowStart") {
-          state.cwnd = Math.min(state.cwnd * 2, state.ssthresh);
-          if (state.cwnd >= state.ssthresh) state.phase = "congestionAvoidance";
-        } else {
-          state.cwnd += 1;
-        }
-        dom.receiverState.textContent = "本轮数据全部确认";
-        dom.senderHost.classList.remove("is-active");
-        dom.senderHost.classList.add("is-round-pulse");
-        gsap.delayedCall(0.8, () => dom.senderHost.classList.remove("is-round-pulse"));
-        updateStatus();
-        setNote(completedPhase === "slowStart"
-          ? "RTT 完成：慢开始将 cwnd 翻倍；达到门限后切换拥塞避免"
-          : "RTT 完成：拥塞避免将 cwnd 增加 1 MSS");
-        recordPoint("normal", true);
-        showRoundToast(oldValue, state.cwnd);
-      }
-    } catch (error) {
-      console.error("TCP congestion-control round stopped:", error);
-      if (state.epoch === epoch) {
-        state.playing = false;
-        setNote("动画被中断；可以重新开始后继续");
-      }
-    } finally {
-      if (state.epoch === epoch) {
-        state.busy = false;
-        updateControls();
-      }
-    }
-  }
-
-  async function prepareWindow(minimum, epoch) {
-    while (state.cwnd < minimum && state.epoch === epoch) {
-      const previousRtt = state.rtt;
-      await runRound();
-      if (state.epoch !== epoch) return;
-      if (state.rtt === previousRtt) throw new Error("窗口准备过程未完成 RTT");
-    }
-  }
-
-  async function runTimeoutEvent() {
-    if (state.busy) return;
-    const epoch = state.epoch;
-    setNote("先完成正常 RTT，使窗口增长到至少 8，再演示超时与门限变化");
-    await prepareWindow(8, epoch);
-    if (state.epoch !== epoch) return;
-    state.busy = true;
-    updateControls();
-    clearBanner();
-    showEventStep("timeout", 0);
-    dom.channelDetail.textContent = "数据包滞留在信道中，ACK 未返回";
-    dom.receiverState.textContent = "部分数据未送达";
-    setNote("灰色包停在信道中央，接下来等待超时计时器归零");
-    const pending = [];
-    for (let number = 1; number <= Math.min(state.cwnd, 4); number += 1) {
-      pending.push(animateStuckPacket(number, (number - 1) * 0.12));
-    }
-    await Promise.all(pending);
-    if (state.epoch !== epoch) return;
-    await completeTimeout({epoch, duration: 2.2, message: "💥 计时器归零！触发超时重传，先更新门限与窗口"});
-    if (state.epoch !== epoch) return;
-    dom.channelDetail.textContent = "超时重传已确认，下一轮从 cwnd = 1 开始";
-    state.busy = false;
-    updateControls();
-  }
-
-  async function runFastRetransmit() {
-    if (state.busy) return;
-    const epoch = state.epoch;
-    await prepareWindow(5, epoch);
-    if (state.epoch !== epoch) return;
-    state.busy = true;
-    updateControls();
-    clearBanner();
-    const originalWindow = state.cwnd;
-    const previousThreshold = state.ssthresh;
-    let enteredRecovery = false;
-    state.duplicateAcks = 0;
-    dom.duplicateCounter.hidden = false;
-    updateStatus();
-    showEventStep("fast", 0);
-    dom.receiverState.textContent = "第 2 包将丢失，后续包返回重复 ACK";
-    dom.receiverAck.textContent = "<ack=1>";
-    dom.channelDetail.textContent = "快重传特写：本组相对编号 1–5，丢失第 2 包";
-    setBanner("个别丢包：观察第 2 包在信道中央丢失，以及三次重复 <ack=2>", "fast-banner");
-    const flights = [];
-    for (let number = 1; number <= 5; number += 1) {
-      flights.push(animatePacket(number, {
-        lost: number === 2,
-        delay: (number - 1) * 0.5,
-        ackText: "<ack=2>",
-        onAck: () => {
-          if (state.epoch !== epoch) return;
-          if (number === 1) {
-            showEventStep("fast", 1);
-            setNote("正常 ACK：第 1 包已确认，期待第 2 包；重复 ACK 计数仍为 0");
-            return;
-          }
-          if (number < 3) return;
-          state.duplicateAcks += 1;
-          updateStatus();
-          $("event-step-1").textContent = "重复 ACK " + state.duplicateAcks + " / 3";
-          setNote("第 " + number + " 包已到达，发送端收到第 " + state.duplicateAcks + " 次重复 <ack=2>");
-          if (state.duplicateAcks === 3 && !enteredRecovery) {
-            enteredRecovery = true;
-            state.ssthresh = Math.max(2, Math.floor(originalWindow / 2));
-            state.cwnd = state.ssthresh;
-            state.phase = "fastRetransmit";
-            showEventStep("fast", 2);
-            showLossSummary("fast", originalWindow, previousThreshold);
-            dom.lossProgress.textContent = "3 次重复 ACK 已到达，立即补发第 2 包，不等待计时器";
-            setBanner("⚡ 收到 3 个重复 ACK！触发【快重传】，立即补发第 2 包！", "fast-banner");
-            updateStatus();
-            recordPoint("fast", true);
-          }
-        }
-      }));
-    }
-    await Promise.all(flights);
-    if (state.epoch !== epoch) return;
-    if (!enteredRecovery) throw new Error("未收到三次重复 ACK");
-    dom.channelDetail.textContent = "快重传：单独弹射第 2 包，接收端随后累计确认到 6";
-    await animatePacket(2, {retransmission: true, highlight: true, ackText: "<ack=6>"});
-    if (state.epoch !== epoch) return;
-    state.phase = "fastRecovery";
-    state.rtt += 1;
-    showEventStep("fast", 3);
-    setBanner("快恢复：缺失段已补齐，cwnd = ssthresh = " + state.cwnd + "，保持折半后的窗口", "fast-banner");
-    dom.lossProgress.textContent = "快恢复：" + originalWindow + " → " + state.cwnd + "，不会回到 1";
-    dom.receiverState.textContent = "累计 ACK = 6 返回，缺口已修复";
-    updateStatus();
-    recordPoint("recovery", true);
-    await waitFor(2.4);
-    if (state.epoch !== epoch) return;
-    state.phase = "congestionAvoidance";
-    state.nextAutomaticLoss = "timeout";
-    updateUpcomingEvent();
-    showEventStep("fast", 4);
-    dom.duplicateCounter.hidden = true;
-    const recoveredWindow = state.cwnd;
-    dom.lossProgress.textContent = "接着演示一轮拥塞避免：" + recoveredWindow + " → " + (recoveredWindow + 1) + "（+1）";
-    state.busy = false;
-    updateStatus();
-    await runRound();
-    if (state.epoch !== epoch) return;
-    setNote("快恢复完成：已从半窗 " + recoveredWindow + " 按拥塞避免规则增长到 " + state.cwnd);
-    dom.lossProgress.textContent = "恢复后首轮 RTT 已完成：" + recoveredWindow + " → " + state.cwnd + "（+1），继续线性增长";
-    updateControls();
-  }
-
-  async function executeIncident(kind) {
-    const epoch = state.epoch;
-    state.pendingIncident = null;
-    state.incidentRunning = true;
-    updateControls();
-    try {
-      if (kind === "fast") await runFastRetransmit();
-      else await runTimeoutEvent();
-    } catch (error) {
-      console.error("TCP incident stopped:", error);
-      if (state.epoch === epoch) {
-        state.playing = false;
-        setNote("丢包演示被中断，可重新开始");
-      }
-    } finally {
-      if (state.epoch === epoch) {
-        state.incidentRunning = false;
-        state.busy = false;
-        updateControls();
-      }
-    }
-  }
-
-  async function advanceSimulation() {
-    if (state.busy || state.incidentRunning) return;
-    const epoch = state.epoch;
-    if (state.pendingIncident) await executeIncident(state.pendingIncident);
-    else if (state.nextAutomaticLoss === "fast" && state.cwnd >= 12) await executeIncident("fast");
-    else await runRound();
-    if (state.epoch === epoch && state.pendingIncident) await executeIncident(state.pendingIncident);
-  }
-
-  function requestIncident(kind) {
-    if (state.incidentRunning || state.pendingIncident) return;
-    state.pendingIncident = kind;
-    updateControls();
-    setNote("已预约" + (kind === "fast" ? "快重传与快恢复" : "超时重传") + "，当前 RTT 完成后自动演示");
-    if (!state.busy && !state.playing) advanceSimulation();
-  }
-
-  function waitFor(seconds) {
-    return new Promise((resolve) => {
-      let timer;
-      let settled = false;
-      const settle = () => {
-        if (settled) return;
-        settled = true;
-        if (timer) state.timelines.delete(timer);
-        resolve();
-      };
-      timer = gsap.delayedCall(seconds, settle);
-      timer.eventCallback("onInterrupt", settle);
-      state.timelines.add(timer);
-    });
-  }
-
-  async function playLoop() {
-    const epoch = state.epoch;
-    const playbackId = ++state.playbackId;
+  function play() {
+    if (!hasGsap || state.playing) return;
+    if (state.pos >= state.scenario.duration - 1e-6) jumpTo(0);
     state.playing = true;
+    svg.classList.add('is-running');
+    if (state.reduced) stepReduced();
+    else if (state.tween) state.tween.play();
     updateControls();
-    while (state.playing && state.epoch === epoch && state.playbackId === playbackId) {
-      await advanceSimulation();
-      if (!state.playing || state.epoch !== epoch || state.playbackId !== playbackId) break;
-      await waitFor(0.24);
-    }
-    if (state.epoch === epoch && state.playbackId === playbackId) {
-      state.playing = false;
-      updateControls();
+  }
+
+  function pause() {
+    stopClock();
+    updateControls();
+    writeLink();
+  }
+
+  function onEnded() {
+    stopClock();
+    updateControls();
+    writeLink();
+  }
+
+  function seek(pos) {
+    stopClock();
+    jumpTo(pos);
+    updateControls();
+    writeLink();
+  }
+
+  function nextKey() {
+    return state.keys.find((key) => key > state.pos + 1e-6);
+  }
+
+  function prevKey() {
+    let found = 0;
+    state.keys.forEach((key) => {
+      if (key < state.pos - 1e-6) found = key;
+    });
+    return found;
+  }
+
+  function rebuild(pos, options) {
+    const keepPlaying = Boolean(options && options.keepPlaying && state.playing);
+    stopClock();
+    killTween();
+    state.scenario = model.buildScenario({ events: state.events });
+    state.keys = model.keyTimes(state.scenario);
+    buildChart(state.scenario);
+    const slider = $('progress-slider');
+    slider.max = String(state.scenario.duration);
+    if (hasGsap) createTween(clamp(pos, 0, state.scenario.duration));
+    jumpTo(clamp(pos, 0, state.scenario.duration));
+    updateControls();
+    writeLink();
+    if (keepPlaying) play();
+  }
+
+  // ---------- 预约、重新开始与地址栏 ----------
+
+  function addEvent(kind) {
+    const target = model.nextEventRound(state.scenario, state.pos);
+    if (!target) return;
+    state.events = model.normalizeEvents([...state.events.filter((event) => event.round !== target), { round: target, kind }]);
+    rebuild(state.pos, { keepPlaying: true });
+  }
+
+  function reset() {
+    state.events = model.DEFAULT_EVENTS.map((event) => ({ ...event }));
+    stopClock();
+    rebuild(0);
+  }
+
+  function readLink() {
+    try {
+      const params = new URLSearchParams(location.hash.slice(1));
+      if (params.has('e')) {
+        const parsed = params.get('e').split(',').map((item) => {
+          const match = /^(\d{1,2})([tf])$/.exec(item.trim());
+          return match ? { round: Number(match[1]), kind: match[2] === 't' ? 'timeout' : 'fast' } : null;
+        }).filter(Boolean);
+        state.events = model.normalizeEvents(parsed);
+      }
+      const t = Number(params.get('t'));
+      state.startPos = params.has('t') && Number.isFinite(t) && t >= 0 ? t : 0;
+    } catch (error) {
+      state.startPos = 0;
     }
   }
+
+  function writeLink() {
+    state.linkedAt = Date.now();
+    try {
+      const events = state.events.map((event) => `${event.round}${event.kind === 'timeout' ? 't' : 'f'}`).join(',');
+      history.replaceState(null, '', `#t=${state.pos.toFixed(2)}&e=${events}`);
+    } catch (error) {
+      // 某些本地环境不允许改写地址，演示照常可用
+    }
+  }
+
+  // ---------- 控件与键盘 ----------
 
   function setSpeed(value) {
     state.speed = Number(value);
-    dom.speedValue.textContent = state.speed.toFixed(1) + "×";
-    const percentage = ((state.speed - 0.5) / 2) * 100;
-    dom.speed.style.setProperty("--pct", percentage + "%");
-    gsap.globalTimeline.timeScale(state.speed);
+    setText($('speed-value'), `${state.speed.toFixed(1)}×`);
+    $('speed-slider').style.setProperty('--pct', `${((state.speed - 0.5) / 2) * 100}%`);
+    if (state.tween) state.tween.timeScale(state.speed);
   }
 
-  function clearParticles() {
-    document.querySelectorAll(".packet").forEach((packet) => packet.remove());
-    gsap.killTweensOf([dom.senderHost, dom.receiverHost, dom.roundToast, dom.timerProgress, dom.eventBanner]);
-    gsap.killTweensOf(".packet");
-    gsap.set([dom.senderHost, dom.receiverHost], { clearProps: "transform,opacity" });
-    dom.senderHost.classList.remove("is-active", "is-loss", "is-round-pulse");
-    dom.receiverHost.classList.remove("is-active", "is-loss", "is-receiving");
+  function setMotion(reduced) {
+    const wasPlaying = state.playing;
+    stopClock();
+    state.reduced = reduced;
+    document.body.dataset.motion = reduced ? 'reduced' : 'full';
+    $('motion-toggle').checked = reduced;
+    if (wasPlaying) play();
   }
 
-  function resetSimulation() {
-    state.epoch += 1;
-    state.playbackId += 1;
-    state.playing = false;
-    state.busy = false;
-    state.pendingIncident = null;
-    state.incidentRunning = false;
-    state.nextAutomaticLoss = "timeout";
-    state.lastLoss = null;
-    state.timelines.forEach((timeline) => timeline.kill());
-    state.timelines.clear();
-    gsap.killTweensOf("*");
-    clearParticles();
-    state.cwnd = 1;
-    state.ssthresh = INITIAL_SSTHRESH;
-    state.phase = "slowStart";
-    state.rtt = 0;
-    state.inFlight = 0;
-    state.received = 0;
-    state.duplicateAcks = 0;
-    state.points = [{ rtt: 0, cwnd: 1, kind: "start" }];
-    dom.receiverAck.textContent = "<ack=1>";
-    dom.receiverState.textContent = "就绪，等待数据";
-    dom.timerLabel.textContent = "空闲";
-    dom.duplicateCounter.hidden = true;
-    dom.eventBanner.hidden = true;
-    dom.eventBanner.className = "event-banner";
-    dom.eventBanner.removeAttribute("style");
-    dom.eventSteps.hidden = true;
-    dom.lossSummary.hidden = true;
-    dom.roundToast.textContent = "";
-    dom.roundToast.removeAttribute("style");
-    dom.channelDetail.textContent = "拥塞窗口决定本轮发送量";
-    updateUpcomingEvent();
-    gsap.set(dom.timerProgress, { strokeDashoffset: 0 });
-    setNote("等待开始 · 每轮 RTT 完成后更新窗口");
-    updateStatus();
-    updateControls();
-    renderChart(false);
+  function bind() {
+    $('btn-play').addEventListener('click', () => (state.playing ? pause() : play()));
+    $('btn-step').addEventListener('click', () => {
+      const next = nextKey();
+      seek(next === undefined ? state.scenario.duration : next);
+    });
+    $('btn-reset').addEventListener('click', reset);
+    $('btn-timeout').addEventListener('click', () => addEvent('timeout'));
+    $('btn-fast-loss').addEventListener('click', () => addEvent('fast'));
+    $('speed-slider').addEventListener('input', (event) => setSpeed(event.target.value));
+    $('progress-slider').addEventListener('input', (event) => seek(Number(event.target.value)));
+    $('motion-toggle').addEventListener('change', (event) => setMotion(event.target.checked));
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden && state.playing) pause();
+    });
+    document.addEventListener('keydown', (event) => {
+      const el = event.target instanceof Element ? event.target : null;
+      if (el && el.closest('input, select, textarea, button, a')) return;
+      if (event.ctrlKey || event.metaKey || event.altKey) return;
+      if (event.code === 'Space') {
+        event.preventDefault();
+        if (state.playing) pause();
+        else play();
+      } else if (event.code === 'ArrowRight') {
+        event.preventDefault();
+        const next = nextKey();
+        if (next !== undefined) seek(next);
+      } else if (event.code === 'ArrowLeft') {
+        event.preventDefault();
+        seek(prevKey());
+      } else if (event.code === 'Home') {
+        event.preventDefault();
+        seek(0);
+      }
+    });
   }
 
-  dom.play.addEventListener("click", () => {
-    if (state.playing) {
-      state.playing = false;
-      state.playbackId += 1;
-      updateControls();
-    } else if (!state.busy && !state.incidentRunning) {
-      playLoop();
-    }
-  });
-  dom.step.addEventListener("click", () => { if (!state.busy && !state.playing) advanceSimulation(); });
-  dom.reset.addEventListener("click", resetSimulation);
-  dom.timeout.addEventListener("click", () => requestIncident("timeout"));
-  dom.fastLoss.addEventListener("click", () => requestIncident("fast"));
-  dom.speed.addEventListener("input", (event) => setSpeed(event.target.value));
+  function init() {
+    readLink();
+    state.reduced = motionQuery ? motionQuery.matches : false;
+    document.body.dataset.motion = state.reduced ? 'reduced' : 'full';
+    $('motion-toggle').checked = state.reduced;
+    setSpeed($('speed-slider').value);
+    bind();
+    if (!hasGsap) $('btn-play').title = '没有动画引擎（GSAP 未加载）';
+    rebuild(state.startPos);
+  }
 
-  setSpeed(dom.speed.value);
-  updateStatus();
-  updateControls();
-  renderChart(false);
+  init();
 })();

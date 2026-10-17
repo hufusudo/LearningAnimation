@@ -1,145 +1,82 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="zh-CN">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#faf9f5">
-  <title>外存空闲空间的成组链接法 · 交互演示</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Newsreader:opsz,wght@6..72,500;6..72,600&display=swap" rel="stylesheet">
+  <meta name="description" content="看清成组链接法的四个动作：栈顶分配、读入下一组、满栈写回和压栈回收。可暂停、逐步和回看。">
+  <title>外存成组链接法 · 可视化实验室</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23faf9f5'/%3E%3Cpath d='M7 8h18M7 16h18M7 24h18' stroke='%23343c38' stroke-width='3'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="style.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js" defer></script>
+  <script src="model.js" defer></script>
   <script src="app.js" defer></script>
 </head>
 <body>
   <header class="site-header">
-    <div class="header-inner">
-      <a class="brand-mark" href="../index.html" aria-label="返回可视化实验室">408</a>
-      <div class="brand-copy">
-        <p class="eyebrow">操作系统 · 文件管理</p>
-        <h1>外存空闲空间的成组链接法</h1>
-      </div>
-      <a class="back-link" href="../index.html"><span aria-hidden="true">←</span> 返回展厅</a>
-    </div>
+    <a class="back-link" href="../index.html#os">← 返回计算机操作系统</a>
+    <span>可视化实验室</span>
+    <span class="header-note">文件管理 · 空闲空间</span>
   </header>
+  <main>
+    <div class="title-row">
+      <h1>外存成组链接法<span class="english-name">Grouped free list</span></h1>
+      <p class="subtitle">平时只动内存中的盘块号；一组用完再读下一组，栈满了才整组写回外存。</p>
+    </div>
 
-  <main class="page-shell">
-    <section class="intro-row" aria-labelledby="page-title">
-      <div>
-        <p class="intro-kicker">栈顶出入 · 次栈底成链</p>
-        <h2 id="page-title">看一个盘块号，如何在内存栈与外存组之间接力。</h2>
-        <p class="intro-copy">分配时逐个弹出；栈只剩 next 时换入下一组。回收遇到满栈，就把整组写进新盘块，再把新组接到外存链尾。</p>
+    <section class="stage" id="stage" aria-label="成组链接法动画">
+      <div class="stage-heading">
+        <div class="stage-status">
+          <i class="led" aria-hidden="true"></i>
+          <span class="clock"><span>t</span><output id="clock" for="progress">0.0</output></span>
+          <span class="phase" id="phase">栈顶分配</span>
+        </div>
+        <div class="chapters" role="group" aria-label="定位演示章节">
+          <button id="chapter-allocate" type="button" aria-pressed="true">分配</button>
+          <button id="chapter-reclaim" type="button" aria-pressed="false">回收</button>
+        </div>
       </div>
-      <div class="capacity-note">
-        <span class="capacity-icon" aria-hidden="true">↕</span>
-        <span><strong>演示栈容量 4</strong><br>count 包含 next 指针</span>
+      <div class="stage-scroll" tabindex="0" aria-label="成组链接示意图，窄屏下可横向滚动">
+        <svg id="sand" viewBox="0 0 1100 440" role="img" aria-labelledby="sand-title" aria-describedby="sand-desc accessible-state">
+          <title id="sand-title">内存地址栈、外存组链与已分配盘块</title>
+          <desc id="sand-desc">内存只保存一组空闲盘块号。普通分配弹出栈顶；只剩 next 时先读组信息，再分配组载体。满栈回收把整栈写进回收盘块，让它成为新链首。</desc>
+        </svg>
+      </div>
+      <p class="scroll-hint">示意图可左右滑动查看</p>
+      <p id="accessible-state" class="sr-only" role="status" aria-live="polite"></p>
+      <div class="stage-foot">
+        <p id="caption" class="caption" aria-live="polite"></p>
+        <span id="counts" class="counts"></span>
       </div>
     </section>
 
-    <section class="control-panel" aria-label="演示控制">
-      <div class="direct-actions">
-        <button class="button button-allocate" id="btn-allocate" type="button">
-          <span class="button-symbol" aria-hidden="true">↓</span> 分配一个盘块
-        </button>
-        <button class="button button-reclaim" id="btn-reclaim" type="button">
-          <span class="button-symbol" aria-hidden="true">↑</span> 回收一个盘块
-        </button>
+    <section class="playback" aria-label="演示播放控制">
+      <div class="transport">
+        <button id="reset" class="tactile" type="button" title="重新开始（Home）">↺<span>重播</span></button>
+        <button id="previous" class="tactile" type="button" title="上一步（←）">‹<span>上一步</span></button>
+        <button id="play" class="beam-cta" type="button" title="播放或暂停（空格）"><span id="play-symbol" aria-hidden="true">▶</span><span id="play-label">播放</span></button>
+        <button id="next" class="tactile" type="button" title="下一步（→）"><span>下一步</span>›</button>
       </div>
-
-      <div class="playback-controls">
-        <div class="action-picker" role="group" aria-label="单步与自动播放的动作">
-          <span class="control-label">下一步</span>
-          <button class="mode-button is-selected" type="button" data-mode="allocate" aria-pressed="true">分配</button>
-          <button class="mode-button" type="button" data-mode="reclaim" aria-pressed="false">回收</button>
-        </div>
-        <button class="button button-neutral" id="btn-step" type="button">单步执行</button>
-        <button class="button button-play" id="btn-play" type="button"><span aria-hidden="true">▶</span> 自动播放</button>
-        <button class="button button-neutral" id="btn-pause" type="button" disabled><span aria-hidden="true">Ⅱ</span> 暂停</button>
-        <button class="button button-reset" id="btn-reset" type="button"><span aria-hidden="true">↺</span> 重置</button>
-        <label class="speed-control" for="speed">
-          <span>速度</span>
-          <input id="speed" type="range" min="0.5" max="2" step="0.25" value="1">
-          <output id="speed-value" for="speed">1×</output>
-        </label>
+      <div class="progress-control">
+        <label for="progress" class="sr-only">演示时刻</label>
+        <input id="progress" class="taste-slider" type="range" min="0" max="24" step="0.01" value="0">
+        <div class="progress-meta"><span>开始</span><output id="progress-caption" for="progress"></output></div>
       </div>
-      <p class="control-hint" id="operation-status" aria-live="polite">就绪。点击内存栈顶可分配，点击已占用盘块可回收。</p>
+      <label class="speed-control" for="speed">速度
+        <select id="speed"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="1.5">1.5×</option><option value="2">2×</option></select>
+      </label>
+      <label class="motion-control" for="reduce-motion"><input id="reduce-motion" type="checkbox"><span>减少动效</span></label>
     </section>
 
-    <section class="workspace" id="workspace" aria-label="成组链接法状态图">
-      <svg class="link-layer" id="link-layer" aria-hidden="true">
-        <defs>
-          <marker id="arrow-head" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto">
-            <path d="M 0 1 L 9 5 L 0 9 z" fill="#7654a6"></path>
-          </marker>
-        </defs>
-      </svg>
-
-      <section class="state-panel memory-panel" aria-labelledby="memory-title">
-        <div class="panel-heading">
-          <div class="heading-mark memory-mark" aria-hidden="true">内</div>
-          <div>
-            <h3 id="memory-title">内存空闲盘块号栈</h3>
-            <p>栈顶优先分配</p>
-          </div>
-          <span class="zone-tag memory-tag">内存</span>
-        </div>
-        <div class="memory-summary" id="memory-summary"></div>
-        <div class="memory-stack" id="memory-stack" aria-label="内存空闲盘块号栈内容"></div>
-        <p class="panel-footnote">点击栈顶盘块号可分配；count = 1 时点击 next 换组。</p>
-      </section>
-
-      <section class="state-panel disk-panel" aria-labelledby="disk-title">
-        <div class="panel-heading">
-          <div class="heading-mark disk-mark" aria-hidden="true">外</div>
-          <div>
-            <h3 id="disk-title">外存空闲盘块号栈</h3>
-            <p>每个组占用一个盘块保存</p>
-          </div>
-          <span class="zone-tag disk-tag" id="group-count">3 组</span>
-        </div>
-        <div class="disk-groups" id="external-groups" aria-label="外存空闲盘块号栈链表"></div>
-        <div class="empty-chain" id="empty-chain" hidden>外存链为空，内存 next = null。</div>
-      </section>
-
-      <section class="pool-column" aria-label="盘块池">
-        <section class="state-panel pool-panel free-panel" aria-labelledby="free-title">
-          <div class="panel-heading">
-            <div class="heading-mark free-mark" aria-hidden="true">闲</div>
-            <div>
-              <h3 id="free-title">空闲盘块池</h3>
-              <p>含内存项与外存组盘块</p>
-            </div>
-            <span class="zone-tag free-tag" id="free-count">12 块</span>
-          </div>
-          <div class="block-pool" id="free-pool" aria-label="当前空闲盘块"></div>
-        </section>
-
-        <section class="state-panel pool-panel occupied-panel" aria-labelledby="occupied-title">
-          <div class="panel-heading">
-            <div class="heading-mark occupied-mark" aria-hidden="true">占</div>
-            <div>
-              <h3 id="occupied-title">已占用盘块池</h3>
-              <p>点击盘块可将它回收</p>
-            </div>
-            <span class="zone-tag occupied-tag" id="occupied-count">0 块</span>
-          </div>
-          <div class="block-pool occupied-pool" id="occupied-pool" aria-label="已占用盘块"></div>
-          <p class="empty-pool" id="occupied-empty">分配盘块后会出现在这里。</p>
-        </section>
-      </section>
-    </section>
-
-    <section class="log-panel" aria-labelledby="log-title">
-      <div class="log-heading">
-        <div>
-          <p class="eyebrow">每一步都能追溯</p>
-          <h3 id="log-title">操作日志</h3>
-        </div>
-        <span class="log-count" id="log-count">0 条记录</span>
-      </div>
-      <ol class="log-list" id="operation-log" aria-live="polite" aria-relevant="additions"></ol>
-    </section>
-    <footer class="page-footer">成组链接法：内存栈保存一组，栈底指针连接外存中的下一组。</footer>
+    <nav class="operation-rail" aria-label="点击操作定位并暂停">
+      <div class="rail-heading"><span>四次分配</span><span>把这四块回收</span></div>
+      <div id="operations" class="operations"></div>
+    </nav>
+    <p id="dependency-notice" class="dependency-notice" hidden>动画引擎未加载。仍可用上一步、下一步、进度条和操作节点查看全部状态；联网后刷新可恢复播放。</p>
+    <footer class="page-foot">
+      <span>示意：容量 4，count 包含底部 next 槽；null 只表示链尾，不是盘块。</span>
+      <span>空格播放 / 暂停 · ← → 逐步 · Home 复位</span>
+    </footer>
   </main>
 </body>
 </html>
