@@ -396,6 +396,14 @@ window.MODULES = [
     "formula": "SCAN 331 柱道 · C-SCAN 382 柱道 · 折返方式决定服务顺序与总寻道距离"
   },
   {
+    "title": "偏导与可微的几何辨析",
+    "discipline": "math",
+    "path": "偏导与可微的几何辨析/index.html",
+    "badge": "截线与切线 · 嵌套集合判定",
+    "desc": "同一个考察点 P=(0,0)，沿一条直线切开曲面：截线、割线、切线与误差带同屏对照，缩小距离 ρ 时看断口、折角与误差比怎样变化；嵌套集合图给出五个样本在四个概念上的真值，盲测可先猜后揭晓。",
+    "formula": "偏导连续 ⇒ 可微 ⇒ 偏导存在且连续 · 反例 F1–F4 逐一击穿"
+  },
+  {
     "title": "假脱机技术SPOOLing",
     "discipline": "os",
     "path": "假脱机技术SPOOLing/index.html",
