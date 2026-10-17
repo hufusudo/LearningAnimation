@@ -37,6 +37,8 @@ const state = {
   ta: 0, ub: 0, tb: 0,
   stageProgressA: 0, stageProgressB: 0,
   alpha: 0,           // 平面倾角（度）
+  speed: 1,            // 演示播放速度
+  motion: false,      // 减少动效（启动时跟随系统）
   layers: {
     aCommon: true, aBox: true, aPlane: true, aPoints: true,
     bProjPlane: true, bDrops: true, bProjLine: true, bPlane: true
@@ -83,34 +85,16 @@ window.addEventListener('DOMContentLoaded', () => {
   initThree();
   buildModuleA();
   buildModuleB();
+  buildHalos();
   bindUI();
   initDrag();
+  state.motion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   applyPresetA('skew', false);
   applyPresetB('oblique', false);
   refresh();
   animate();
-  renderPanel();
-  initKaTeX();
-  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-    state.stageProgressA = 4;
-    refresh();
-    updateStoryUI();
-  } else {
-    window.setTimeout(playStory, 650);
-  }
+  window.setTimeout(playStory, 650);
 });
-
-function initKaTeX() {
-  const tryRender = () => {
-    if (window.renderMathInElement) {
-      window.renderMathInElement(document.body, {
-        delimiters: [{ left: '$$', right: '$$', display: true }, { left: '$', right: '$', display: false }],
-        throwOnError: false
-      });
-    } else setTimeout(tryRender, 100);
-  };
-  tryRender();
-}
 
 function initThree() {
   container = document.getElementById('canvas-container');
@@ -221,6 +205,44 @@ function setLabel(sp, text, color) {
   ud.texture.needsUpdate = true;
   const wh = ud.small ? 0.24 : 0.29;
   sp.scale.set(wh * (W / H), wh, 1);
+}
+
+/* ============================ 2b. 引导与淡入工具 ============================ */
+
+const hasGsap = typeof gsap !== 'undefined';
+const HA = {}, HB = {};
+
+// 焦点外环：深墨色细环，只改位置、缩放与透明度
+function makeHalo() {
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = 128;
+  const ctx = canvas.getContext('2d');
+  ctx.lineWidth = 8;
+  ctx.strokeStyle = '#292524';
+  ctx.beginPath();
+  ctx.arc(64, 64, 54, 0, Math.PI * 2);
+  ctx.stroke();
+  const mat = new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(canvas), transparent: true, depthTest: false, depthWrite: false });
+  const sp = new THREE.Sprite(mat);
+  sp.renderOrder = 998;
+  sp.visible = false;
+  return sp;
+}
+function setHalo(sp, pos, q) {
+  sp.visible = q > 0.001;
+  if (!sp.visible) return;
+  sp.position.copy(pos);
+  sp.material.opacity = 0.85 * q;
+  sp.scale.setScalar(0.4 + 0.12 * q);
+}
+// 标签按回执进度淡入淡出
+function fadeLabel(sp, q) {
+  sp.visible = q > 0.001;
+  sp.material.opacity = q;
+}
+function buildHalos() {
+  ['P1', 'P2', 'D1', 'D2', 'A', 'B', 'N'].forEach(k => { HA[k] = makeHalo(); groupA.add(HA[k]); });
+  ['C', 'Vt', 'Nt', 'E1', 'E2', 'E1p', 'E2p'].forEach(k => { HB[k] = makeHalo(); groupB.add(HB[k]); });
 }
 
 /* ============================ 3. 几何构件工具 ============================ */
@@ -580,23 +602,53 @@ function updateA() {
   setLabel(A.lbAB, `|AB|=${fmt(pA.distanceTo(pB))}`, '#6D28D9');
   A.lbAB.position.copy(pA).add(pB).multiplyScalar(0.5).add(v3(0, 0, 0.34));
 
-  // 按用户的构造顺序：方向 → 叉积 n₁ → 任意连线 n₂ → 正交投影。
-  const construction = GeometryConstruction.lineDistanceConstruction(coords(pA), coords(d1), coords(pB), coords(d2), PAR_EPS);
+  // 向量模式按构造顺序逐步出现：方向 → 叉积 n₁ → 连线 n₂ → 投影。其它模式不受步进影响
   const vectorMode = state.modeA === 'vector';
   const stage = state.stageProgressA;
-  setVectorArrow(A.arrowS1, P1, d1, vectorMode ? reveal(stage, 1) : 0, 1.65);
-  setVectorArrow(A.arrowS2, P2, d2, vectorMode ? reveal(stage, 1) : 0, 1.65);
+  const V = StoryChoreo.storyView(vectorMode ? stage : 0);
+  const sub = (k, a, b) => (vectorMode ? StoryChoreo.split(stage, k, a, b) : 0);
+  const construction = GeometryConstruction.lineDistanceConstruction(coords(pA), coords(d1), coords(pB), coords(d2), PAR_EPS);
   const n1 = construction.normal ? v3(...construction.normal) : v3();
-  setVectorArrow(A.arrowN1, P1, n1, vectorMode ? reveal(stage, 2) : 0, 1.55);
-  setVectorArrow(A.arrowN2, pA, pB.clone().sub(pA), vectorMode ? reveal(stage, 3) : 0);
+  const unitN = construction.unitNormal ? v3(...construction.unitNormal) : v3();
   const foot = construction.foot ? v3(...construction.foot) : pA;
-  setVectorArrow(A.arrowProjection, pA, foot.clone().sub(pA), vectorMode ? reveal(stage, 4) : 0);
-  setDash(A.dashProjection, pB, foot);
-  A.dashProjection.visible = vectorMode && !!construction.foot && reveal(stage, 4) > 0.01 && pB.distanceTo(foot) > 0.01;
-  A.lbN1.position.copy(P1).addScaledVector(construction.unitNormal ? v3(...construction.unitNormal) : v3(), 1.65).add(v3(0, 0, 0.24));
+  const L = state.layers;
+
+  setVectorArrow(A.arrowS1, P1, d1, sub(1, 0.25, 0.46), 1.65);
+  setVectorArrow(A.arrowS2, P2, d2, sub(1, 0.46, 0.7), 1.65);
+  setVectorArrow(A.arrowN1, P1, n1, vectorMode ? V.main[1] : 0, 1.55);
+  setVectorArrow(A.arrowN2, pA, pB.clone().sub(pA), vectorMode ? V.main[2] : 0);
+  setVectorArrow(A.arrowProjection, pA, foot.clone().sub(pA), sub(4, 0.25, 0.46));
+  // 第 4 步：先投出投影段 A→F，再由 B 落下虚线到 F
+  const drop = sub(4, 0.46, 0.7);
+  setDash(A.dashProjection, pB, pB.clone().lerp(foot, drop));
+  A.dashProjection.visible = vectorMode && !!construction.foot && drop > 0.001 && pB.distanceTo(foot) > 0.01;
+
+  // 标签：回执排在主动作之后
+  A.lbN1.position.copy(P1).addScaledVector(unitN, 1.65).add(v3(0, 0, 0.24));
   A.lbN2.position.copy(pA).lerp(pB, 0.58).add(v3(0, 0, 0.32));
-  A.lbN1.visible = vectorMode && !!construction.normal && reveal(stage, 2) > 0.85;
-  A.lbN2.visible = vectorMode && reveal(stage, 3) > 0.85;
+  fadeLabel(A.lbD1, vectorMode ? V.tag[0] : 1);
+  fadeLabel(A.lbD2, vectorMode ? V.tag[0] : 1);
+  fadeLabel(A.lbN1, vectorMode && construction.normal ? V.tag[1] : 0);
+  fadeLabel(A.lbN2, vectorMode ? V.tag[2] : 0);
+
+  // 动点 A、B 随第 3 步的引导出现
+  const appear = vectorMode ? Math.max(V.guide[2], V.main[2]) : (state.modeA === 'common' ? 1 : 0);
+  const showPts = L.aPoints && appear > 0.001;
+  A.mA.visible = A.mB.visible = showPts;
+  A.mA.scale.setScalar(Math.max(appear, 0.001));
+  A.mB.scale.setScalar(Math.max(appear, 0.001));
+  fadeLabel(A.lbA, showPts ? 1 : 0);
+  fadeLabel(A.lbB, showPts ? 1 : 0);
+  A.rodAB.visible = A.lbAB.visible = L.aPoints && state.modeA === 'common';
+
+  // 焦点外环：每步先指出即将参与的对象
+  setHalo(HA.P1, P1, vectorMode ? V.guide[0] : 0);
+  setHalo(HA.P2, P2, vectorMode ? V.guide[0] : 0);
+  setHalo(HA.D1, P1.clone().addScaledVector(d1, 1.65), vectorMode ? V.guide[1] : 0);
+  setHalo(HA.D2, P2.clone().addScaledVector(d2, 1.65), vectorMode ? V.guide[1] : 0);
+  setHalo(HA.A, pA, vectorMode ? V.guide[2] : 0);
+  setHalo(HA.B, pB, vectorMode ? V.guide[2] : 0);
+  setHalo(HA.N, P1.clone().addScaledVector(unitN, 1.55), vectorMode ? V.guide[3] : 0);
 
   // 公垂线段
   const { Q1, Q2 } = cpA;
@@ -604,18 +656,17 @@ function updateA() {
   const lenC = Q1.distanceTo(Q2);
   setLabel(A.lbD, `d = ${fmt(relA.d)}`, '#DC2626');
   A.lbD.position.copy(Q1).add(Q2).multiplyScalar(0.5).add(v3(0.15, 0.15, 0.32));
-  if (vectorMode && construction.foot) {
-    A.lbD.position.copy(pA).lerp(foot, 0.5).add(v3(0.18, 0.12, 0.32));
-  }
+  if (vectorMode && construction.foot) A.lbD.position.copy(pA).lerp(foot, 0.5).add(v3(0.18, 0.12, 0.32));
   if (lenC > 1e-3) {
     const u12 = new THREE.Vector3().subVectors(Q2, Q1).normalize();
     // 直角标记应画在「公垂线方向 × 直线方向」张成的平面内
     setRightAngle(A.frCommon1, Q1, u12, d1, 0.22);
     setRightAngle(A.frCommon2, Q2, u12.clone().negate(), d2, 0.22);
-    A.frCommon1.visible = A.frCommon2.visible = true;
-  } else {
-    A.frCommon1.visible = A.frCommon2.visible = false;
   }
+  // 平行时没有叉积法向量，公垂线在第 4 步替代投影段出现
+  const showCommon = L.aCommon && lenC > 1e-3 && (!vectorMode || (!construction.normal && V.main[3] > 0.001));
+  A.rodCommon.visible = A.frCommon1.visible = A.frCommon2.visible = showCommon;
+  fadeLabel(A.lbD, vectorMode ? (construction.normal ? V.tag[3] : (showCommon ? V.tag[3] : 0)) : (showCommon ? 1 : 0));
 
   // 平行六面体：以 P1 为顶点，棱 u=d1, v=d2, w=P2-P1
   const w = new THREE.Vector3().subVectors(P2, P1);
@@ -626,6 +677,8 @@ function updateA() {
     : `共面 ⇒ V=0（V/S 失效）`;
   setLabel(A.lbBox, volTxt, '#4338CA');
   A.lbBox.position.copy(P1).addScaledVector(d1, 0.5).addScaledVector(d2, 0.5).addScaledVector(w, 1.15);
+  const showBox = L.aBox && state.modeA === 'box';
+  A.boxEdges.visible = A.boxFaces.visible = A.boxBase.visible = A.lbBox.visible = showBox;
 
   // 过 L1 平行 L2 的平面 π
   const n = new THREE.Vector3().crossVectors(d1, d2);
@@ -645,23 +698,9 @@ function updateA() {
     } else A.frPlane.visible = false;
     setLabel(A.lbPlane, `π: 过 L₁ ∥ L₂`, '#0D9488');
     A.lbPlane.position.copy(center).addScaledVector(e2, 2.4).addScaledVector(d1, -3.6);
-  } else {
-    A.planeA.visible = A.planeAOutline.visible = A.dashPlane.visible = A.frPlane.visible = false;
   }
-
-  // 图层 / 模式可见性
-  const L = state.layers;
-  A.rodAB.visible = A.lbAB.visible = L.aPoints && state.modeA === 'common';
-  A.mA.visible = A.mB.visible = A.lbA.visible = A.lbB.visible = L.aPoints && (state.modeA === 'common' || (vectorMode && reveal(stage, 3) > 0));
-  A.lbD1.visible = A.lbD2.visible = !vectorMode || reveal(stage, 1) > 0.85;
-  const showBox = L.aBox && state.modeA === 'box';
-  A.boxEdges.visible = A.boxFaces.visible = A.boxBase.visible = A.lbBox.visible = showBox;
   const showPlane = L.aPlane && state.modeA === 'plane' && hasN;
   A.planeA.visible = A.planeAOutline.visible = A.dashPlane.visible = A.frPlane.visible = A.lbPlane.visible = showPlane;
-  const showCommon = L.aCommon && (!vectorMode || (!construction.normal && reveal(stage, 4) > 0));
-  A.rodCommon.visible = showCommon && lenC > 1e-3;
-  A.frCommon1.visible = A.frCommon2.visible = showCommon && lenC > 1e-3;
-  A.lbD.visible = vectorMode ? reveal(stage, 4) > 0.85 : showCommon;
 }
 
 function updateBox(edges, faces, base, o, u, v, w) {
@@ -702,6 +741,9 @@ function updateB() {
   const construction = GeometryConstruction.projectionPlaneConstruction(coords(n), coords(d), coords(C), 1e-3);
   const auxNormal = construction.auxNormal ? v3(...construction.auxNormal) : v3();
   const stage = state.stageProgressB;
+  const V = StoryChoreo.storyView(stage);
+  const sub = (k, p0, p1) => StoryChoreo.split(stage, k, p0, p1);
+  const L = state.layers;
 
   // 平面姿态
   B.planeMesh.rotation.set(a, 0, 0);
@@ -718,58 +760,79 @@ function updateB() {
   setLabel(B.lbD, 'v', '#B45309'); B.lbD.position.copy(B.D.position).add(v3(0, 0, 0.32));
   setLabel(B.lbL, 'L', '#2563EB'); B.lbL.position.copy(C).addScaledVector(d, 3.15).add(v3(0, 0, 0.32));
 
-  // 投影方向（把 d 投影到平面上）
+  // 投影方向（把 d 投影到平面上）与退化判别
   const dPerp = v3(...construction.projectedDirection);
-  const dLen = dPerp.length();
-  const isPend = dLen <= 1e-3;     // L ⊥ π
-  const isPar = Math.abs(d.dot(n)) < 1e-3; // L ∥ π（或含于 π）
+  const isPend = dPerp.length() <= 1e-3;     // L ⊥ π
+  const isPar = Math.abs(d.dot(n)) < 1e-3;   // L ∥ π（或含于 π）
 
   // 端点与其投影
   const E1 = C.clone().addScaledVector(d, -LINE_HALF);
   const E2 = C.clone().addScaledVector(d, LINE_HALF);
   const E1p = projectOnPlane(E1, n), E2p = projectOnPlane(E2, n);
-
-  B.dashE1.visible = B.dashE2.visible = !isPend;
-  setDash(B.dashE1, E1, E1p);
-  setDash(B.dashE2, E2, E2p);
   const projectedCenter = v3(...construction.projectedPoint);
-  const grow = reveal(stage, 4);
-  setRod(B.rodProj, projectedCenter.clone().addScaledVector(dPerp, -LINE_HALF * grow),
-    projectedCenter.clone().addScaledVector(dPerp, LINE_HALF * grow), 0.032);
-  B.rodProj.visible = !isPend;
-  B.lbLp.visible = !isPend;
+  const uN = n.clone().normalize();
+
+  // 第 3 步：两端向 π 的连线先作为引导画出（之后留作 π′ 的棱）
+  const drop = Math.max(V.guide[2], V.main[2]);
+  setDash(B.dashE1, E1, E1.clone().lerp(E1p, drop));
+  setDash(B.dashE2, E2, E2.clone().lerp(E2p, drop));
+  B.dashE1.visible = B.dashE2.visible = !isPend && L.bDrops && drop > 0.001;
+
+  // 第 4 步：投影直线 L′ 沿 π 生长
+  const lp = V.main[3];
+  setRod(B.rodProj, projectedCenter.clone().addScaledVector(dPerp, -LINE_HALF * lp),
+    projectedCenter.clone().addScaledVector(dPerp, LINE_HALF * lp), 0.032);
+  B.rodProj.visible = !isPend && L.bProjLine && lp > 0.001;
   if (!isPend) {
     setLabel(B.lbLp, 'L′ = π ∩ π′', '#059669');
     B.lbLp.position.copy(E1p).add(E2p).multiplyScalar(0.5).add(v3(0, 0, 0.34));
   }
+  fadeLabel(B.lbLp, !isPend && L.bProjLine ? V.tag[3] : 0);
+
   // 直角标记
-  B.fr1.visible = B.fr2.visible = !isPend;
+  B.fr1.visible = B.fr2.visible = !isPend && L.bDrops && V.tag[3] > 0.5;
   if (!isPend) {
-    const uN = n.clone().normalize();
     const uP = dPerp.clone().normalize();
     setRightAngle(B.fr1, E1p, uN, uP, 0.22);
     setRightAngle(B.fr2, E2p, uN, uP, 0.22);
   }
 
-  // 动点 M 与其投影 M′
+  // 动点 M 与其投影 M′：随第 4 步的引导出现
   const M = C.clone().addScaledVector(d, state.tb);
   const Mp = projectOnPlane(M, n);
   B.M.position.copy(M); B.Mp.position.copy(Mp);
   setDash(B.dashMMp, M, Mp);
-  setLabel(B.lbM, 'M', '#6D28D9'); B.lbM.position.copy(M).add(v3(0.06, 0.06, 0.32));
+  setLabel(B.lbM, 'M', '#6D28D9'); B.lbM.position.copy(M).add(v3(0.42, 0.16, 0.45));   // 与 P 的标签错开（tb=0 时 M 与 P 重合）
   setLabel(B.lbMp, 'M′', '#B45309'); B.lbMp.position.copy(Mp).add(v3(0.06, 0.06, 0.26));
+  const mq = Math.max(V.guide[3], V.main[3]);
+  B.M.visible = B.Mp.visible = mq > 0.001;
+  B.M.scale.setScalar(Math.max(mq, 0.001));
+  B.Mp.scale.setScalar(Math.max(mq, 0.001));
+  fadeLabel(B.lbM, mq);
+  fadeLabel(B.lbMp, mq);
+  B.dashMMp.visible = L.bDrops && mq > 0.001;
 
-  // 法向量与直线方向 → n′=n×v → 辅助平面 → 两平面的交线。
-  setVectorArrow(B.arrowN, v3(-1.4, -1.6 * Math.cos(a), -1.6 * Math.sin(a)), n, reveal(stage, 1), 1.55);
-  setVectorArrow(B.arrowV, C, d, reveal(stage, 1), 1.65);
-  setVectorArrow(B.arrowAux, C, auxNormal, reveal(stage, 2), 1.55);
-  B.lbN.position.copy(B.arrowN.position).addScaledVector(n, 1.78);
+  // 第 1 步：法向量 n 与方向 v；第 2 步：n′ = n × v
+  const nOrigin = v3(-1.4, -1.6 * Math.cos(a), -1.6 * Math.sin(a));
+  setVectorArrow(B.arrowN, nOrigin, n, sub(1, 0.25, 0.46), 1.55);
+  setVectorArrow(B.arrowV, C, d, sub(1, 0.46, 0.7), 1.65);
+  setVectorArrow(B.arrowAux, C, auxNormal, V.main[1], 1.55);
+  B.lbN.position.copy(nOrigin).addScaledVector(n, 1.78);
   B.lbAux.position.copy(C).addScaledVector(construction.unitAuxNormal ? v3(...construction.unitAuxNormal) : v3(), 1.78);
-  B.lbN.visible = reveal(stage, 1) > 0.85;
-  B.lbAux.visible = !!construction.auxNormal && reveal(stage, 2) > 0.85;
-  B.lbD.visible = reveal(stage, 1) > 0.85;
+  fadeLabel(B.lbN, V.tag[0]);
+  fadeLabel(B.lbD, V.tag[0]);
+  fadeLabel(B.lbAux, construction.auxNormal ? V.tag[1] : 0);
 
-  // 投影平面 π′ = span(d, n) 过 C；沿 n 方向跨越到目标平面以保证交线可见
+  // 焦点外环
+  setHalo(HB.C, C, V.guide[0]);
+  setHalo(HB.Vt, C.clone().addScaledVector(d, 1.65), V.guide[1]);
+  setHalo(HB.Nt, nOrigin.clone().addScaledVector(n, 1.55), V.guide[1]);
+  setHalo(HB.E1, E1, V.guide[2]);
+  setHalo(HB.E2, E2, V.guide[2]);
+  setHalo(HB.E1p, E1p, isPend ? 0 : V.guide[3]);
+  setHalo(HB.E2p, E2p, isPend ? 0 : V.guide[3]);
+
+  // 投影平面 π′ = span(d, n) 过 C；沿 n 方向跨越到目标平面以保证交线可见（第 3 步生成）
   const e1 = (dPerp.length() > 1e-3 ? dPerp.clone().normalize()
              : new THREE.Vector3().crossVectors(n, v3(1, 0, 0)).normalize());
   const e2 = n.clone().normalize();
@@ -780,6 +843,11 @@ function updateB() {
   setQuadOutline(B.ppOutline, ppCenter, e1, e2, 4.6, ppHalf);
   setLabel(B.lbPip, 'π′: 过 L 且 ⊥ π', '#B45309');
   B.lbPip.position.copy(ppCenter).addScaledVector(e1, 3.0).addScaledVector(e2, ppHalf + 0.35);
+  const pq = V.main[2];
+  B.ppFace.visible = B.ppOutline.visible = L.bProjPlane && !isPend && pq > 0.001;
+  B.ppFace.material.opacity = 0.12 * pq;
+  B.ppOutline.material.opacity = 0.55 * pq;
+  fadeLabel(B.lbPip, L.bProjPlane && !isPend ? V.tag[2] : 0);
 
   // 平面标签
   setLabel(B.lbPi, planeEq(n), '#0D9488');
@@ -788,35 +856,18 @@ function updateB() {
 
   // 交点
   const denom = d.dot(n);
-  B.pierce.visible = Math.abs(denom) > 1e-4;
   let piercePt = null;
-  if (B.pierce.visible) {
-    const t = -C.dot(n) / denom;
-    piercePt = C.clone().addScaledVector(d, t);
+  if (Math.abs(denom) > 1e-4) {
+    piercePt = C.clone().addScaledVector(d, -C.dot(n) / denom);
     B.pierce.position.copy(piercePt);
   }
+  B.pierce.visible = piercePt !== null && V.tag[3] > 0.001;
 
-  infoB = { n, d, C, M, Mp, piercePt, isPend, isPar, dPerp, dLen, E1, E2, E1p, E2p, auxNormal };
-
-  // 图层
-  const L = state.layers;
-  B.ppFace.visible = B.ppOutline.visible = L.bProjPlane && !isPend && reveal(stage, 3) > 0;
-  B.lbPip.visible = L.bProjPlane && !isPend && reveal(stage, 3) > 0.85;
-  B.ppFace.material.opacity = 0.12 * reveal(stage, 3);
-  B.ppOutline.material.opacity = 0.55 * reveal(stage, 3);
-  B.dashE1.visible = B.dashE1.visible && L.bDrops && grow > 0.1;
-  B.dashE2.visible = B.dashE2.visible && L.bDrops && grow > 0.1;
-  B.dashMMp.visible = L.bDrops && grow > 0.1;
-  B.fr1.visible = B.fr1.visible && L.bDrops && grow > 0.85;
-  B.fr2.visible = B.fr2.visible && L.bDrops && grow > 0.85;
-  B.rodProj.visible = B.rodProj.visible && L.bProjLine && grow > 0;
-  B.lbLp.visible = B.lbLp.visible && L.bProjLine && grow > 0.85;
-  B.M.visible = B.Mp.visible = B.lbM.visible = B.lbMp.visible = grow > 0.1;
-  B.pierce.visible = B.pierce.visible && grow > 0.85;
+  infoB = { n, d, C, M, Mp, piercePt, isPend, isPar, dPerp, dLen: dPerp.length(), E1, E2, E1p, E2p, auxNormal };
   B.planeMesh.visible = B.planeGrid.visible = B.planeOutline.visible = L.bPlane;
 }
 
-/* ============================ 9. 统一刷新 ============================ */
+/* ============================ 9. 演示进度与控制 ============================ */
 
 const STORY = {
   A: [
@@ -834,19 +885,112 @@ const STORY = {
     ['取两平面交线', 'π′ 与原平面 π 的交线，就是 L 的正交投影 L′。', 'L′']
   ]
 };
-let storyTimeline = null;
-const reveal = (progress, stage) => Math.max(0, Math.min(1, progress - stage + 1));
+const STEP_SEC = 1.3;   // 1× 下每步推进的秒数
+const DWELL = 0.35;     // 步界停留（秒）；减少动效时改为 0.9 秒的逐步跳转
+let storyTimeline = null, storyTween = null;
+
 const storyKey = () => state.module === 'A' ? 'stageProgressA' : 'stageProgressB';
+const storyActive = () => state.module === 'B' || state.modeA === 'vector';
+const storyEnd = () => state[storyKey()] >= 4 - 1e-6;
+const isPlaying = () => !!storyTimeline && storyTimeline.isActive();
+const setText = (id, text) => {
+  const el = document.getElementById(id);
+  if (el.textContent !== text) el.textContent = text;
+};
+
+// 从 p 连续推进到第 4 步：每步一段补间，步界停留；减少动效时直接跳转
+function buildStory(from) {
+  const key = storyKey();
+  const jump = state.motion;
+  const tl = gsap.timeline({ paused: true, onUpdate: refresh, onComplete: refresh });
+  let at = from;
+  while (at < 4 - 1e-6) {
+    const next = Math.min(4, Math.floor(at + 1e-6) + 1);
+    tl.to(state, { [key]: next, duration: jump ? 0 : (next - at) * STEP_SEC, ease: 'sine.inOut' });
+    at = next;
+    if (at < 4 - 1e-6) tl.to({}, { duration: jump ? 0.9 : DWELL });
+  }
+  tl.timeScale(state.speed);
+  return tl;
+}
+
+function playStory() {
+  if (!storyActive() || !hasGsap) return;
+  if (storyTimeline) storyTimeline.kill();
+  if (storyTween) { storyTween.kill(); storyTween = null; }
+  if (storyEnd()) state[storyKey()] = 0;
+  storyTimeline = buildStory(state[storyKey()]);
+  storyTimeline.play();
+  updateStoryUI();
+}
+
+function pauseStory() {
+  if (storyTimeline) storyTimeline.pause();
+  updateStoryUI();
+}
+
+function togglePlay() {
+  if (!storyActive() || !hasGsap) return;
+  if (isPlaying()) pauseStory();
+  else if (storyTimeline && !storyEnd()) { storyTimeline.play(); updateStoryUI(); }
+  else playStory();
+}
+
+// 定位到 p 并暂停；animate 时用短补间过渡，不做生硬跳变
+function seekStory(p, animate = true) {
+  if (storyTimeline) { storyTimeline.kill(); storyTimeline = null; }
+  if (storyTween) { storyTween.kill(); storyTween = null; }
+  const key = storyKey();
+  const target = Math.max(0, Math.min(4, p));
+  if (hasGsap && animate && !state.motion) {
+    storyTween = gsap.to(state, { [key]: target, duration: 0.6, ease: 'sine.inOut', onUpdate: refresh, onComplete: refresh });
+  } else {
+    state[key] = target;
+    refresh();
+  }
+}
+
+function restartStory() {
+  seekStory(0, false);
+  playStory();
+}
+
+function stepBy(delta) {
+  if (!storyActive()) return;
+  seekStory(Math.ceil(state[storyKey()] - 1e-4) + delta);
+}
+
+function setSpeed(x) {
+  state.speed = x;
+  if (storyTimeline) storyTimeline.timeScale(x);
+  updateStoryUI();
+}
+
+function toggleMotion() {
+  const playing = isPlaying();
+  state.motion = !state.motion;
+  if (storyTimeline) { storyTimeline.kill(); storyTimeline = null; }
+  if (playing) playStory();   // 播放中切换：从当前时刻续播
+  updateStoryUI();
+}
 
 function updateStoryUI() {
-  const vectorMode = state.module === 'B' || state.modeA === 'vector';
-  document.getElementById('story-guide').classList.toggle('hidden', !vectorMode);
+  const active = storyActive();
+  document.getElementById('story-guide').classList.toggle('hidden', !active);
   document.getElementById('layers-A').style.display = state.module === 'A' && state.modeA !== 'vector' ? 'flex' : 'none';
   document.getElementById('layers-B').style.display = state.module === 'B' ? 'flex' : 'none';
-  if (!vectorMode) return;
-  const step = Math.min(4, Math.ceil(state[storyKey()] - 1e-4));
+  document.getElementById('story-notice').classList.toggle('hidden', hasGsap);
+  document.getElementById('story-motion').setAttribute('aria-pressed', String(state.motion));
+  document.querySelectorAll('#story-speed button').forEach(b => {
+    b.classList.toggle('active', Number(b.dataset.speed) === state.speed);
+    b.disabled = !hasGsap || !active;
+  });
+  if (!active) return;
+
+  const p = state[storyKey()];
+  const step = Math.min(4, Math.ceil(p - 1e-4));
   const entry = STORY[state.module][step];
-  document.getElementById('story-title').textContent = entry[0];
+  setText('story-title', entry[0]);
   let detail = entry[1];
   if (state.module === 'A' && relA && relA.crLen < PAR_EPS && step >= 2) {
     detail = step === 4 ? '方向平行时 n₁ = 0，改用点到直线的垂直距离。' : '此时 s₁ × s₂ = 0，叉积法向量不存在。';
@@ -854,14 +998,18 @@ function updateStoryUI() {
   if (state.module === 'B' && infoB && infoB.isPend && step >= 2) {
     detail = step === 4 ? 'L 垂直于 π，整条直线投影为一个点。' : '此时 n × v = 0，辅助平面不唯一。';
   }
-  document.getElementById('story-detail').textContent = detail;
-  document.getElementById('story-count').textContent = `${step} / 4`;
+  setText('story-detail', detail);
+  setText('story-count', `${step} / 4`);
+  document.getElementById('story-fill').style.width = `${(p / 4) * 100}%`;
   document.querySelectorAll('#story-steps button').forEach((button, index) => {
     button.classList.toggle('active', index === step);
     button.setAttribute('aria-current', index === step ? 'step' : 'false');
   });
   document.getElementById('story-prev').disabled = step === 0;
   document.getElementById('story-next').disabled = step === 4;
+  const play = document.getElementById('story-play');
+  play.disabled = !hasGsap;
+  setText('story-play', isPlaying() ? '暂停' : storyEnd() ? '重播' : p > 1e-6 ? '继续' : '播放');
 }
 
 function renderStorySteps() {
@@ -872,38 +1020,10 @@ function renderStorySteps() {
     button.type = 'button';
     button.textContent = entry[2];
     button.title = entry[0];
-    button.addEventListener('click', () => setStoryStep(index));
+    button.addEventListener('click', () => seekStory(index));
     host.appendChild(button);
   });
   updateStoryUI();
-}
-
-function setStoryStep(step) {
-  if (storyTimeline) storyTimeline.kill();
-  const key = storyKey();
-  gsap.to(state, {
-    [key]: Math.max(0, Math.min(4, step)), duration: 0.55, ease: 'power2.inOut', overwrite: true,
-    onUpdate: () => { refresh(); updateStoryUI(); },
-    onComplete: () => { refresh(); updateStoryUI(); }
-  });
-}
-
-function playStory() {
-  if (state.module === 'A' && state.modeA !== 'vector') return;
-  if (storyTimeline) storyTimeline.kill();
-  const key = storyKey();
-  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-    state[key] = 4;
-    refresh();
-    return;
-  }
-  state[key] = 0;
-  refresh(); updateStoryUI();
-  storyTimeline = gsap.timeline({ onUpdate: () => { refresh(); updateStoryUI(); }, onComplete: updateStoryUI });
-  for (let step = 1; step <= 4; step++) {
-    storyTimeline.to(state, { [key]: step, duration: 0.82, ease: 'power2.inOut' });
-    if (step < 4) storyTimeline.to({}, { duration: 0.45 });
-  }
 }
 
 function refresh() {
@@ -912,7 +1032,6 @@ function refresh() {
   gridHelper.visible = state.module === 'A';
   if (state.module === 'A') updateA(); else updateB();
   updateHUD();
-  fillDynValues();
   updateStoryUI();
 }
 
@@ -933,6 +1052,13 @@ const REL_META = {
   coincident: { text: '重合直线', cls: 'bg-emerald-50 text-emerald-700 border-emerald-200', sub: '同一条直线' }
 };
 
+let lastHudHtml = '';
+function setHud(body, html) {
+  if (html === lastHudHtml) return;   // 只在内容变化时写 DOM，避免每帧重排
+  lastHudHtml = html;
+  body.innerHTML = html;
+}
+
 function updateHUD() {
   const b = HUD.badge(), s = HUD.sub(), body = HUD.body();
   if (state.module === 'A') {
@@ -941,26 +1067,24 @@ function updateHUD() {
     b.textContent = m.text;
     s.textContent = m.sub;
 
-    const crLen = relA.crLen;
-    const mixed = relA.mixed;
     const pA = L1.P.clone().addScaledVector(L1.d, state.ta);
     const pB = L2.P.clone().addScaledVector(L2.d, state.ub);
-    const ab = pA.distanceTo(pB);
     if (state.modeA === 'vector') {
+      const V = StoryChoreo.storyView(state.stageProgressA);
+      const shown = k => V.main[k - 1] > 0.02;
       const c = GeometryConstruction.lineDistanceConstruction(coords(pA), coords(L1.d), coords(pB), coords(L2.d), PAR_EPS);
-      const stage = state.stageProgressA;
-      body.innerHTML =
-        (stage < 1 ? kv('当前步骤', '先观察 L₁ 与 L₂') : kv('方向向量 s₁、s₂', `${vecStr(L1.d)} · ${vecStr(L2.d)}`)) +
-        (stage >= 2 ? kv('n₁ = s₁ × s₂', c.normal ? vecStr(v3(...c.normal)) : '零向量') : '') +
-        (stage >= 3 ? kv('n₂ = AB', vecStr(v3(...c.connector))) : '') +
-        (stage >= 4 ? kv(c.normal ? '|n₂ 在 n₁ 上的投影|' : '平行时的点线距离', fmt(relA.d, 3)) +
-          kv('d(L₁, L₂)', `<span style="color:#DC2626">${fmt(relA.d, 3)}</span>`) : '');
+      setHud(body,
+        (!shown(1) ? kv('当前步骤', '先观察 L₁ 与 L₂') : kv('方向向量 s₁、s₂', `${vecStr(L1.d)} · ${vecStr(L2.d)}`)) +
+        (shown(2) ? kv('n₁ = s₁ × s₂', c.normal ? vecStr(v3(...c.normal)) : '零向量') : '') +
+        (shown(3) ? kv('n₂ = AB', vecStr(v3(...c.connector))) : '') +
+        (shown(4) ? kv(c.normal ? '|n₂ 在 n₁ 上的投影|' : '平行时的点线距离', fmt(relA.d, 3)) +
+          kv('d(L₁, L₂)', `<span style="color:#DC2626">${fmt(relA.d, 3)}</span>`) : ''));
     } else {
-      body.innerHTML =
-        kv('|s₁ × s₂|', `${fmt(crLen, 3)} ${crLen < PAR_EPS ? '(≈0 ⇒ 平行)' : ''}`) +
-        kv('混合积 (P₁P₂,s₁,s₂)', fmt(mixed, 3)) +
+      setHud(body,
+        kv('|s₁ × s₂|', `${fmt(relA.crLen, 3)} ${relA.crLen < PAR_EPS ? '(≈0 ⇒ 平行)' : ''}`) +
+        kv('混合积 (P₁P₂,s₁,s₂)', fmt(relA.mixed, 3)) +
         kv('d(L₁, L₂)', `<span style="color:#DC2626">${fmt(relA.d, 3)}</span>`) +
-        kv('|AB| ≥ d', `${fmt(ab, 3)}`);
+        kv('|AB| ≥ d', fmt(pA.distanceTo(pB), 3)));
     }
 
     const btn = document.getElementById('btn-min-text');
@@ -977,13 +1101,14 @@ function updateHUD() {
     b.textContent = text;
     s.textContent = sub;
 
-    const stage = state.stageProgressB;
-    body.innerHTML =
-      (stage < 1 ? kv('当前步骤', '先观察 L 与 π') : kv('平面法向量 n', vecStr(n)) + kv('直线方向 v', vecStr(d))) +
-      (stage >= 2 ? kv('π′ 法向量 n×v', isPend ? '零向量' : vecStr(auxNormal)) : '') +
-      (stage >= 3 ? kv('辅助平面 π′', isPend ? '不唯一' : '过 L，法向量为 n×v') : '') +
-      (stage >= 4 ? kv('π ∩ π′', isPend ? '退化为一点' : '投影直线 L′') +
-        kv('M′ = M − (M·n)n', vecStr(Mp)) : '');
+    const V = StoryChoreo.storyView(state.stageProgressB);
+    const shown = k => V.main[k - 1] > 0.02;
+    setHud(body,
+      (!shown(1) ? kv('当前步骤', '先观察 L 与 π') : kv('平面法向量 n', vecStr(n)) + kv('直线方向 v', vecStr(d))) +
+      (shown(2) ? kv('π′ 法向量 n×v', isPend ? '零向量' : vecStr(auxNormal)) : '') +
+      (shown(3) ? kv('辅助平面 π′', isPend ? '不唯一' : '过 L，法向量为 n×v') : '') +
+      (shown(4) ? kv('π ∩ π′', isPend ? '退化为一点' : '投影直线 L′') +
+        kv('M′ = M − (M·n)n', vecStr(Mp)) : ''));
 
     const btn = document.getElementById('btn-min-text');
     if (btn) btn.textContent = '让 M 扫过 L（M′ 描出 L′）';
@@ -1017,7 +1142,7 @@ function applyPresetA(name, animate = true) {
   state.ta = 0; state.ub = 0;
   setSlider('slider-ta', 'val-ta', 0, 3);
   setSlider('slider-ub', 'val-ub', 0, 3);
-  if (!animate) {
+  if (!animate || !hasGsap) {
     L1.P.copy(P.p1); L1.d.copy(P.d1); L2.P.copy(P.p2); L2.d.copy(P.d2);
     refresh();
     return;
@@ -1046,7 +1171,7 @@ function applyPresetB(name, animate = true) {
   setSlider('slider-alpha', 'val-alpha', P.alpha, 0);
   state.tb = 0;
   setSlider('slider-tb', 'val-tb', 0, 3);
-  if (!animate) {
+  if (!animate || !hasGsap) {
     LB.P.copy(P.p); LB.d.copy(P.d);
     refresh();
     return;
@@ -1066,18 +1191,25 @@ function setSlider(id, vid, value, dec) {
 
 function bindUI() {
   renderStorySteps();
-  document.getElementById('story-prev').addEventListener('click', () => setStoryStep(Math.ceil(state[storyKey()] - 1e-4) - 1));
-  document.getElementById('story-next').addEventListener('click', () => setStoryStep(Math.ceil(state[storyKey()] - 1e-4) + 1));
-  document.getElementById('story-play').addEventListener('click', playStory);
+  document.getElementById('story-prev').addEventListener('click', () => stepBy(-1));
+  document.getElementById('story-next').addEventListener('click', () => stepBy(1));
+  document.getElementById('story-play').addEventListener('click', togglePlay);
+  document.getElementById('story-track').addEventListener('click', e => {
+    const r = e.currentTarget.getBoundingClientRect();
+    seekStory(4 * (e.clientX - r.left) / r.width);
+  });
+  document.querySelectorAll('#story-speed button').forEach(btn =>
+    btn.addEventListener('click', () => setSpeed(Number(btn.dataset.speed))));
+  document.getElementById('story-motion').addEventListener('click', toggleMotion);
   document.getElementById('tab-module-A').addEventListener('click', () => switchModule('A'));
   document.getElementById('tab-module-B').addEventListener('click', () => switchModule('B'));
 
   document.querySelectorAll('[data-case-a]').forEach(btn =>
-    btn.addEventListener('click', () => { setActiveChip('[data-case-a]', btn); applyPresetA(btn.dataset.caseA); renderPanel(); if (state.modeA === 'vector') playStory(); }));
+    btn.addEventListener('click', () => { setActiveChip('[data-case-a]', btn); applyPresetA(btn.dataset.caseA); restartStory(); }));
   document.querySelectorAll('[data-mode-a]').forEach(btn =>
-    btn.addEventListener('click', () => { setActiveChip('[data-mode-a]', btn); state.modeA = btn.dataset.modeA; if (storyTimeline) storyTimeline.kill(); refresh(); renderPanel(); if (state.modeA === 'vector') playStory(); }));
+    btn.addEventListener('click', () => { setActiveChip('[data-mode-a]', btn); state.modeA = btn.dataset.modeA; restartStory(); }));
   document.querySelectorAll('[data-case-b]').forEach(btn =>
-    btn.addEventListener('click', () => { setActiveChip('[data-case-b]', btn); applyPresetB(btn.dataset.caseB); renderPanel(); playStory(); }));
+    btn.addEventListener('click', () => { setActiveChip('[data-case-b]', btn); applyPresetB(btn.dataset.caseB); restartStory(); }));
 
   document.getElementById('slider-ta').addEventListener('input', e => { state.ta = +e.target.value; document.getElementById('val-ta').textContent = state.ta.toFixed(2); updateA(); updateHUD(); });
   document.getElementById('slider-ub').addEventListener('input', e => { state.ub = +e.target.value; document.getElementById('val-ub').textContent = state.ub.toFixed(2); updateA(); updateHUD(); });
@@ -1092,15 +1224,22 @@ function bindUI() {
     cb.addEventListener('change', () => { state.layers[LAYER_KEY[cb.dataset.layer]] = cb.checked; refresh(); }));
 
   document.getElementById('btn-reset-cam').addEventListener('click', resetCamera);
-  document.getElementById('btn-min').addEventListener('click', onMinButton);
+  const minBtn = document.getElementById('btn-min');
+  minBtn.disabled = !hasGsap;
+  minBtn.addEventListener('click', onMinButton);
 
-  const tp = document.getElementById('btn-toggle-explain');
-  tp.addEventListener('click', () => {
-    const p = document.getElementById('explain-panel');
-    const hidden = p.style.display === 'none';
-    p.style.display = hidden ? 'flex' : 'none';
-    tp.textContent = hidden ? '隐藏笔记' : '笔记看板';
+  // 键盘：空格播放／暂停，← → 单步，Home 重播；焦点在按钮或表单控件上时不抢键
+  document.addEventListener('keydown', e => {
+    const el = e.target instanceof Element ? e.target : null;
+    if (el && el.closest('input, select, textarea, button, a, [contenteditable]')) return;
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    if (e.code === 'Space') { e.preventDefault(); togglePlay(); }
+    else if (e.code === 'ArrowRight') { e.preventDefault(); stepBy(1); }
+    else if (e.code === 'ArrowLeft') { e.preventDefault(); stepBy(-1); }
+    else if (e.code === 'Home') { e.preventDefault(); restartStory(); }
   });
+  // 切到后台时暂停
+  document.addEventListener('visibilitychange', () => { if (document.hidden) pauseStory(); });
 }
 
 function setActiveChip(sel, active) {
@@ -1109,7 +1248,7 @@ function setActiveChip(sel, active) {
 }
 
 function switchModule(m) {
-  if (storyTimeline) storyTimeline.kill();
+  if (storyTimeline) { storyTimeline.kill(); storyTimeline = null; }
   state.module = m;
   state[storyKey()] = 0;
   document.getElementById('tab-module-A').classList.toggle('active', m === 'A');
@@ -1120,13 +1259,17 @@ function switchModule(m) {
   resetCamera();
   renderStorySteps();
   refresh();
-  renderPanel();
   playStory();
 }
 
 function resetCamera() {
   const to = state.module === 'A' ? { p: [7.6, -9.2, 6.6], t: [0, 0, 0.4] }
                                   : { p: [7.2, -8.6, 5.4], t: [0, 0, 1.0] };
+  if (!hasGsap) {
+    camera.position.set(...to.p);
+    controls.target.set(...to.t);
+    return;
+  }
   gsap.to(camera.position, { x: to.p[0], y: to.p[1], z: to.p[2], duration: 0.7, ease: 'power2.out' });
   gsap.to(controls.target, { x: to.t[0], y: to.t[1], z: to.t[2], duration: 0.7, ease: 'power2.out' });
 }
@@ -1234,184 +1377,6 @@ function applyDrag(obj, target) {
   else if (obj === B.D) {
     const nd = target.clone().sub(LB.P);
     if (nd.length() > 0.35) LB.d.copy(nd.normalize());
-  }
-}
-
-/* ============================ 14. 笔记面板 ============================ */
-
-function renderPanel() {
-  const el = document.getElementById('derivation-content');
-  const title = document.getElementById('panel-title');
-  const sub = document.getElementById('panel-subtitle');
-
-  if (state.module === 'A') {
-    title.textContent = '两直线间距离的几何理解';
-    sub.textContent = '平行 · 相交 · 重合 · 异面 的统一判别与计算';
-    el.innerHTML = panelA();
-  } else {
-    title.textContent = '直线在平面上的投影';
-    sub.textContent = '沿法向的正交投影 L′ = π ∩ π′';
-    el.innerHTML = panelB();
-  }
-  if (window.renderMathInElement) {
-    window.renderMathInElement(el, {
-      delimiters: [{ left: '$$', right: '$$', display: true }, { left: '$', right: '$', display: false }],
-      throwOnError: false
-    });
-  }
-  fillDynValues();
-}
-
-function panelA() {
-  const highlight = { vector: '向量投影', common: '理解一', box: '理解二', plane: '理解三' }[state.modeA];
-  const hlCls = k => k === highlight ? 'background:#FEF9C3;border-radius:6px;padding:1px 4px;' : '';
-  return String.raw`
-    <div class="callout-box callout-tip">
-      <b>按动画顺序构造：</b>先取两条直线的方向向量 $\vec s_1,\vec s_2$，叉乘得到 $\vec n_1=\vec s_1\times\vec s_2$；再在两直线上任取 $A,B$，连接成 $\vec n_2=\overrightarrow{AB}$；最后将 $\vec n_2$ 投到 $\vec n_1$ 的方向上。
-      <div class="formula-box">$$d=\left|\operatorname{proj}_{\vec n_1}\vec n_2\right|=\frac{|\vec n_2\cdot\vec n_1|}{|\vec n_1|}\qquad(\vec n_1\ne\vec0)$$</div>
-      <p>移动 $A,B$ 会改变 $\vec n_2$，但它沿 $\vec n_1$ 的投影长度不变。</p>
-    </div>
-
-    <div class="text-[11px] font-mono uppercase tracking-wider text-stone-400 mt-3">补充：位置关系与其他求法</div>
-    <div class="callout-box callout-note">
-      <b>判别总纲：</b>先用方向向量的叉积看是否平行，再看两直线是否共面。四类关系对应的距离公式各不相同，但都统一于「<b>公垂线段长度</b>」这一个几何量。
-    </div>
-
-    <div class="formula-box">
-      $$L_1:\ P_1+t\,\vec s_1,\qquad L_2:\ P_2+u\,\vec s_2,\qquad \vec s_1,\vec s_2\ \text{为单位方向向量}$$
-    </div>
-
-    <div class="flex items-start gap-2"><span class="step-num">1</span>
-      <div><b>方向关系</b>：计算 $\vec s_1\times\vec s_2$。
-      <ul class="list-disc pl-4 mt-1 space-y-0.5">
-        <li>$\vec s_1\times\vec s_2=\vec 0$：两直线<b>平行或重合</b>（共面）；</li>
-        <li>$\vec s_1\times\vec s_2\ne\vec 0$：方向不同，再用混合积判别是否共面。</li>
-      </ul></div>
-    </div>
-
-    <div class="flex items-start gap-2"><span class="step-num">2</span>
-      <div><b>共面判别（混合积）</b>：
-        <div class="formula-box">$$\big(P_2-P_1\big)\cdot(\vec s_1\times\vec s_2)\;\begin{cases}=0&\text{共面 → 相交}\\\ne 0&\text{异面}\end{cases}$$</div>
-      </div>
-    </div>
-
-    <div class="flex items-start gap-2"><span class="step-num">3</span>
-      <div><b>方向不平行时的距离公式</b>
-        <div class="formula-box">$$d(L_1,L_2)=\frac{\big|(P_2-P_1)\cdot(\vec s_1\times\vec s_2)\big|}{\big|\vec s_1\times\vec s_2\big|}$$</div>
-        三种情形的退化：
-        <ul class="list-disc pl-4 mt-1 space-y-0.5">
-          <li><b>异面</b>：分子为平行六面体体积 $V$，分母为底面积 $S$，$d=V/S$；</li>
-          <li><b>平行</b>：$\vec s_1\times\vec s_2=\vec 0$，公式失效，改用 $d=\dfrac{|\overrightarrow{P_1P_2}\times\vec s_1|}{|\vec s_1|}$；</li>
-          <li><b>相交 / 重合</b>：分子为 $0$，故 $d=0$。</li>
-        </ul>
-      </div>
-    </div>
-
-    <div class="pt-1 mt-1 border-t border-[#EFEFE9]">
-      <div class="text-[11px] font-mono uppercase tracking-wider text-stone-400 mb-2">${state.modeA === 'vector' ? '同一距离的其他三种理解' : `同一距离的三层理解（当前高亮：${highlight}）`}</div>
-
-      <div style="${hlCls('理解一')}" class="mb-2">
-        <b>理解一 · 公垂线段（最小值定义）</b>
-        <p class="mt-1">在 $L_1,L_2$ 上各取动点 $A(t),B(u)$，则 $|AB|$ 的下确界就是 $d$，且取到最小值的 $A,B$ 连线<b>同时垂直于两条直线</b>，即公垂线段。</p>
-        <div class="formula-box">$$\min_{t,u}|A(t)B(u)|=d,\qquad \overrightarrow{AB}\perp\vec s_1,\ \overrightarrow{AB}\perp\vec s_2$$</div>
-        <p class="text-stone-500">拖动 $t,u$ 滑块可实时看到 $|AB|\ge d$。</p>
-      </div>
-
-      <div style="${hlCls('理解二')}" class="mb-2">
-        <b>理解二 · 平行六面体 $d=V/S$</b>
-        <p class="mt-1">以 $P_1$ 为顶点，$\vec s_1,\vec s_2,\overrightarrow{P_1P_2}$ 为三条棱作平行六面体：其<b>体积</b> $V=|(P_2-P_1)\cdot(\vec s_1\times\vec s_2)|$，<b>底面积</b> $S=|\vec s_1\times\vec s_2|$。同一体积除以底面积恰是底面上的<b>高</b>，也就是异面直线的距离。</p>
-        <p class="text-stone-500 mt-1">⚠️ 平行/重合时 $\vec s_1\parallel\vec s_2$，三向量共面，$V=S=0$，$V/S$ 成为待定型——这正是混合积公式失效的原因。</p>
-      </div>
-
-      <div style="${hlCls('理解三')}" class="mb-2">
-        <b>理解三 · 平面法（化归为点到平面距离）</b>
-        <p class="mt-1">过 $L_1$ 作平面 $\pi\parallel L_2$（法向量 $\vec n=\vec s_1\times\vec s_2$）。因为 $L_2$ 上每一点到 $\pi$ 的距离都相同，所以</p>
-        <div class="formula-box">$$d(L_1,L_2)=d(P_2,\pi)=\frac{|(P_2-P_1)\cdot \vec n|}{|\vec n|}$$</div>
-        <p class="text-stone-500">这正是「线线距离 → 线面距离 → 点面距离」的降维链条。</p>
-      </div>
-    </div>
-
-    <div id="dyn-values" class="editorial-card p-3 mt-1"></div>
-
-    <div class="callout-box callout-warning">
-      <b>易错点：</b>平行直线不能直接套用混合积公式（分母为 0）；重合直线虽然 $\vec s_1\times\vec s_2=\vec0$，但距离为 $0$，要与平行区分——判据是 $\overrightarrow{P_1P_2}\times\vec s_1$ 是否为零。
-    </div>
-  `;
-}
-
-function panelB() {
-  return String.raw`
-    <div class="callout-box callout-note">
-      <b>按动画顺序构造：</b>先看目标平面 $\pi$ 的法向量 $\vec n$ 和直线 $L$ 的方向向量 $\vec v$；叉乘得到辅助平面的法向量；作出过 $L$ 的辅助平面 $\pi'$；最后取 $\pi$ 与 $\pi'$ 的交线。
-    </div>
-
-    <div class="flex items-start gap-2"><span class="step-num">1</span>
-      <div><b>叉乘求辅助平面的法向量</b>：
-        <div class="formula-box">$$\vec n'=\vec n\times\vec v$$</div>
-        $\vec n'$ 同时垂直于 $\vec n$ 和 $\vec v$。
-      </div>
-    </div>
-
-    <div class="flex items-start gap-2"><span class="step-num">2</span>
-      <div><b>作过直线的辅助平面</b>：取直线上的点 $P$，令
-        <div class="formula-box">$$\pi':\ \vec n'\cdot(X-P)=0$$</div>
-        因为 $\vec n'\perp\vec v$，它包含整条 $L$；因为 $\vec n'\perp\vec n$，它也包含沿 $\vec n$ 方向的投影线。
-      </div>
-    </div>
-
-    <div class="flex items-start gap-2"><span class="step-num">3</span>
-      <div><b>取两平面的交线</b>：$\pi'$ 与原平面 $\pi$ 的交线就是投影直线
-        <div class="formula-box">$$L'=\pi\cap\pi'$$</div>
-        直线 $L$ 上的每一点都沿 $\vec n$ 方向落到这条交线上。
-      </div>
-    </div>
-
-    <div class="callout-box callout-tip">
-      <b>计算核对：</b>若 $\pi:\ \vec n\cdot X=p$，点 $X$ 的投影为 $X'=X-\dfrac{\vec n\cdot X-p}{|\vec n|^2}\vec n$；投影直线的方向为 $\vec v'=\vec v-\dfrac{\vec v\cdot\vec n}{|\vec n|^2}\vec n$。
-    </div>
-
-    <div class="pt-1 mt-1 border-t border-[#EFEFE9]">
-      <div class="text-[11px] font-mono uppercase tracking-wider text-stone-400 mb-2">按 $L$ 与 $\pi$ 的位置关系分类</div>
-      <ul class="space-y-1.5">
-        <li><b>斜交</b>（$\vec v\cdot\vec n\ne0$）：$L'$ 是一条过交点的一般直线，$L$ 与其投影线的夹角 $\varphi$ 满足 $\sin\varphi=\dfrac{|\vec v\cdot\vec n|}{|\vec v|\,|\vec n|}$。</li>
-        <li><b>平行于 $\pi$</b>（$\vec v\cdot\vec n=0$ 且 $P\notin\pi$）：投影线 $L'\parallel L$，距离保持不变。</li>
-        <li><b>含于 $\pi$</b>（$\vec v\cdot\vec n=0$ 且 $P\in\pi$）：$L'=L$，投影即自身。</li>
-        <li><b>垂直于 $\pi$</b>（$\vec n\times\vec v=\vec 0$）：辅助平面不唯一，整条直线投影为<b>一个点</b>。</li>
-      </ul>
-    </div>
-
-    <div class="callout-box callout-tip">
-      <b>统一视角：</b>投影是一种<b>正交压缩</b>——沿 $\vec n$ 方向的长度被压为 $0$，垂直于 $\vec n$ 的分量原样保留。所以「投影直线的方向 = 原方向的正交补分量」。
-    </div>
-
-    <div id="dyn-values" class="editorial-card p-3 mt-1"></div>
-
-    <div class="callout-box callout-warning">
-      <b>易错点：</b>投影方向永远是 $\pi$ 的<b>法向量</b> $\vec n$，而不是某个「看起来竖直」的方向；平面倾斜时投影线也随之改变。不要把投影平面 $\pi'$ 与目标平面 $\pi$ 混淆——$L'$ 是二者的交线。
-    </div>
-  `;
-}
-
-/* 动态数值（顶部 / 底部卡片） */
-function fillDynValues() {
-  const box = document.getElementById('dyn-values');
-  if (!box) return;
-  if (state.module === 'A') {
-    const pA = L1.P.clone().addScaledVector(L1.d, state.ta);
-    const pB = L2.P.clone().addScaledVector(L2.d, state.ub);
-    box.innerHTML = `<div class="text-[11px] font-mono uppercase tracking-wider text-stone-400 mb-1">当前数值代入</div>` +
-      `<div class="font-mono text-[11px] text-stone-500 mb-1">P₁ = ${vecStr(L1.P)} , s₁ = ${vecStr(L1.d)}<br>P₂ = ${vecStr(L2.P)} , s₂ = ${vecStr(L2.d)}</div>` +
-      kv('|s₁×s₂|', fmt(relA.crLen, 4)) +
-      kv('混合积', fmt(relA.mixed, 4)) +
-      kv('d(L₁,L₂)', fmt(relA.d, 4)) +
-      kv('|AB|', fmt(pA.distanceTo(pB), 4));
-  } else {
-    const { n, d, C, M, Mp, piercePt, isPend } = infoB;
-    box.innerHTML = `<div class="text-[11px] font-mono uppercase tracking-wider text-stone-400 mb-1">当前数值代入</div>` +
-      `<div class="font-mono text-[11px] text-stone-500 mb-1">P = ${vecStr(C)} , v = ${vecStr(d)}<br>n = ${vecStr(n)}</div>` +
-      kv('M', vecStr(M)) +
-      kv("M' = M − (M·n)n", vecStr(Mp)) +
-      kv('交点 L∩π', piercePt ? vecStr(piercePt) : (isPend ? '（重合于 L 上一点）' : '（平行，无交点）'));
   }
 }
 
