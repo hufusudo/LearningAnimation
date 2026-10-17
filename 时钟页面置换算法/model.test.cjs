@@ -162,31 +162,41 @@ test('每步的结构不变量：连续、一步一个页框、指针只顺时�
   }
 });
 
-test('sampleAt 的拖动与倒退：任一步的起点等于上一步的终点，越界被钳制', () => {
+test('sampleAt 的前后关系与钳制：起点等于上一步终点，越界被钳制，prev 指向上一步', () => {
   const s = M.SCENARIOS[0];
   const run = M.buildRun({ mode: 'enhanced', frames: s.frames, pointer: s.pointer, requests: s.requests });
-  assert.deepEqual(M.sampleAt(run, 0, 0).snap, run.init);
-  assert.equal(M.sampleAt(run, 0, 0).deg, run.initDeg);
-  for (let i = 1; i <= run.N; i++) {
-    const a = M.sampleAt(run, i, 0);
-    const b = M.sampleAt(run, i - 1, 1);
-    assert.deepEqual(a.snap, b.snap, `第 ${i} 步起点的页框画面应与上一步终点一致`);
-    assert.ok(Math.abs(a.deg - b.deg) < 1e-9, `第 ${i} 步起点的指针角度应连续`);
+  assert.deepEqual(M.sampleAt(run, 0, 0).step.before, run.init);
+  for (let i = 1; i < run.N; i++) {
+    const v = M.sampleAt(run, i, 0.5);
+    assert.equal(v.step, run.steps[i]);
+    assert.equal(v.prev, run.steps[i - 1]);
+    assert.deepEqual(M.sampleAt(run, i, 0).step.before, M.sampleAt(run, i - 1, 1).step.after, `第 ${i} 步起点应等于上一步终点`);
   }
   assert.equal(M.sampleAt(run, -4, 0).index, 0);
   assert.equal(M.sampleAt(run, Number.NaN, 0).index, 0);
-  assert.equal(M.sampleAt(run, Infinity, 0).index, run.N);
-  assert.equal(M.sampleAt(run, run.N + 3, 0.5).done, true);
-  // 同一步内指针角度单调递增，且 HAND_END 之后到位
-  const step = run.steps.find((st) => st.moves);
-  const k = run.steps.indexOf(step);
-  let last = -Infinity;
-  for (let p = 0; p <= 1.0001; p += 0.05) {
-    const d = M.sampleAt(run, k, p).deg;
-    assert.ok(d >= last - 1e-9);
-    last = d;
+  assert.equal(M.sampleAt(run, Infinity, 0).done, true);
+  assert.equal(M.sampleAt(run, run.N + 3, 0.5).index, run.N);
+  assert.equal(M.sampleAt(run, run.N + 3, 0.5).step, run.steps[run.N - 1]);
+  const empty = M.buildRun({ mode: 'enhanced', frames: s.frames, pointer: 0, requests: [] });
+  assert.equal(M.sampleAt(empty, 0, 0).step, null);
+});
+
+test('淘汰时页框真正空出，装入后才填入新页；命中与缺页的查表步记录结果', () => {
+  const s = M.SCENARIOS[1];   // 场景 2：第一次访问淘汰干净页 P2，第二次访问淘汰脏页 P4
+  const run = M.buildRun({ mode: 'enhanced', frames: s.frames, pointer: s.pointer, requests: s.requests });
+  const evicts = run.steps.filter((st) => st.kind === 'evict');
+  assert.equal(evicts.length, 2);
+  for (const st of evicts) {
+    assert.equal(st.after.frames[st.focus].page, null, '淘汰后该页框应为空');
+    const next = run.steps[run.steps.indexOf(st) + 1];
+    assert.equal(next.kind, 'load', '淘汰之后紧跟装入');
+    assert.notEqual(next.after.frames[st.focus].page, null, '装入后页框有页号');
   }
-  assert.equal(M.sampleAt(run, k, M.HAND_END).deg, step.handTo);
+  assert.deepEqual(evicts.map((st) => st.dirty), [false, true]);
+  assert.deepEqual(run.steps.filter((st) => st.kind === 'lookup').map((st) => st.outcome), ['fault', 'fault']);
+  const hits = M.buildRun({ mode: 'enhanced', ...M.SCENARIOS[4], requests: M.SCENARIOS[4].requests });
+  assert.ok(hits.steps.filter((st) => st.kind === 'lookup').every((st) => st.outcome === 'hit'));
+  assert.ok(hits.evictStep.every((v) => v === Infinity), '全部命中时没有淘汰步');
 });
 
 test('推演是确定的：相同输入得到相同的步序列', () => {

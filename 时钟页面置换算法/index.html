@@ -43,7 +43,10 @@
       <span class="count" id="seq-count"></span>
     </div>
     <div class="seq-row">
-      <ol class="track" id="track" aria-label="访问序列，点击跳到该次访问"></ol>
+      <div class="track-scroll" id="track-scroll">
+        <ol class="track" id="track" aria-label="访问序列，点击跳到该次访问"></ol>
+        <span class="track-cursor" id="track-cursor" aria-hidden="true"></span>
+      </div>
       <form class="append" id="append">
         <label>追加 <input id="append-page" type="number" min="1" max="9" value="5" inputmode="numeric" aria-label="页号"></label>
         <select id="append-op" aria-label="访问类型">
@@ -69,7 +72,23 @@
         <title id="dial-title">驻留集圆盘</title>
         <desc id="dial-desc">四个页框绕圆盘排列，指针从中心指向当前检查的页框；每个页框显示页号、访问位 R、修改位 M 与类别。</desc>
         <circle class="ring" cx="360" cy="230" r="150"></circle>
+        <g id="fx-under">
+          <path id="trail" class="trail" d=""></path>
+          <line id="connector" class="connector" x1="0" y1="0" x2="0" y2="0"></line>
+        </g>
         <g id="cards"></g>
+        <g id="tray" class="tray">
+          <rect id="tray-box" class="tray-box" x="578" y="350" width="116" height="62" rx="14" stroke="#D6D3CD" stroke-width="1.2"></rect>
+          <text class="tray-title" x="594" y="372">外存</text>
+          <text id="tray-count" class="tray-count" x="594" y="400">写回 0</text>
+          <text id="tray-ghost" class="tray-count tray-ghost" x="594" y="400"></text>
+        </g>
+        <g id="fx-over">
+          <g id="ghost" class="ghost" style="display: none">
+            <rect class="ghost-box" x="-30" y="-13" width="60" height="26" rx="8"></rect>
+            <text id="ghost-text" class="ghost-text" x="0" y="0" text-anchor="middle"></text>
+          </g>
+        </g>
         <g id="hand" transform="rotate(0 360 230)">
           <line class="hand-line" x1="360" y1="230" x2="360" y2="112"></line>
           <path class="hand-tip" d="M351 124 L360 104 L369 124 Z"></path>
@@ -88,10 +107,10 @@
       <p class="rule" id="rule" aria-live="polite"></p>
       <h2>统计</h2>
       <dl class="stats">
-        <div><dt>访问</dt><dd id="st-total">0</dd></div>
-        <div><dt>命中</dt><dd id="st-hits">0</dd></div>
-        <div><dt>缺页</dt><dd id="st-faults">0</dd></div>
-        <div><dt>写回</dt><dd id="st-writes">0</dd></div>
+        <div><dt>访问</dt><dd class="num" data-stat="total"><span class="n-main">0</span><span class="n-ghost" aria-hidden="true"></span></dd></div>
+        <div><dt>命中</dt><dd class="num" data-stat="hits"><span class="n-main">0</span><span class="n-ghost" aria-hidden="true"></span></dd></div>
+        <div><dt>缺页</dt><dd class="num" data-stat="faults"><span class="n-main">0</span><span class="n-ghost" aria-hidden="true"></span></dd></div>
+        <div><dt>写回</dt><dd class="num" data-stat="writes"><span class="n-main">0</span><span class="n-ghost" aria-hidden="true"></span></dd></div>
       </dl>
     </aside>
   </div>
@@ -123,6 +142,7 @@
 </div>
 
 <script src="model.js"></script>
+<script src="choreo.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
