@@ -1,677 +1,829 @@
 /**
- * VLAN 原理与 802.1Q 帧流动机制 (app.js)
- * 宽敞内部空间 · 全同VLAN端口并发广播 · 全异VLAN端口严格拒绝 (SW1: P5,P6,P7; SW2: P4,P5,P6) · 丝滑形变
+ * VLAN 与 802.1Q 帧流动 · 界面控制器。
+ *
+ * 分工：model.js 给几何与时刻表，choreo.js 由（步，进度）算出画面，这里只负责
+ * 建一次舞台 SVG、把 world 写进 DOM、以及播放/单步/拖动/速度/键盘/减少动效/地址栏。
+ * 画面完全由时刻算出，没有历史动画累积，所以倒退与拖动都能精确重绘。
  */
-
 (function () {
   'use strict';
 
-  // 动画状态机
+  const M = window.VlanModel;
+  const C = window.VlanChoreo;
+  const G = M.GEO;
+  const L = M.LAYOUT;
+  const RUN = M.buildRun();
+  const NS = 'http://www.w3.org/2000/svg';
+  const DWELL = 0.9;          // 减少动效时每一步停留的秒数（1× 速度）
+
+  const $ = (id) => document.getElementById(id);
+
   const state = {
-    currentStep: 1,
-    totalSteps: 4,
-    isPlaying: false,
-    speedMultiplier: 1.0,
-    timer: null,
-    activeTweens: []
+    t: 0,
+    playing: false,
+    speed: 1,
+    reduce: false,
+    raf: 0,
+    timer: 0,
+    target: null,
+    last: 0,
+    lastHash: 0
   };
 
-  let coords = {};
+  const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
+  const r3 = (v) => Math.round(v * 1000) / 1000;
 
-  // DOM 元素引用
-  const els = {
-    btnPlay: document.getElementById('btn-play'),
-    playIcon: document.getElementById('play-icon'),
-    playText: document.getElementById('play-text'),
-    btnReset: document.getElementById('btn-reset'),
-    btnPrev: document.getElementById('btn-prev'),
-    btnNext: document.getElementById('btn-next'),
-    speedBtns: document.querySelectorAll('.speed-btn'),
-    stepBadge: document.getElementById('step-badge'),
-    stepDesc: document.getElementById('step-desc'),
-    statusDot: document.getElementById('status-dot'),
-
-    canvasContainer: document.getElementById('canvas-container'),
-    svgLinks: document.getElementById('svg-links'),
-    svgPackets: document.getElementById('svg-packets'),
-    svgIsolations: document.getElementById('svg-isolations'),
-
-    // 设备终端
-    hostA: document.getElementById('host-A'),
-    hostB: document.getElementById('host-B'),
-    hostA2: document.getElementById('host-A2'), // 终端 3
-    hostA3: document.getElementById('host-A3'), // 终端 4
-    hostC: document.getElementById('host-C'),
-    hostD: document.getElementById('host-D'),
-    hostC2: document.getElementById('host-C2'), // 终端 7
-
-    hostE: document.getElementById('host-E'),
-    hostE2: document.getElementById('host-E2'), // 终端 E2
-    hostF: document.getElementById('host-F'),
-    hostF2: document.getElementById('host-F2'),
-    hostF3: document.getElementById('host-F3'),
-
-    // 交换机 1 端口与内部中心
-    sw1P1: document.getElementById('sw1-p1'),
-    sw1P2: document.getElementById('sw1-p2'),
-    sw1P3: document.getElementById('sw1-p3'),
-    sw1P4: document.getElementById('sw1-p4'),
-    sw1P5: document.getElementById('sw1-p5'),
-    sw1P6: document.getElementById('sw1-p6'),
-    sw1P7: document.getElementById('sw1-p7'),
-    sw1P8: document.getElementById('sw1-p8'),
-    sw1Center: document.getElementById('sw1-center'),
-
-    // 交换机 2 端口与内部中心
-    sw2P1: document.getElementById('sw2-p1'),
-    sw2P2: document.getElementById('sw2-p2'),
-    sw2P3: document.getElementById('sw2-p3'),
-    sw2P4: document.getElementById('sw2-p4'),
-    sw2P5: document.getElementById('sw2-p5'),
-    sw2P6: document.getElementById('sw2-p6'),
-    sw2Center: document.getElementById('sw2-center')
-  };
-
-  // 测量所有节点在 SVG 视口中的精准中心坐标
-  function updateCoordinates() {
-    const containerRect = els.canvasContainer.getBoundingClientRect();
-
-    function getCenter(el) {
-      if (!el) return { x: 0, y: 0, top: 0, bottom: 0 };
-      const r = el.getBoundingClientRect();
-      return {
-        x: r.left + r.width / 2 - containerRect.left,
-        y: r.top + r.height / 2 - containerRect.top,
-        top: r.top - containerRect.top,
-        bottom: r.bottom - containerRect.top
-      };
+  // ============================================================
+  // SVG 小工具
+  // ============================================================
+  function svgEl(tag, attrs, parent) {
+    const node = document.createElementNS(NS, tag);
+    if (attrs) {
+      for (const key in attrs) node.setAttribute(key, attrs[key]);
     }
-
-    coords = {
-      hostA: getCenter(els.hostA),
-      hostB: getCenter(els.hostB),
-      hostA2: getCenter(els.hostA2),
-      hostA3: getCenter(els.hostA3),
-      hostC: getCenter(els.hostC),
-      hostD: getCenter(els.hostD),
-      hostC2: getCenter(els.hostC2),
-
-      hostE: getCenter(els.hostE),
-      hostE2: getCenter(els.hostE2),
-      hostF: getCenter(els.hostF),
-      hostF2: getCenter(els.hostF2),
-      hostF3: getCenter(els.hostF3),
-
-      sw1P1: getCenter(els.sw1P1),
-      sw1P2: getCenter(els.sw1P2),
-      sw1P3: getCenter(els.sw1P3),
-      sw1P4: getCenter(els.sw1P4),
-      sw1P5: getCenter(els.sw1P5),
-      sw1P6: getCenter(els.sw1P6),
-      sw1P7: getCenter(els.sw1P7),
-      sw1P8: getCenter(els.sw1P8),
-      sw1Center: getCenter(els.sw1Center),
-
-      sw2P1: getCenter(els.sw2P1),
-      sw2P2: getCenter(els.sw2P2),
-      sw2P3: getCenter(els.sw2P3),
-      sw2P4: getCenter(els.sw2P4),
-      sw2P5: getCenter(els.sw2P5),
-      sw2P6: getCenter(els.sw2P6),
-      sw2Center: getCenter(els.sw2Center)
-    };
-
-    renderLinks();
+    if (parent) parent.appendChild(node);
+    return node;
   }
 
-  // 绘制内部总线与外部物理连线
-  function renderLinks() {
-    let html = '';
-
-    function drawLine(p1, p2, color = '#CBD5E1', width = 2, dash = '') {
-      if (!p1 || !p2 || (p1.x === 0 && p1.y === 0) || (p2.x === 0 && p2.y === 0)) return;
-      html += `<line x1="${p1.x}" y1="${p1.y}" x2="${p2.x}" y2="${p2.y}" stroke="${color}" stroke-width="${width}" ${dash ? `stroke-dasharray="${dash}"` : ''} />`;
-    }
-
-    // 1. 交换机 1 内部总线 (内部处理空间中的浅灰虚线)
-    drawLine(coords.sw1P1, coords.sw1Center, '#CBD5E1', 1.8, '4,3');
-    drawLine(coords.sw1Center, coords.sw1P2, '#CBD5E1', 1.8, '4,3');
-    drawLine(coords.sw1Center, coords.sw1P3, '#CBD5E1', 1.8, '4,3');
-    drawLine(coords.sw1Center, coords.sw1P4, '#CBD5E1', 1.8, '4,3');
-    drawLine(coords.sw1Center, coords.sw1P5, '#CBD5E1', 1.8, '4,3');
-    drawLine(coords.sw1Center, coords.sw1P6, '#CBD5E1', 1.8, '4,3');
-    drawLine(coords.sw1Center, coords.sw1P7, '#CBD5E1', 1.8, '4,3');
-    drawLine(coords.sw1Center, coords.sw1P8, '#CBD5E1', 1.8, '4,3');
-
-    // 2. 交换机 2 内部总线
-    drawLine(coords.sw2P1, coords.sw2Center, '#CBD5E1', 1.8, '4,3');
-    drawLine(coords.sw2Center, coords.sw2P2, '#CBD5E1', 1.8, '4,3');
-    drawLine(coords.sw2Center, coords.sw2P3, '#CBD5E1', 1.8, '4,3');
-    drawLine(coords.sw2Center, coords.sw2P4, '#CBD5E1', 1.8, '4,3');
-    drawLine(coords.sw2Center, coords.sw2P5, '#CBD5E1', 1.8, '4,3');
-    drawLine(coords.sw2Center, coords.sw2P6, '#CBD5E1', 1.8, '4,3');
-
-    // 3. 交换机与主机外部双绞线
-    drawLine(coords.sw1P1, coords.hostA, '#93C5FD', 2.2);
-    drawLine(coords.sw1P2, coords.hostB, '#93C5FD', 2.2);
-    drawLine(coords.sw1P3, coords.hostA2, '#93C5FD', 2.2);
-    drawLine(coords.sw1P4, coords.hostA3, '#93C5FD', 2.2);
-    drawLine(coords.sw1P5, coords.hostC, '#FCD34D', 2.2);
-    drawLine(coords.sw1P6, coords.hostD, '#FCD34D', 2.2);
-    drawLine(coords.sw1P7, coords.hostC2, '#FCD34D', 2.2);
-
-    drawLine(coords.sw2P2, coords.hostE, '#93C5FD', 2.2);
-    drawLine(coords.sw2P3, coords.hostE2, '#93C5FD', 2.2);
-    drawLine(coords.sw2P4, coords.hostF, '#FCD34D', 2.2);
-    drawLine(coords.sw2P5, coords.hostF2, '#FCD34D', 2.2);
-    drawLine(coords.sw2P6, coords.hostF3, '#FCD34D', 2.2);
-
-    // 4. SW1(P8) 与 SW2(P1) 之间的 Trunk 跨越链路
-    if (coords.sw1P8 && coords.sw2P1) {
-      const yMid = (coords.sw1P8.y + coords.sw2P1.y) / 2;
-      html += `<path d="M ${coords.sw1P8.x} ${coords.sw1P8.y} C ${coords.sw1P8.x + 35} ${yMid - 15}, ${coords.sw2P1.x - 35} ${yMid - 15}, ${coords.sw2P1.x} ${coords.sw2P1.y}" fill="none" stroke="#10B981" stroke-width="3.5" stroke-dasharray="7,4" />`;
-    }
-
-    els.svgLinks.innerHTML = html;
+  // 只在变化时写入属性，避免每帧重排
+  function setA(node, name, value) {
+    const cache = node.__a || (node.__a = {});
+    if (cache[name] === value) return;
+    cache[name] = value;
+    node.setAttribute(name, value);
   }
 
-  // ==========================================================================
-  // 高保真可平滑形变的报文对象构造器
-  // ==========================================================================
-  function createMorphablePacket(id = 'pkt-morph', initialType = 'mac') {
-    const isMac = initialType === 'mac';
-    const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-    g.setAttribute('id', id);
-    g.setAttribute('class', 'packet-node');
+  function setText(node, text) {
+    if (node.__t === text) return;
+    node.__t = text;
+    node.textContent = text;
+  }
 
-    g.innerHTML = `
-      <!-- 报文主体方块 -->
-      <rect class="pkt-bg" x="${isMac ? -20 : -25}" y="-14" width="${isMac ? 40 : 50}" height="28" rx="4"
-            fill="${isMac ? '#EF4444' : '#059669'}" stroke="${isMac ? '#B91C1C' : '#047857'}" stroke-width="1.5" />
-      
-      <!-- 报文文字标题 -->
-      <text class="pkt-text" x="0" y="${isMac ? 4 : 0}" fill="#FFFFFF" font-size="9.5"
-            font-family="JetBrains Mono, monospace" font-weight="bold" text-anchor="middle">
-        ${isMac ? 'MAC帧' : '802.1Q'}
-      </text>
-      
-      <!-- 4B VLAN Tag 角标 (可平滑缩放/展开) -->
-      <g class="pkt-tag" opacity="${isMac ? 0 : 1}" transform="${isMac ? 'scale(0)' : 'scale(1)'}">
-        <rect x="-16" y="5" width="32" height="9" rx="2" fill="#34D399" />
-        <text x="0" y="12" fill="#064E3B" font-size="7.5" font-family="JetBrains Mono, monospace" font-weight="800" text-anchor="middle">
-          VID:10
-        </text>
-      </g>
-    `;
+  function setClass(node, cls, on) {
+    const cache = node.__c || (node.__c = {});
+    if (cache[cls] === on) return;
+    cache[cls] = on;
+    node.classList.toggle(cls, on);
+  }
+
+  // ============================================================
+  // 舞台：静态结构只建一次
+  // ============================================================
+  const stage = $('stage');
+  const portEls = {};
+  const hostEls = {};
+  const bandEls = {};
+  const swEls = {};
+
+  function layer(name) {
+    const g = svgEl('g', { id: 'layer-' + name });
+    stage.appendChild(g);
     return g;
   }
 
-  // 丝滑形变：红色 MAC 帧 -> 绿色 802.1Q 打标帧
-  function smoothMorphTo1Q(pktEl, duration = 0.5) {
-    if (!pktEl) return;
-    const bg = pktEl.querySelector('.pkt-bg');
-    const text = pktEl.querySelector('.pkt-text');
-    const tag = pktEl.querySelector('.pkt-tag');
-
-    const tl = gsap.timeline();
-    tl.to(bg, {
-      fill: '#059669',
-      stroke: '#047857',
-      width: 50,
-      x: -25,
-      duration: duration,
-      ease: 'power2.inOut'
-    }, 0);
-
-    tl.to(text, {
-      textContent: '802.1Q',
-      y: 0,
-      duration: duration * 0.4
-    }, 0);
-
-    tl.to(tag, {
-      opacity: 1,
-      scale: 1,
-      duration: duration * 0.6,
-      ease: 'back.out(2)'
-    }, duration * 0.2);
-
-    return tl;
+  function buildDefs() {
+    const defs = svgEl('defs', null, stage);
+    const pat = svgEl('pattern', { id: 'grid18', width: 18, height: 18, patternUnits: 'userSpaceOnUse' }, defs);
+    svgEl('path', { d: 'M18 0H0V18', fill: 'none', stroke: 'rgba(52,60,56,0.05)', 'stroke-width': 1 }, pat);
+    svgEl('rect', { x: 0, y: 0, width: G.stageW, height: G.stageH, fill: 'url(#grid18)' }, stage);
   }
 
-  // 丝滑形变：绿色 802.1Q 帧 -> 红色 MAC 帧 (剥除 Tag)
-  function smoothMorphToMac(pktEl, duration = 0.5) {
-    if (!pktEl) return;
-    const bg = pktEl.querySelector('.pkt-bg');
-    const text = pktEl.querySelector('.pkt-text');
-    const tag = pktEl.querySelector('.pkt-tag');
-
-    const tl = gsap.timeline();
-    tl.to(tag, {
-      opacity: 0,
-      scale: 0,
-      duration: duration * 0.35,
-      ease: 'power2.in'
-    }, 0);
-
-    tl.to(bg, {
-      fill: '#EF4444',
-      stroke: '#B91C1C',
-      width: 40,
-      x: -20,
-      duration: duration,
-      ease: 'power2.inOut'
-    }, 0.05);
-
-    tl.to(text, {
-      textContent: 'MAC帧',
-      y: 4,
-      duration: duration * 0.4
-    }, 0.1);
-
-    return tl;
+  function buildBands() {
+    const g0 = layer('bands');
+    Object.values(L.bands).forEach((b) => {
+      const g = svgEl('g', { class: 'band', 'data-vid': b.vid }, g0);
+      svgEl('rect', { class: 'band-box', x: b.x1, y: b.top, width: b.x2 - b.x1, height: b.h, rx: 12 }, g);
+      const t = svgEl('text', { class: 'band-txt', x: b.cx, y: G.bandLabelY, 'text-anchor': 'middle' }, g);
+      t.textContent = b.label;
+      bandEls[b.key] = g;
+    });
   }
 
-  // 创建拒绝转发/隔离 ❌ 标志 (紧凑美观，适应每个被拒绝的端口)
-  function createIsolationBarrier(x, y, label = '拒绝') {
-    const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-    g.setAttribute('class', 'isolation-badge');
-    g.innerHTML = `
-      <circle cx="${x}" cy="${y}" r="8.5" fill="#FEE2E2" stroke="#EF4444" stroke-width="1.8" />
-      <line x1="${x - 3}" y1="${y - 3}" x2="${x + 3}" y2="${y + 3}" stroke="#DC2626" stroke-width="1.8" stroke-linecap="round" />
-      <line x1="${x + 3}" y1="${y - 3}" x2="${x - 3}" y2="${y + 3}" stroke="#DC2626" stroke-width="1.8" stroke-linecap="round" />
-      <rect x="${x - 16}" y="${y + 10}" width="32" height="12" rx="2.5" fill="#DC2626" opacity="0.95" />
-      <text x="${x}" y="${y + 19}" fill="#FFFFFF" font-size="7.5" font-family="-apple-system, sans-serif" font-weight="bold" text-anchor="middle">
-        ${label}
-      </text>
-    `;
+  function buildCables() {
+    const g0 = layer('cables');
+    Object.values(L.hosts).forEach((h) => {
+      svgEl(
+        'line',
+        {
+          class: 'cable',
+          'data-vid': h.vid,
+          x1: h.cx,
+          y1: G.portTop + G.portH,
+          x2: h.cx,
+          y2: h.top
+        },
+        g0
+      );
+    });
+    const a = L.ports['sw1:P8'];
+    const b = L.ports['sw2:P1'];
+    svgEl('line', { class: 'trunk-cable', x1: a.x2, y1: a.cy, x2: b.x1, y2: b.cy }, g0);
+    const note = svgEl(
+      'text',
+      { class: 'trunk-note', x: (a.x2 + b.x1) / 2, y: 146, 'text-anchor': 'middle' },
+      g0
+    );
+    note.textContent = 'Trunk 允许 10 · 20';
+  }
+
+  function buildPort(pt) {
+    const g = svgEl('g', { class: 'port', 'data-vid': pt.vid, 'data-port': pt.id });
+    svgEl('rect', { class: 'port-ring', x: pt.x1 - 3.5, y: pt.y1 - 3.5, width: G.portW + 7, height: G.portH + 7, rx: 11, opacity: 0 }, g);
+    svgEl('rect', { class: 'port-box', x: pt.x1, y: pt.y1, width: G.portW, height: G.portH, rx: 8 }, g);
+    const id = svgEl('text', { class: 'port-id', x: pt.cx, y: pt.y1 + 18, 'text-anchor': 'middle' }, g);
+    id.textContent = pt.id;
+    const vid = svgEl('text', { class: 'port-vid', x: pt.cx, y: pt.y1 + 33, 'text-anchor': 'middle' }, g);
+    vid.textContent = 'PVID ' + pt.vid;
+
+    // 未转发：端口下方一枚 ✕（形状 + 颜色，不只靠颜色）
+    const mark = svgEl('g', { class: 'port-mark', opacity: 0 }, g);
+    svgEl('circle', { cx: pt.cx, cy: 206, r: 7 }, mark);
+    svgEl(
+      'path',
+      { d: 'M' + (pt.cx - 2.4) + ' 203.6 L' + (pt.cx + 2.4) + ' 208.4 M' + (pt.cx + 2.4) + ' 203.6 L' + (pt.cx - 2.4) + ' 208.4' },
+      mark
+    );
+
+    portEls[pt.key] = { ring: g.querySelector('.port-ring'), mark };
     return g;
   }
 
-  // 清空动效与残留图元
-  function clearArtifacts() {
-    state.activeTweens.forEach(t => t.kill());
-    state.activeTweens = [];
-
-    els.svgPackets.innerHTML = '';
-    els.svgIsolations.innerHTML = '';
-
-    document.querySelectorAll('.host-card').forEach(h => h.classList.remove('receiving-pulse', 'sending-pulse'));
-    document.querySelectorAll('.port-badge').forEach(p => p.classList.remove('active-port', 'blocked-port'));
+  function buildTrunkPort(tp) {
+    const g = svgEl('g', { class: 'trunk-port', 'data-port': tp.id });
+    svgEl('rect', { class: 'trunk-ring', x: tp.x1 - 3.5, y: tp.y1 - 3.5, width: G.trunkW + 7, height: G.trunkH + 7, rx: 11, opacity: 0 }, g);
+    svgEl('rect', { class: 'trunk-box', x: tp.x1, y: tp.y1, width: G.trunkW, height: G.trunkH, rx: 8 }, g);
+    const id = svgEl('text', { class: 'trunk-id', x: tp.cx, y: tp.y1 + 15, 'text-anchor': 'middle' }, g);
+    id.textContent = tp.id;
+    const sub = svgEl('text', { class: 'trunk-sub', x: tp.cx, y: tp.y1 + 27, 'text-anchor': 'middle' }, g);
+    sub.textContent = 'Trunk';
+    portEls[tp.key] = { ring: g.querySelector('.trunk-ring'), mark: null };
+    return g;
   }
 
-  // ==========================================================================
-  // 核心动画步骤调度机 (4 大阶段)
-  // ==========================================================================
-  function goToStep(step) {
-    if (step < 1) step = 1;
-    if (step > state.totalSteps) step = state.totalSteps;
+  function buildSwitch(sw) {
+    const g = svgEl('g', { class: 'sw', 'data-sw': sw.id });
+    svgEl('rect', { class: 'sw-body', x: sw.x, y: sw.y, width: sw.w, height: sw.h, rx: 16 }, g);
 
-    state.currentStep = step;
-    els.stepBadge.innerText = `${step} / ${state.totalSteps}`;
+    const title = svgEl('text', { class: 'sw-title', x: sw.x + 20, y: 38 }, g);
+    title.textContent = sw.title;
+    const code = svgEl('text', { class: 'sw-code', x: sw.x + 20, y: 56 }, g);
+    code.textContent = sw.code;
 
-    els.btnPrev.disabled = (step === 1);
-    els.btnNext.disabled = (step === state.totalSteps);
+    // 右侧：VID → 端口映射（查表时对应的行会染底）
+    const mapEls = {};
+    const right = sw.x + sw.w - 20;
+    sw.map.forEach((row, i) => {
+      const y = 38 + i * 18;
+      const rect = svgEl(
+        'rect',
+        { class: 'map-hl', 'data-vid': row.vid, x: right - 106, y: y - 11.5, width: 110, height: 17, rx: 5, opacity: 0 },
+        g
+      );
+      const txt = svgEl('text', { class: 'map-txt', 'data-vid': row.vid, x: right, y, 'text-anchor': 'end' }, g);
+      txt.textContent = row.text;
+      mapEls[row.vid] = { rect, txt };
+    });
 
-    clearArtifacts();
-    updateCoordinates();
+    // VLAN 转发表芯片
+    const fab = sw.fabric;
+    const fabricRing = svgEl(
+      'rect',
+      {
+        class: 'fabric-ring',
+        x: fab.cx - G.fabricW / 2 - 5,
+        y: fab.cy - G.fabricH / 2 - 5,
+        width: G.fabricW + 10,
+        height: G.fabricH + 10,
+        rx: 11,
+        opacity: 0
+      },
+      g
+    );
+    svgEl('rect', { class: 'fabric-box', x: fab.cx - G.fabricW / 2, y: fab.cy - G.fabricH / 2, width: G.fabricW, height: G.fabricH, rx: 8 }, g);
+    const ft = svgEl('text', { class: 'fabric-txt', x: fab.cx, y: fab.cy + 3.5, 'text-anchor': 'middle' }, g);
+    ft.textContent = 'VLAN 转发表';
+    svgEl('line', { class: 'fabric-link', x1: fab.cx, y1: fab.cy + G.fabricH / 2, x2: fab.cx, y2: G.busY - 12 }, g);
 
-    const speed = state.speedMultiplier;
-    const durBase = 1.2 / speed;
+    // 内部总线（背板）与端口支线
+    svgEl(
+      'rect',
+      { class: 'bus-band', x: sw.bus.x1, y: G.busY - 12, width: sw.bus.x2 - sw.bus.x1, height: 24, rx: 12 },
+      g
+    );
+    svgEl('line', { class: 'bus', x1: sw.bus.x1 + 8, y1: sw.bus.y, x2: sw.bus.x2 - 8, y2: sw.bus.y }, g);
+    sw.ports.forEach((key) => {
+      const pt = L.ports[key];
+      svgEl('line', { class: 'stub', x1: pt.cx, y1: G.busY + 12, x2: pt.cx, y2: pt.y1 }, g);
+    });
 
-    switch (step) {
-      // ----------------------------------------------------------------------
-      // 阶段 1：主机 A 发送 MAC 帧 -> 进入交换机 1 内部 -> 丝滑变为 1Q 帧
-      // ----------------------------------------------------------------------
-      case 1:
-        els.stepDesc.innerText = '阶段 1：主机 A 发送红色 MAC 帧，进入交换机 1 内部打标，丝滑转变为绿色 802.1Q 帧 (VID:10)';
-        els.statusDot.className = 'w-2 h-2 rounded-full bg-red-500 animate-pulse';
+    // 端口槽与 Trunk 端口
+    sw.ports.forEach((key) => {
+      g.appendChild(buildPort(L.ports[key]));
+    });
+    g.appendChild(buildTrunkPort(L.ports[sw.trunk]));
 
-        els.hostA.classList.add('sending-pulse');
-        els.sw1P1.classList.add('active-port');
+    stage.querySelector('#layer-switches').appendChild(g);
+    swEls[sw.id] = { fabricRing, map: mapEls };
+  }
 
-        const p1 = createMorphablePacket('pkt-step1', 'mac');
-        els.svgPackets.appendChild(p1);
-        gsap.set(p1, { x: coords.hostA.x, y: coords.hostA.y - 12 });
+  function buildHosts() {
+    const g0 = layer('hosts');
+    Object.values(L.hosts).forEach((h) => {
+      const g = svgEl('g', { class: 'host', 'data-host': h.id }, g0);
+      const ring = svgEl(
+        'rect',
+        { class: 'host-ring', x: h.cx - h.w / 2 - 4, y: h.top - 4, width: h.w + 8, height: h.h + 8, rx: 13, opacity: 0 },
+        g
+      );
+      svgEl('rect', { class: 'host-box', x: h.cx - h.w / 2, y: h.top, width: h.w, height: h.h, rx: 10 }, g);
+      const badge = svgEl('text', { class: 'host-badge', x: h.cx, y: h.top + 22, 'text-anchor': 'middle' }, g);
+      badge.textContent = h.badge;
+      const role = svgEl('text', { class: 'host-role', x: h.cx, y: h.top + 35, 'text-anchor': 'middle' }, g);
+      role.textContent = h.role;
 
-        const tl1 = gsap.timeline();
-        // A -> SW1 P1 (保持红色)
-        tl1.to(p1, {
-          x: coords.sw1P1.x,
-          y: coords.sw1P1.y,
-          duration: durBase * 0.8,
-          ease: 'power2.in'
-        });
+      // 收到回执：✓
+      const check = svgEl('g', { class: 'host-check', opacity: 0 }, g);
+      svgEl('circle', { cx: h.cx + 18, cy: h.top + 7, r: 6 }, check);
+      svgEl(
+        'path',
+        { d: 'M' + (h.cx + 15) + ' ' + (h.top + 7) + ' l2.1 2.3 l3.9 -4.5' },
+        check
+      );
 
-        // 穿越 P1 进入交换机内部核心 (开始丝滑形变：Red -> Green 1Q)
-        tl1.to(p1, {
-          x: coords.sw1Center.x,
-          y: coords.sw1Center.y,
-          duration: durBase * 1.0,
-          ease: 'power1.out',
-          onStart: () => {
-            smoothMorphTo1Q(p1, durBase * 0.8);
-          },
-          onComplete: () => {
-            gsap.fromTo(els.sw1Center, { scale: 0.95 }, { scale: 1.12, duration: 0.2, yoyo: true, repeat: 1 });
-          }
-        });
+      // 发送方：主机上方一枚「发送」
+      const send = svgEl('g', { class: 'host-send', opacity: 0 }, g);
+      svgEl('rect', { x: h.cx - 19, y: h.top - 22, width: 38, height: 16, rx: 8 }, send);
+      const st = svgEl('text', { x: h.cx, y: h.top - 10.5, 'text-anchor': 'middle' }, send);
+      st.textContent = '发送';
 
-        state.activeTweens.push(tl1);
-        break;
+      hostEls[h.id] = { ring, check, send };
+    });
+  }
 
-      // ----------------------------------------------------------------------
-      // 阶段 2：SW1 内部全广播：同 VLAN (P2, P3, P4) 全部转发变回 MAC 帧；所有异 VLAN 端口 (P5, P6, P7) 全部拒绝转发！
-      // ----------------------------------------------------------------------
-      case 2:
-        els.stepDesc.innerText = '阶段 2：交换机 1 广播至同 VLAN 端口 (P2、P3、P4) 变回 MAC 帧；所有不同 VLAN 端口 (P5、P6、P7) 全部直接拒绝 ❌';
-        els.statusDot.className = 'w-2 h-2 rounded-full bg-blue-500 animate-pulse';
+  // ---------- 动态层：帧、浮标、飞行标签、结论 ----------
+  const framePool = [];
+  const tagPool = [];
+  let frameLayer = null;
+  let trailEl = null;
+  let pvidEl = null;
+  let resultEl = null;
+  const PVID_W = 58;
+  const PVID_H = 18;
 
-        // 高亮同 VLAN 转发端口
-        els.sw1P1.classList.add('active-port');
-        els.sw1P2.classList.add('active-port');
-        els.sw1P3.classList.add('active-port');
-        els.sw1P4.classList.add('active-port');
+  function makeFrameEl() {
+    const g = svgEl('g', { class: 'frame' }, frameLayer);
+    const body = svgEl('rect', { class: 'frame-body', rx: 6 }, g);
+    const tagRect = svgEl('rect', { class: 'frame-tag', rx: 3 }, g);
+    const seps = [];
+    const lbls = [];
+    C.CELLS.forEach((cell, k) => {
+      if (k > 0) seps[k] = svgEl('line', { class: 'frame-sep' }, g);
+      const lbl = svgEl(
+        'text',
+        { class: 'frame-lbl' + (cell.key === 'tag' ? ' frame-lbl-tag' : ''), y: 3.4, 'text-anchor': 'middle' },
+        g
+      );
+      lbl.textContent = cell.label;
+      lbls[k] = lbl;
+    });
+    const len = svgEl('text', { class: 'frame-len', 'text-anchor': 'start' }, g);
+    const el = { g, body, tagRect, seps, lbls, len, ghost: null };
+    framePool.push(el);
+    return el;
+  }
 
-        const tl2 = gsap.timeline();
+  function buildFx() {
+    const g0 = layer('fx');
+    trailEl = svgEl('polyline', { class: 'trail', points: '', opacity: 0 }, g0);
 
-        // 1. 同 VLAN 分支转发辅助函数
-        function createSameVlanBranch(targetPortCoord, targetHostCoord, targetHostEl, delay = 0) {
-          const pkt = createMorphablePacket('pkt-sw1-branch', '1q');
-          els.svgPackets.appendChild(pkt);
-          gsap.set(pkt, { x: coords.sw1Center.x, y: coords.sw1Center.y });
+    pvidEl = svgEl('g', { class: 'pvid-chip', opacity: 0 }, g0);
+    svgEl('rect', { x: -PVID_W / 2, y: -PVID_H / 2, width: PVID_W, height: PVID_H, rx: 9 }, pvidEl);
+    const pt = svgEl('text', { x: 0, y: 3, 'text-anchor': 'middle' }, pvidEl);
+    pt.textContent = 'PVID 10';
+  }
 
-          // 中心 -> Access 端口
-          tl2.to(pkt, {
-            x: targetPortCoord.x,
-            y: targetPortCoord.y,
-            duration: durBase * 0.7,
-            ease: 'power1.in',
-            onComplete: () => {
-              // 端口出向强制剥离 Tag，丝滑变回红色 MAC 帧
-              smoothMorphToMac(pkt, durBase * 0.55);
-            }
-          }, delay);
+  function buildDynamic() {
+    frameLayer = layer('frames');
+    for (let i = 0; i < 4; i++) makeFrameEl();
 
-          // Access 端口 -> 对应主机
-          tl2.to(pkt, {
-            x: targetHostCoord.x,
-            y: targetHostCoord.y - 12,
-            duration: durBase * 0.8,
-            ease: 'power2.out',
-            onComplete: () => {
-              targetHostEl.classList.add('receiving-pulse');
-            }
-          }, delay + durBase * 0.7);
-        }
-
-        // 2. 异 VLAN 端口拒绝辅助函数 (所有该拒绝的端口都要拒绝！)
-        function createRejectBranch(targetPortCoord, targetPortEl, delay = 0) {
-          const pkt = createMorphablePacket('pkt-sw1-reject', '1q');
-          els.svgPackets.appendChild(pkt);
-          gsap.set(pkt, { x: coords.sw1Center.x, y: coords.sw1Center.y });
-
-          tl2.to(pkt, {
-            x: targetPortCoord.x,
-            y: targetPortCoord.y,
-            duration: durBase * 0.65,
-            ease: 'power1.in',
-            onComplete: () => {
-              targetPortEl.classList.add('blocked-port');
-              const barrier = createIsolationBarrier(targetPortCoord.x, targetPortCoord.y, '拒绝');
-              els.svgIsolations.appendChild(barrier);
-              gsap.from(barrier, { scale: 0, duration: 0.25, ease: 'back.out(2)' });
-              gsap.to(pkt, { opacity: 0, scale: 0.2, duration: 0.2, onComplete: () => pkt.remove() });
-            }
-          }, delay);
-        }
-
-        // --- 同 VLAN 端口并发转发 ---
-        createSameVlanBranch(coords.sw1P2, coords.hostB, els.hostB, 0);       // 发往 P2 -> 主机 B
-        createSameVlanBranch(coords.sw1P3, coords.hostA2, els.hostA2, 0.04);   // 发往 P3 -> 终端 3
-        createSameVlanBranch(coords.sw1P4, coords.hostA3, els.hostA3, 0.08);   // 发往 P4 -> 终端 4
-
-        // --- 所有不同 VLAN 端口 (P5, P6, P7) 全部拒绝 ---
-        createRejectBranch(coords.sw1P5, els.sw1P5, 0);                        // P5 拒绝！
-        createRejectBranch(coords.sw1P6, els.sw1P6, 0.04);                     // P6 拒绝！
-        createRejectBranch(coords.sw1P7, els.sw1P7, 0.08);                     // P7 拒绝！
-
-        state.activeTweens.push(tl2);
-        break;
-
-      // ----------------------------------------------------------------------
-      // 阶段 3：1Q 帧到达 Trunk 端口 -> 保持 1Q 绿色帧穿越到达交换机 2
-      // ----------------------------------------------------------------------
-      case 3:
-        els.stepDesc.innerText = '阶段 3：1Q 帧到达 Trunk 口 (P8)，保持绿色 802.1Q 帧在中继链路上传输到达交换机 2';
-        els.statusDot.className = 'w-2 h-2 rounded-full bg-emerald-600 animate-pulse';
-
-        els.sw1P8.classList.add('active-port');
-        els.sw2P1.classList.add('active-port');
-
-        const pTrunk = createMorphablePacket('pkt-trunk', '1q');
-        els.svgPackets.appendChild(pTrunk);
-        gsap.set(pTrunk, { x: coords.sw1Center.x, y: coords.sw1Center.y });
-
-        const tl3 = gsap.timeline();
-
-        // 1. SW1 中心 -> SW1 Trunk 端口 (P8)
-        tl3.to(pTrunk, {
-          x: coords.sw1P8.x,
-          y: coords.sw1P8.y,
-          duration: durBase * 0.6,
-          ease: 'power1.out',
-          onComplete: () => {
-            gsap.fromTo(els.sw1P8, { scale: 0.95 }, { scale: 1.15, duration: 0.15, yoyo: true, repeat: 1 });
-          }
-        });
-
-        // 2. 沿 Trunk 贝塞尔曲线平滑飞向 SW2 的 Trunk 端口 (P1)
-        const trunkPath = { progress: 0 };
-        const pStart = coords.sw1P8, pEnd = coords.sw2P1;
-        const yMid = (pStart.y + pEnd.y) / 2;
-
-        tl3.to(trunkPath, {
-          progress: 1,
-          duration: durBase * 1.3,
-          ease: 'power1.inOut',
-          onUpdate: () => {
-            const t = trunkPath.progress;
-            const cx1 = pStart.x + 35, cy1 = yMid - 15;
-            const cx2 = pEnd.x - 35, cy2 = yMid - 15;
-            const x = Math.pow(1 - t, 3) * pStart.x + 3 * Math.pow(1 - t, 2) * t * cx1 + 3 * (1 - t) * Math.pow(t, 2) * cx2 + Math.pow(t, 3) * pEnd.x;
-            const y = Math.pow(1 - t, 3) * pStart.y + 3 * Math.pow(1 - t, 2) * t * cy1 + 3 * (1 - t) * Math.pow(t, 2) * cy2 + Math.pow(t, 3) * pEnd.y;
-            gsap.set(pTrunk, { x: x, y: y });
-          },
-          onComplete: () => {
-            gsap.fromTo(els.sw2P1, { scale: 0.95 }, { scale: 1.15, duration: 0.15, yoyo: true, repeat: 1 });
-          }
-        });
-
-        // 3. 进入 SW2 内部中心
-        tl3.to(pTrunk, {
-          x: coords.sw2Center.x,
-          y: coords.sw2Center.y,
-          duration: durBase * 0.7,
-          ease: 'power1.out'
-        });
-
-        state.activeTweens.push(tl3);
-        break;
-
-      // ----------------------------------------------------------------------
-      // 阶段 4：SW2 内部全广播：同 VLAN (P2, P3) 均转发并变回 MAC 帧；所有异 VLAN 端口 (P4, P5, P6) 全部拒绝转发！
-      // ----------------------------------------------------------------------
-      case 4:
-        els.stepDesc.innerText = '阶段 4：交换机 2 广播至同 VLAN 端口 (P2、P3) 变回 MAC 帧；所有不同 VLAN 端口 (P4、P5、P6) 全部直接拒绝 ❌';
-        els.statusDot.className = 'w-2 h-2 rounded-full bg-emerald-500 animate-pulse';
-
-        // 高亮 SW2 同 VLAN 端口
-        els.sw2P2.classList.add('active-port');
-        els.sw2P3.classList.add('active-port');
-
-        const tl4 = gsap.timeline();
-
-        // 1. SW2 同 VLAN 分支转发辅助函数
-        function createSw2SameVlanBranch(targetPortCoord, targetHostCoord, targetHostEl, delay = 0) {
-          const pkt = createMorphablePacket('pkt-sw2-branch', '1q');
-          els.svgPackets.appendChild(pkt);
-          gsap.set(pkt, { x: coords.sw2Center.x, y: coords.sw2Center.y });
-
-          // 中心 -> Port
-          tl4.to(pkt, {
-            x: targetPortCoord.x,
-            y: targetPortCoord.y,
-            duration: durBase * 0.7,
-            ease: 'power1.in',
-            onComplete: () => {
-              smoothMorphToMac(pkt, durBase * 0.55);
-            }
-          }, delay);
-
-          // Port -> 主机
-          tl4.to(pkt, {
-            x: targetHostCoord.x,
-            y: targetHostCoord.y - 12,
-            duration: durBase * 0.8,
-            ease: 'power2.out',
-            onComplete: () => {
-              targetHostEl.classList.add('receiving-pulse');
-            }
-          }, delay + durBase * 0.7);
-        }
-
-        // 2. SW2 异 VLAN 端口拒绝辅助函数 (所有该拒绝的端口都要拒绝！)
-        function createSw2RejectBranch(targetPortCoord, targetPortEl, delay = 0) {
-          const pkt = createMorphablePacket('pkt-sw2-reject', '1q');
-          els.svgPackets.appendChild(pkt);
-          gsap.set(pkt, { x: coords.sw2Center.x, y: coords.sw2Center.y });
-
-          tl4.to(pkt, {
-            x: targetPortCoord.x,
-            y: targetPortCoord.y,
-            duration: durBase * 0.65,
-            ease: 'power1.in',
-            onComplete: () => {
-              targetPortEl.classList.add('blocked-port');
-              const barrier = createIsolationBarrier(targetPortCoord.x, targetPortCoord.y, '拒绝');
-              els.svgIsolations.appendChild(barrier);
-              gsap.from(barrier, { scale: 0, duration: 0.25, ease: 'back.out(2)' });
-              gsap.to(pkt, { opacity: 0, scale: 0.2, duration: 0.2, onComplete: () => pkt.remove() });
-            }
-          }, delay);
-        }
-
-        // --- SW2 同 VLAN 端口并发转发 ---
-        createSw2SameVlanBranch(coords.sw2P2, coords.hostE, els.hostE, 0);     // P2 -> 主机 E
-        createSw2SameVlanBranch(coords.sw2P3, coords.hostE2, els.hostE2, 0.05); // P3 -> 终端 E2
-
-        // --- SW2 所有不同 VLAN 端口 (P4, P5, P6) 全部拒绝 ---
-        createSw2RejectBranch(coords.sw2P4, els.sw2P4, 0);                     // P4 拒绝！
-        createSw2RejectBranch(coords.sw2P5, els.sw2P5, 0.04);                  // P5 拒绝！
-        createSw2RejectBranch(coords.sw2P6, els.sw2P6, 0.08);                  // P6 拒绝！
-
-        state.activeTweens.push(tl4);
-        break;
+    const g0 = layer('tags');
+    for (let i = 0; i < 6; i++) {
+      const g = svgEl('g', { class: 'tag', opacity: 0 }, g0);
+      const bg = svgEl('rect', { class: 'tag-bg', rx: 5, y: -12.5, height: 17 }, g);
+      const txt = svgEl('text', { class: 'tag-text', y: 0 }, g);
+      tagPool.push({ g, bg, txt, kind: null });
     }
+
+    const g1 = layer('result');
+    resultEl = svgEl(
+      'text',
+      { class: 'result', x: G.stageW / 2, y: G.resultY, 'text-anchor': 'middle', opacity: 0 },
+      g1
+    );
+    resultEl.textContent = '✓ E 收到的帧 = A 发出的帧：1518 B，标签已在出向剥除';
   }
 
-  // ==========================================================================
-  // 自动循环播放与用户按键交互
-  // ==========================================================================
-  function togglePlay() {
-    if (state.isPlaying) {
-      pause();
+  // ============================================================
+  // 上色：把 world 写进 DOM
+  // ============================================================
+  function paintFrame(el, data) {
+    if (!data) {
+      setA(el.g, 'opacity', 0);
+      setA(el.g, 'display', 'none');
+      return;
+    }
+    setA(el.g, 'display', 'inline');
+    setA(el.g, 'opacity', r3(data.alpha));
+    setA(el.g, 'transform', 'translate(' + r3(data.x) + ' ' + r3(data.y) + ') scale(' + data.scale + ')');
+    setClass(el.g, 'is-ghost', !!data.ghost);
+
+    const total = C.frameWidth(data.tag);
+    const left = -total / 2;
+    setA(el.body, 'x', r3(left));
+    setA(el.body, 'y', -C.FRAME_H / 2);
+    setA(el.body, 'width', r3(total));
+    setA(el.body, 'height', C.FRAME_H);
+
+    let cursor = left;
+    C.CELLS.forEach((cell, k) => {
+      const w = cell.key === 'tag' ? C.FRAME_TAG * data.tag : cell.w;
+      if (k > 0) {
+        setA(el.seps[k], 'x1', r3(cursor));
+        setA(el.seps[k], 'x2', r3(cursor));
+        setA(el.seps[k], 'y1', -C.FRAME_H / 2);
+        setA(el.seps[k], 'y2', C.FRAME_H / 2);
+      }
+      setA(el.lbls[k], 'x', r3(cursor + w / 2));
+      // 标签格是长出来的：宽度够放字才显字，避免文字溢出到相邻字段
+      setA(el.lbls[k], 'opacity', cell.key === 'tag' ? r3(clamp((w - 30) / 8, 0, 1)) : w >= 12 ? 1 : 0);
+      if (cell.key === 'tag') {
+        setA(el.tagRect, 'x', r3(cursor));
+        setA(el.tagRect, 'width', r3(Math.max(0, w)));
+        setA(el.tagRect, 'y', -C.FRAME_H / 2);
+        setA(el.tagRect, 'height', C.FRAME_H);
+      }
+      cursor += w;
+    });
+
+    setText(el.len, data.label || '');
+    setA(el.len, 'x', r3(total / 2 + 7));
+    setA(el.len, 'y', 3.4);
+    setA(el.len, 'text-anchor', 'start');
+  }
+
+  function paint(w, stepIndex) {
+    // 帧：副本先画（在主帧下面，像从主帧里长出来），主帧压在最上面
+    const ordered = w.frames.slice().sort((a, b) => (a.ghost ? 0 : 1) - (b.ghost ? 0 : 1));
+    for (let i = 0; i < framePool.length; i++) paintFrame(framePool[i], ordered[i]);
+
+    // 端口：发光与 ✕
+    Object.keys(w.ports).forEach((key) => {
+      const el = portEls[key];
+      const st = w.ports[key];
+      if (!el) return;
+      setA(el.ring, 'opacity', r3(st.glow));
+      if (el.mark) setA(el.mark, 'opacity', r3(st.mark));
+    });
+
+    // 主机：✓、光环、发送
+    Object.keys(w.hosts).forEach((id) => {
+      const el = hostEls[id];
+      const st = w.hosts[id];
+      if (!el) return;
+      setA(el.check, 'opacity', r3(st.recv));
+      setA(el.ring, 'opacity', r3(st.ring));
+      setA(el.send, 'opacity', r3(st.send));
+    });
+
+    // 广播域压暗
+    Object.keys(w.bands).forEach((key) => {
+      const g = bandEls[key];
+      if (g) setA(g, 'opacity', r3(1 - 0.7 * w.bands[key].dim));
+    });
+
+    // 查表高亮与转发表脉冲
+    Object.keys(swEls).forEach((id) => {
+      const el = swEls[id];
+      const alpha = w.lookup && w.lookup.sw === id ? w.lookup.alpha : 0;
+      const vid = w.lookup && w.lookup.sw === id ? w.lookup.vid : null;
+      Object.keys(el.map).forEach((key) => {
+        const on = String(vid) === String(key);
+        setA(el.map[key].rect, 'opacity', on ? r3(alpha) : 0);
+      });
+      setA(el.fabricRing, 'opacity', w.fabric && w.fabric.sw === id ? r3(w.fabric.alpha) : 0);
+    });
+
+    // 走过的线路
+    if (w.trail) {
+      const pts = [];
+      for (let i = 0; i < w.trail.points.length; i++) {
+        pts.push(r3(w.trail.points[i][0]) + ',' + r3(w.trail.points[i][1]));
+      }
+      setA(trailEl, 'points', pts.join(' '));
+      setA(trailEl, 'opacity', r3(w.trail.alpha));
+      setClass(trailEl, 'is-trunk', stepIndex === 4);
     } else {
-      play();
+      setA(trailEl, 'opacity', 0);
     }
+
+    // 从端口飞进帧里的 PVID 标签
+    if (w.pvid) {
+      setA(pvidEl, 'opacity', r3(w.pvid.alpha));
+      setA(pvidEl, 'transform', 'translate(' + r3(w.pvid.x) + ' ' + r3(w.pvid.y) + ')');
+    } else {
+      setA(pvidEl, 'opacity', 0);
+    }
+
+    // 浮标
+    for (let i = 0; i < tagPool.length; i++) {
+      const el = tagPool[i];
+      const t = w.tags[i];
+      if (!t) {
+        setA(el.g, 'opacity', 0);
+        continue;
+      }
+      let tw = 12;
+      for (const ch of t.text) tw += ch.charCodeAt(0) > 0x2e80 ? 9.8 : 5.7;
+      setA(el.g, 'opacity', r3(t.alpha));
+      setA(el.g, 'transform', 'translate(' + r3(t.x) + ' ' + r3(t.y) + ')');
+      setText(el.txt, t.text);
+      setA(el.txt, 'x', 0);
+      setA(el.txt, 'text-anchor', t.anchor);
+      let bgX;
+      if (t.anchor === 'middle') bgX = -tw / 2;
+      else if (t.anchor === 'end') bgX = -(tw - 6);
+      else bgX = -6;
+      setA(el.bg, 'x', r3(bgX));
+      setA(el.bg, 'width', r3(tw));
+      setClass(el.g, 'k-key', t.kind === 'key');
+      setClass(el.g, 'k-warn', t.kind === 'warn');
+      setClass(el.g, 'k-note', t.kind === 'note');
+      setClass(el.g, 'k-quiet', t.kind === 'quiet');
+    }
+
+    // 帧结构条：跟着舞台上的帧，标出当前是哪种帧
+    const tagged = w.mainTag > 0.5;
+    setClass(specPlain, 'is-live', !tagged);
+    setClass(specTag, 'is-live', tagged);
+
+    // 结论
+    setA(resultEl, 'opacity', r3(w.result));
   }
 
-  function play() {
-    state.isPlaying = true;
-    els.playIcon.innerText = '⏸';
-    els.playText.innerText = '暂停';
-    scheduleNext();
+  // ============================================================
+  // 舞台状态与阶段条
+  // ============================================================
+  const specPlain = $('spec-plain');
+  const specTag = $('spec-tag');
+
+  const els = {
+    stepCount: $('step-count'),
+    phase: $('phase'),
+    scope: $('scope'),
+    narr: $('narr'),
+    lamp: $('lamp'),
+    scrub: $('scrub'),
+    scrubText: $('scrub-text'),
+    playText: $('play-text'),
+    play: $('btn-play'),
+    prev: $('btn-prev'),
+    next: $('btn-next'),
+    replay: $('btn-replay'),
+    reduce: $('reduce'),
+    steps: $('steps'),
+    notice: $('notice')
+  };
+
+  let chipEls = [];
+
+  function buildSteps() {
+    RUN.steps.forEach((step, i) => {
+      const li = document.createElement('li');
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'step-chip';
+      btn.title = step.narr;
+      const no = document.createElement('span');
+      no.className = 'no';
+      no.textContent = String(i + 1);
+      const name = document.createElement('span');
+      name.textContent = step.phase;
+      btn.appendChild(no);
+      btn.appendChild(name);
+      btn.addEventListener('click', () => {
+        stopLoop();
+        setT(RUN.bounds[i]);
+        render();
+        writeHash();
+      });
+      li.appendChild(btn);
+      els.steps.appendChild(li);
+      chipEls.push(btn);
+    });
+  }
+
+  function updateChrome(s) {
+    const step = RUN.steps[s.index];
+    setText(els.stepCount, '第 ' + (s.index + 1) + ' / ' + RUN.N + ' 步');
+    setText(els.phase, step.phase);
+    setText(els.scope, step.scope);
+    setText(els.narr, step.narr);
+    setClass(els.lamp, 'is-running', state.playing);
+    const scrubbed = s.t.toFixed(2);
+    if (els.scrub.__v !== scrubbed) {
+      els.scrub.__v = scrubbed;
+      els.scrub.value = scrubbed;
+    }
+    setText(els.scrubText, 't = ' + s.t.toFixed(1) + ' s');
+    chipEls.forEach((btn, i) => {
+      setClass(btn, 'is-current', i === s.index);
+      setClass(btn, 'is-done', i < s.index);
+      setA(btn, 'aria-current', i === s.index ? 'step' : 'false');
+    });
+  }
+
+  function render() {
+    const s = M.sampleAt(RUN, state.t);
+    const w = C.world(s.index, s.p);
+    paint(w, s.index);
+    updateChrome(s);
+  }
+
+  function setT(t) {
+    state.t = clamp(t, 0, RUN.total);
+  }
+
+  // ============================================================
+  // 播放控制
+  // ============================================================
+  function setPlayLabel(playing) {
+    els.playText.textContent = playing ? '⏸ 暂停' : '▶ 播放';
+    setClass(els.lamp, 'is-running', playing);
+  }
+
+  function stopLoop() {
+    if (state.raf) cancelAnimationFrame(state.raf);
+    if (state.timer) clearTimeout(state.timer);
+    state.raf = 0;
+    state.timer = 0;
+    state.playing = false;
+    state.target = null;
+    setPlayLabel(false);
   }
 
   function pause() {
-    state.isPlaying = false;
-    els.playIcon.innerText = '▶';
-    els.playText.innerText = '播放动画';
-    if (state.timer) {
-      clearTimeout(state.timer);
-      state.timer = null;
-    }
+    stopLoop();
+    render();
+    writeHash();
   }
 
-  function scheduleNext() {
-    if (!state.isPlaying) return;
-
-    if (state.currentStep >= state.totalSteps) {
-      state.timer = setTimeout(() => {
-        if (!state.isPlaying) return;
-        goToStep(1);
-        scheduleNext();
-      }, 2500 / state.speedMultiplier);
+  function tick(now) {
+    if (!state.playing) return;
+    const dt = Math.min(0.1, Math.max(0, (now - state.last) / 1000));
+    state.last = now;
+    const limit = state.target == null ? RUN.total : state.target;
+    const t = state.t + dt * state.speed;
+    if (t >= limit - 1e-6) {
+      setT(limit);
+      render();
+      if (now - state.lastHash > 300) {
+        writeHash();
+        state.lastHash = now;
+      }
+      stopLoop();
+      writeHash();
       return;
     }
-
-    state.timer = setTimeout(() => {
-      if (!state.isPlaying) return;
-      goToStep(state.currentStep + 1);
-      scheduleNext();
-    }, 2800 / state.speedMultiplier);
+    setT(t);
+    render();
+    if (now - state.lastHash > 300) {
+      writeHash();
+      state.lastHash = now;
+    }
+    state.raf = requestAnimationFrame(tick);
   }
 
-  // 事件绑定
+  function startLoop() {
+    if (state.playing) return;
+    state.playing = true;
+    state.last = performance.now();
+    setPlayLabel(true);
+    state.raf = requestAnimationFrame(tick);
+  }
+
+  function reduceTick() {
+    if (!state.playing) return;
+    const s = M.sampleAt(RUN, state.t);
+    let idx = s.p >= 0.999 ? s.index + 1 : s.index;
+    if (idx >= RUN.N) {
+      pause();
+      return;
+    }
+    setT(M.stepEnd(RUN, idx) - 0.0005);
+    render();
+    writeHash();
+    // setTimeout 的延时按整数毫秒取整，浮点秒会退化成 0
+    const dwell = Math.max(120, Math.round((DWELL / state.speed) * 1000));
+    if (idx >= RUN.N - 1) {
+      state.timer = setTimeout(() => {
+        if (state.playing) pause();
+      }, dwell);
+      return;
+    }
+    state.timer = setTimeout(reduceTick, dwell);
+  }
+
+  function play() {
+    if (state.reduce) {
+      stopLoop();
+      state.playing = true;
+      setPlayLabel(true);
+      reduceTick();
+      return;
+    }
+    if (state.t >= RUN.total - 1e-6) state.t = 0;
+    state.target = null;
+    startLoop();
+  }
+
+  function togglePlay() {
+    if (state.playing) pause();
+    else play();
+  }
+
+  function playTo(target) {
+    state.target = target;
+    if (state.reduce) {
+      setT(target);
+      render();
+      writeHash();
+      return;
+    }
+    if (state.t >= target - 1e-6) {
+      render();
+      return;
+    }
+    startLoop();
+  }
+
+  function nextStep() {
+    const s = M.sampleAt(RUN, state.t);
+    const idx = s.p >= 0.999 ? s.index + 1 : s.index;
+    if (idx >= RUN.N) return;
+    playTo(M.stepEnd(RUN, idx) - 0.0005);
+  }
+
+  function prevStep() {
+    const s = M.sampleAt(RUN, state.t);
+    const idx = s.p > 0.04 ? s.index : Math.max(0, s.index - 1);
+    stopLoop();
+    setT(RUN.bounds[idx]);
+    render();
+    writeHash();
+  }
+
+  function replay() {
+    stopLoop();
+    setT(0);
+    render();
+    writeHash();
+  }
+
+  // ============================================================
+  // 地址栏
+  // ============================================================
+  function writeHash() {
+    try {
+      const params = new URLSearchParams();
+      params.set('t', state.t.toFixed(2));
+      params.set('x', String(state.speed));
+      if (state.reduce) params.set('r', '1');
+      history.replaceState(null, '', '#' + params.toString());
+    } catch (err) {
+      /* 某些本地环境不允许改写地址，演示照常可用 */
+    }
+  }
+
+  function readHash() {
+    const params = new URLSearchParams(location.hash.slice(1));
+    const t = Number(params.get('t'));
+    if (params.has('t') && Number.isFinite(t)) state.t = clamp(t, 0, RUN.total);
+    const x = Number(params.get('x'));
+    if (x === 0.5 || x === 1 || x === 1.5 || x === 2) setSpeed(x, false);
+    if (params.get('r') === '1') setReduce(true, false);
+  }
+
+  // ============================================================
+  // 事件
+  // ============================================================
+  function setSpeed(value, write) {
+    state.speed = value;
+    document.querySelectorAll('.seg-btn').forEach((btn) => {
+      btn.setAttribute('aria-pressed', String(Number(btn.dataset.speed) === value));
+    });
+    if (write) writeHash();
+  }
+
+  function setReduce(on, write) {
+    state.reduce = on;
+    els.reduce.checked = on;
+    document.body.classList.toggle('is-reduced', on);
+    if (write) writeHash();
+  }
+
   function bindEvents() {
-    els.btnPlay.addEventListener('click', togglePlay);
-
-    els.btnReset.addEventListener('click', () => {
-      pause();
-      goToStep(1);
+    els.play.addEventListener('click', togglePlay);
+    els.replay.addEventListener('click', replay);
+    els.prev.addEventListener('click', prevStep);
+    els.next.addEventListener('click', () => {
+      stopLoop();
+      nextStep();
     });
 
-    els.btnPrev.addEventListener('click', () => {
-      pause();
-      goToStep(state.currentStep - 1);
+    els.scrub.addEventListener('input', () => {
+      stopLoop();
+      setT(Number(els.scrub.value));
+      render();
+      writeHash();
     });
 
-    els.btnNext.addEventListener('click', () => {
-      pause();
-      goToStep(state.currentStep + 1);
-    });
-
-    els.speedBtns.forEach(btn => {
+    document.querySelectorAll('.seg-btn').forEach((btn) => {
       btn.addEventListener('click', () => {
-        els.speedBtns.forEach(b => {
-          b.classList.remove('active', 'border-stone-900', 'bg-stone-900', 'text-white');
-          b.classList.add('border-[#E5E4DC]', 'bg-white', 'text-stone-700');
-        });
-        btn.classList.add('active', 'border-stone-900', 'bg-stone-900', 'text-white');
-        btn.classList.remove('border-[#E5E4DC]', 'bg-white', 'text-stone-700');
-        state.speedMultiplier = parseFloat(btn.getAttribute('data-speed'));
+        setSpeed(Number(btn.dataset.speed), true);
+        if (state.playing && state.reduce) {
+          stopLoop();
+          play();
+        }
       });
     });
 
-    window.addEventListener('resize', () => {
-      updateCoordinates();
+    els.reduce.addEventListener('change', () => {
+      const was = state.playing;
+      setReduce(els.reduce.checked, true);
+      if (was) {
+        stopLoop();
+        play();
+      }
     });
 
-    // 点击主机可手动跳转对应阶段观察
-    els.hostA.addEventListener('click', () => { pause(); goToStep(1); });
-    els.hostB.addEventListener('click', () => { pause(); goToStep(2); });
-    els.hostE.addEventListener('click', () => { pause(); goToStep(4); });
+    document.addEventListener('keydown', (event) => {
+      const target = event.target instanceof Element ? event.target : null;
+      if (target && target.closest('input, select, textarea, button, a')) return;
+      if (event.ctrlKey || event.metaKey || event.altKey) return;
+      if (event.code === 'Space') {
+        event.preventDefault();
+        togglePlay();
+      } else if (event.code === 'ArrowRight') {
+        event.preventDefault();
+        stopLoop();
+        nextStep();
+      } else if (event.code === 'ArrowLeft') {
+        event.preventDefault();
+        prevStep();
+      } else if (event.code === 'Home') {
+        event.preventDefault();
+        replay();
+      }
+    });
+
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden && state.playing) pause();
+    });
   }
 
-  // 初始化入口
-  window.addEventListener('DOMContentLoaded', () => {
-    bindEvents();
-    setTimeout(() => {
-      updateCoordinates();
-      goToStep(1);
-      play();
-    }, 200);
-  });
+  // ============================================================
+  // 启动
+  // ============================================================
+  function init() {
+    buildDefs();
+    buildBands();
+    buildCables();
+    layer('switches');
+    Object.keys(L.switches).forEach((id) => buildSwitch(L.switches[id]));
+    buildHosts();
+    buildFx();
+    buildDynamic();
+    buildSteps();
 
+    els.scrub.min = '0';
+    els.scrub.max = RUN.total.toFixed(2);
+    els.scrub.step = '0.01';
+
+    // 减少动效默认跟随系统设置，页面上可以改
+    if (typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      setReduce(true, false);
+    }
+
+    readHash();
+    render();
+    bindEvents();
+
+    if (typeof window.requestAnimationFrame !== 'function') {
+      els.play.disabled = true;
+      els.notice.hidden = false;
+      els.notice.textContent = '当前环境不支持动画帧，播放按钮已停用；单步、上一步与进度滑块仍可使用。';
+    }
+  }
+
+  init();
 })();
