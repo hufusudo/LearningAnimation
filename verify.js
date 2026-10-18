@@ -193,7 +193,56 @@ if (!readmeCount) {
   console.log(`✅ README 模块数与登记表一致（${modules.length} 个）`);
 }
 
-// 8. 输出汇总统计
+// 8. 文档引用体检：规范文档里的相对链接必须可达，动效选择表的编号必须都在动效库里
+console.log('\n🔎 文档引用与动效编号体检...');
+const docFiles = [
+  path.join(__dirname, 'AGENTS.md'),
+  path.join(__dirname, 'DESIGN_SYSTEM.md'),
+  path.join(__dirname, 'README.md'),
+  ...fs.readdirSync(path.join(__dirname, 'docs'))
+    .filter((name) => name.endsWith('.md') && name !== '设计方案.md') // 本地设计方案不纳入 Git，不参与检查
+    .map((name) => path.join(__dirname, 'docs', name)),
+];
+let refBroken = 0;
+function checkRefs(file, base) {
+  const text = fs.readFileSync(file, 'utf8');
+  for (const [, ref] of text.matchAll(/\]\(([^)\s]+)\)/g)) {
+    if (/^(https?:|mailto:|#)/i.test(ref)) continue;
+    const clean = ref.split('#')[0];
+    const target = path.resolve(base, clean);
+    if (!target.startsWith(__dirname + path.sep)) continue; // 仓库之外的上级资料不在此检查
+    if (!fs.existsSync(target)) {
+      console.error(`❌ ${path.relative(__dirname, file)} 死链: ${ref}`);
+      errors++;
+      refBroken++;
+    }
+  }
+}
+docFiles.forEach((file) => checkRefs(file, path.dirname(file)));
+// 模板会被复制到模块目录，链接按模块目录解析（这里用一个虚拟的模块目录模拟）
+checkRefs(path.join(__dirname, 'tools', 'scaffold', '设计方案.md'), path.join(__dirname, '__module__'));
+const designText = fs.readFileSync(path.join(__dirname, 'DESIGN_SYSTEM.md'), 'utf8');
+const pickerSection = (designText.split('### 小动效选择')[1] || '').split('## §9')[0];
+const libraryIds = new Set([...fs.readFileSync(path.join(__dirname, 'docs', 'motion-library.md'), 'utf8')
+  .matchAll(/^#### ([A-G]\d) /gm)].map((m) => m[1]));
+// 只取选择表第二列每段开头的编号，避免把“P5”这类其他引用误判
+const pickerIds = new Set();
+for (const line of pickerSection.split('\n').filter((row) => row.startsWith('|'))) {
+  (line.split('|')[2] || '').split('、').forEach((segment) => {
+    const token = segment.trim().split(/\s/)[0];
+    if (/^[A-Z]\d$/.test(token)) pickerIds.add(token);
+  });
+}
+for (const id of pickerIds) {
+  if (!libraryIds.has(id)) {
+    console.error(`❌ DESIGN_SYSTEM §8 引用的动效编号 ${id} 在 docs/motion-library.md 中不存在`);
+    errors++;
+    refBroken++;
+  }
+}
+console.log(refBroken === 0 ? '✅ 文档链接与动效编号全部可达' : `❌ 文档引用问题 ${refBroken} 处`);
+
+// 9. 输出汇总统计
 console.log('\n📊 学科收录统计:');
 console.log(`  - 高等数学 (math):       ${counts.math} 个`);
 console.log(`  - 概率统计 (prob):       ${counts.prob} 个`);
