@@ -125,6 +125,7 @@ function createModule(name, discipline, badge) {
     console.log('已创建 ' + name + '/：index.html、style.css、app.js；原有设计方案保留。');
     console.log('已登记到 modules.js。请按设计方案实现内容，控件和组件按需添加。');
   }
+  console.log('新增模块后别忘了同步 README 首段的模块数，verify.js 会核对。');
 }
 
 const [rawName, rawDiscipline, rawBadge] = process.argv.slice(2);
