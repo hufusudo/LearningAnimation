@@ -2,597 +2,102 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>可视化实验室</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Newsreader:ital,opsz,wght@0,6..72,500;0,6..72,600;1,6..72,400&display=swap">
-  <style>
-    :root {
-      --bg-page: #FAF9F5;
-      --border-main: #E5E4DC;
-      --border-subtle: #EFEFE9;
-    }
-    body {
-      background-color: var(--bg-page);
-      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, sans-serif;
-    }
-    .card-project {
-      background: #FFFFFF;
-      border: 1px solid #E5E4DC;
-      transition: all 0.22s cubic-bezier(0.16, 1, 0.3, 1);
-    }
-    .card-project:hover {
-      border-color: #A8A29E;
-      transform: translateY(-2px);
-      box-shadow: 0 10px 24px -4px rgba(0, 0, 0, 0.06);
-    }
-    .card-discipline {
-      background: #FFFFFF;
-      border: 1px solid #E5E4DC;
-      transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
-      cursor: pointer;
-    }
-    .card-discipline:hover {
-      border-color: #78716C;
-      transform: translateY(-3px);
-      box-shadow: 0 12px 28px -6px rgba(0, 0, 0, 0.08);
-    }
-    .pill-btn {
-      transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
-    }
-    .pill-btn.active {
-      background: #1C1917;
-      color: #FFFFFF;
-      border-color: #1C1917;
-      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
-    }
-  </style>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="用交互式演示理解高等数学、概率统计与计算机基础。选择学科，观察每一个关键变化。">
+  <meta name="theme-color" content="#FAF9F5">
+  <title>可视化实验室 · 看见知识的过程</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Crect width='40' height='40' rx='10' fill='%23343C38'/%3E%3Cpath d='M10 27V12M10 27H30M13 23Q21 24 29 11' fill='none' stroke='%23FAF9F5' stroke-width='2.2'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="portal.css">
+  <script defer src="modules.js"></script>
+  <script defer src="portal-model.js"></script>
+  <script defer src="portal.js"></script>
 </head>
-<body class="min-h-screen text-stone-900 flex flex-col justify-between antialiased">
-
-  <!-- Header -->
-  <header class="border-b border-[#E5E4DC] bg-[#FAF9F5]/90 backdrop-blur sticky top-0 z-30 px-6 lg:px-12 py-4">
-    <div class="max-w-6xl mx-auto flex items-center justify-between">
-      <div class="flex items-center gap-3">
-        <a href="#hub" id="brand-link" class="w-8 h-8 rounded-lg bg-stone-900 text-white flex items-center justify-center font-mono font-bold text-xs hover:bg-stone-800 transition-colors">
-          VL
-        </a>
-        <h1 class="text-base font-semibold tracking-tight text-stone-900">
-          可视化实验室
-        </h1>
-      </div>
-
-      <!-- Quick Nav in Header -->
-      <div class="flex items-center gap-3">
-        <nav id="header-nav" class="hidden md:flex items-center gap-1.5 text-xs font-mono">
-          <button onclick="switchView('hub')" id="nav-hub" class="pill-btn active px-3 py-1.5 rounded-lg border border-transparent">
-            学科大厅
-          </button>
-          <button onclick="switchView('all')" id="nav-all" class="pill-btn px-3 py-1.5 rounded-lg border border-[#E5E4DC] text-stone-600 hover:text-stone-900 bg-white">
-            全部模块 (<span id="header-all-count">0</span>)
-          </button>
+<body>
+  <a class="skip-link" href="#main-content">跳到主要内容</a>
+  <header class="site-header">
+    <div class="header-inner">
+      <a class="brand" href="#hub" aria-label="可视化实验室，返回学科大厅">
+        <svg class="brand-mark" viewBox="0 0 36 36" aria-hidden="true"><rect width="36" height="36" rx="9"/><path d="M9 25V11M9 25H28M12 22Q20 23 27 10"/></svg>
+        <span>可视化实验室</span>
+      </a>
+      <div class="header-actions">
+        <nav class="top-nav" aria-label="主导航">
+          <span id="top-nav-indicator" class="nav-indicator" aria-hidden="true"></span>
+          <a id="nav-hub" href="#hub"><span class="nav-long">学科大厅</span><span class="nav-short">学科</span></a>
+          <a id="nav-all" href="#all"><span class="nav-long">全部演示</span><span class="nav-short">全部</span><span id="header-all-count" class="nav-count">—</span></a>
         </nav>
+        <button id="global-search" class="search-shortcut" aria-label="搜索演示，快捷键斜杠" disabled>
+          <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="8.5" cy="8.5" r="5.5"/><path d="m12.5 12.5 4 4"/></svg><span>搜索演示</span><kbd>/</kbd>
+        </button>
       </div>
     </div>
   </header>
 
-  <!-- Main Container -->
-  <main class="flex-1 max-w-6xl w-full mx-auto px-6 lg:px-12 py-8">
+  <main id="main-content" tabindex="-1">
+    <p id="resource-notice" class="resource-notice" role="alert" hidden></p>
+    <noscript><p class="resource-notice">请启用 JavaScript 以浏览学科目录和搜索演示。</p></noscript>
 
-    <!-- ============================================================ -->
-    <!-- VIEW 1: 学科大厅 (DISCIPLINE HUB / 一级入口) -->
-    <!-- ============================================================ -->
-    <section id="view-hub" class="space-y-8">
-      <!-- Hub Hero Banner -->
-      <div class="flex items-center justify-between gap-4 pb-4 border-b border-[#E5E4DC]">
-        <h2 class="text-xl md:text-2xl font-bold tracking-tight text-stone-900">
-          选择学科进入专题演示
-        </h2>
-        <span id="hub-hero-badge" class="text-xs font-mono text-stone-500 whitespace-nowrap">6 大学科门类 · 0 个独立系统</span>
-      </div>
-
-      <!-- Discipline Cards Grid (2x3 or 3x2 responsive) -->
-      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-
-        <!-- 1. 高等数学 -->
-        <div onclick="switchView('math')" class="card-discipline rounded-2xl p-6 flex flex-col justify-between gap-5 group relative overflow-hidden">
-          <div class="absolute top-0 right-0 w-28 h-28 bg-blue-50/60 rounded-full blur-2xl -mr-8 -mt-8 pointer-events-none"></div>
-          <div class="flex flex-col gap-4 relative z-10">
-            <div class="flex items-center justify-between">
-              <div class="flex items-center gap-2.5">
-                <div class="w-9 h-9 rounded-xl bg-blue-600 text-white flex items-center justify-center font-serif text-base font-bold shadow-sm">
-                  ∫dx
-                </div>
-                <h3 class="text-lg font-bold text-stone-900 group-hover:text-blue-600 transition-colors">高等数学</h3>
-              </div>
-              <span id="hub-badge-math" class="text-xs font-mono text-blue-600 font-semibold bg-blue-50 px-2 py-0.5 rounded border border-blue-200 whitespace-nowrap flex-shrink-0">0 个模块</span>
-            </div>
-            <div id="hub-list-math" class="space-y-2 pt-1"></div>
-          </div>
-          <div class="pt-3.5 border-t border-[#ECEBE4] flex items-center justify-between font-mono text-xs text-stone-500 relative z-10">
-            <span class="text-stone-400">Higher Mathematics</span>
-            <span class="text-stone-900 font-semibold group-hover:text-blue-600 group-hover:translate-x-1 transition-all inline-flex items-center gap-1">进入学科展厅 &rarr;</span>
-          </div>
-        </div>
-
-        <!-- 2. 概率论与数理统计 -->
-        <div onclick="switchView('prob')" class="card-discipline rounded-2xl p-6 flex flex-col justify-between gap-5 group relative overflow-hidden">
-          <div class="absolute top-0 right-0 w-28 h-28 bg-emerald-50/60 rounded-full blur-2xl -mr-8 -mt-8 pointer-events-none"></div>
-          <div class="flex flex-col gap-4 relative z-10">
-            <div class="flex items-center justify-between">
-              <div class="flex items-center gap-2.5">
-                <div class="w-9 h-9 rounded-xl bg-emerald-700 text-white flex items-center justify-center font-serif text-base font-bold shadow-sm">
-                  P(X)
-                </div>
-                <h3 class="text-lg font-bold text-stone-900 group-hover:text-emerald-700 transition-colors">概率论与数理统计</h3>
-              </div>
-              <span id="hub-badge-prob" class="text-xs font-mono text-emerald-600 font-semibold bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200 whitespace-nowrap flex-shrink-0">0 个模块</span>
-            </div>
-            <div id="hub-list-prob" class="space-y-2 pt-1"></div>
-          </div>
-          <div class="pt-3.5 border-t border-[#ECEBE4] flex items-center justify-between font-mono text-xs text-stone-500 relative z-10">
-            <span class="text-stone-400">Probability & Statistics</span>
-            <span class="text-stone-900 font-semibold group-hover:text-emerald-700 group-hover:translate-x-1 transition-all inline-flex items-center gap-1">进入学科展厅 &rarr;</span>
-          </div>
-        </div>
-
-        <!-- 3. 数据结构 -->
-        <div onclick="switchView('ds')" class="card-discipline rounded-2xl p-6 flex flex-col justify-between gap-5 group relative overflow-hidden">
-          <div class="absolute top-0 right-0 w-28 h-28 bg-amber-50/60 rounded-full blur-2xl -mr-8 -mt-8 pointer-events-none"></div>
-          <div class="flex flex-col gap-4 relative z-10">
-            <div class="flex items-center justify-between">
-              <div class="flex items-center gap-2.5">
-                <div class="w-9 h-9 rounded-xl bg-amber-600 text-white flex items-center justify-center font-mono text-sm font-bold shadow-sm">
-                  DS
-                </div>
-                <h3 class="text-lg font-bold text-stone-900 group-hover:text-amber-700 transition-colors">数据结构</h3>
-              </div>
-              <span id="hub-badge-ds" class="text-xs font-mono text-amber-700 font-semibold bg-amber-50 px-2 py-0.5 rounded border border-amber-200 whitespace-nowrap flex-shrink-0">0 个模块</span>
-            </div>
-            <div id="hub-list-ds" class="space-y-2 pt-1"></div>
-          </div>
-          <div class="pt-3.5 border-t border-[#ECEBE4] flex items-center justify-between font-mono text-xs text-stone-500 relative z-10">
-            <span class="text-stone-400">Data Structures (408)</span>
-            <span class="text-stone-900 font-semibold group-hover:text-amber-700 group-hover:translate-x-1 transition-all inline-flex items-center gap-1">进入学科展厅 &rarr;</span>
-          </div>
-        </div>
-
-        <!-- 4. 计算机组成原理 -->
-        <div onclick="switchView('co')" class="card-discipline rounded-2xl p-6 flex flex-col justify-between gap-5 group relative overflow-hidden">
-          <div class="absolute top-0 right-0 w-28 h-28 bg-rose-50/60 rounded-full blur-2xl -mr-8 -mt-8 pointer-events-none"></div>
-          <div class="flex flex-col gap-4 relative z-10">
-            <div class="flex items-center justify-between">
-              <div class="flex items-center gap-2.5">
-                <div class="w-9 h-9 rounded-xl bg-rose-600 text-white flex items-center justify-center font-mono text-xs font-bold shadow-sm">
-                  ALU
-                </div>
-                <h3 class="text-lg font-bold text-stone-900 group-hover:text-rose-700 transition-colors">计算机组成原理</h3>
-              </div>
-              <span id="hub-badge-co" class="text-xs font-mono text-rose-700 font-semibold bg-rose-50 px-2 py-0.5 rounded border border-rose-200 whitespace-nowrap flex-shrink-0">0 个模块</span>
-            </div>
-            <div id="hub-list-co" class="space-y-2 pt-1"></div>
-          </div>
-          <div class="pt-3.5 border-t border-[#ECEBE4] flex items-center justify-between font-mono text-xs text-stone-500 relative z-10">
-            <span class="text-stone-400">Computer Organization (408)</span>
-            <span class="text-stone-900 font-semibold group-hover:text-rose-700 group-hover:translate-x-1 transition-all inline-flex items-center gap-1">进入学科展厅 &rarr;</span>
-          </div>
-        </div>
-
-        <!-- 5. 计算机操作系统 -->
-        <div onclick="switchView('os')" class="card-discipline rounded-2xl p-6 flex flex-col justify-between gap-5 group relative overflow-hidden">
-          <div class="absolute top-0 right-0 w-28 h-28 bg-purple-50/60 rounded-full blur-2xl -mr-8 -mt-8 pointer-events-none"></div>
-          <div class="flex flex-col gap-4 relative z-10">
-            <div class="flex items-center justify-between">
-              <div class="flex items-center gap-2.5">
-                <div class="w-9 h-9 rounded-xl bg-purple-600 text-white flex items-center justify-center font-mono text-xs font-bold shadow-sm">
-                  OS
-                </div>
-                <h3 class="text-lg font-bold text-stone-900 group-hover:text-purple-600 transition-colors">计算机操作系统</h3>
-              </div>
-              <span id="hub-badge-os" class="text-xs font-mono text-purple-700 font-semibold bg-purple-50 px-2 py-0.5 rounded border border-purple-200 whitespace-nowrap flex-shrink-0">0 个模块</span>
-            </div>
-            <div id="hub-list-os" class="space-y-2 pt-1"></div>
-          </div>
-          <div class="pt-3.5 border-t border-[#ECEBE4] flex items-center justify-between font-mono text-xs text-stone-500 relative z-10">
-            <span class="text-stone-400">Operating Systems (408)</span>
-            <span class="text-stone-900 font-semibold group-hover:text-purple-600 group-hover:translate-x-1 transition-all inline-flex items-center gap-1">进入学科展厅 &rarr;</span>
-          </div>
-        </div>
-
-        <!-- 6. 计算机网络 -->
-        <div onclick="switchView('net')" class="card-discipline rounded-2xl p-6 flex flex-col justify-between gap-5 group relative overflow-hidden">
-          <div class="absolute top-0 right-0 w-28 h-28 bg-indigo-50/60 rounded-full blur-2xl -mr-8 -mt-8 pointer-events-none"></div>
-          <div class="flex flex-col gap-4 relative z-10">
-            <div class="flex items-center justify-between">
-              <div class="flex items-center gap-2.5">
-                <div class="w-9 h-9 rounded-xl bg-indigo-600 text-white flex items-center justify-center font-mono text-xs font-bold shadow-sm">
-                  NET
-                </div>
-                <h3 class="text-lg font-bold text-stone-900 group-hover:text-indigo-600 transition-colors">计算机网络</h3>
-              </div>
-              <span id="hub-badge-net" class="text-xs font-mono text-indigo-700 font-semibold bg-indigo-50 px-2 py-0.5 rounded border border-indigo-200 whitespace-nowrap flex-shrink-0">0 个模块</span>
-            </div>
-            <div id="hub-list-net" class="space-y-2 pt-1"></div>
-          </div>
-          <div class="pt-3.5 border-t border-[#ECEBE4] flex items-center justify-between font-mono text-xs text-stone-500 relative z-10">
-            <span class="text-stone-400">Computer Networks (408)</span>
-            <span class="text-stone-900 font-semibold group-hover:text-indigo-600 group-hover:translate-x-1 transition-all inline-flex items-center gap-1">进入学科展厅 &rarr;</span>
-          </div>
-        </div>
-
-      </div>
-
-      <!-- Bottom Jump Links to All Projects & 408 Overall -->
-      <div class="pt-6 flex flex-wrap items-center justify-center gap-4 text-center border-t border-[#E5E4DC]">
-        <button onclick="switchView('all')" class="text-xs font-mono text-stone-500 hover:text-stone-900 transition-colors inline-flex items-center gap-1 py-1.5 px-3 rounded-lg hover:bg-stone-200/50">
-          <span>展开全部 <span id="hub-bottom-all-count">0</span> 个独立演示卡片</span>
-          <span>&darr;</span>
-        </button>
-        <span class="text-stone-300">|</span>
-        <button onclick="switchView('cs')" class="text-xs font-mono text-indigo-600 hover:text-indigo-900 transition-colors inline-flex items-center gap-1 py-1.5 px-3 rounded-lg hover:bg-indigo-50">
-          <span>计算机408统考全科综合展厅 (<span id="hub-bottom-cs-count">0</span> 个模块)</span>
-          <span>&rarr;</span>
-        </button>
-      </div>
-    </section>
-
-    <!-- ============================================================ -->
-    <!-- VIEW 2: 学科专属展厅 (DISCIPLINE SHOWCASE / 二级演示列表) -->
-    <!-- ============================================================ -->
-    <section id="view-discipline" class="hidden space-y-6">
-
-      <!-- Breadcrumbs & Back Bar -->
-      <div class="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-[#E5E4DC]">
-        <div class="flex items-center gap-2 text-xs font-mono">
-          <button onclick="switchView('hub')" class="flex items-center gap-1 text-stone-500 hover:text-stone-900 transition-colors py-1 px-2 rounded hover:bg-stone-200/60 font-semibold">
-            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path></svg>
-            <span>返回学科大厅</span>
-          </button>
-          <span class="text-stone-300">/</span>
-          <span id="breadcrumb-title" class="font-semibold text-stone-900">学科展厅</span>
-        </div>
-
-        <!-- Discipline Switcher Pill Bar -->
-        <div class="flex flex-wrap items-center bg-[#EBEAE3] p-0.5 rounded-xl border border-[#DCDAD0] text-xs font-medium gap-0.5">
-          <button onclick="switchView('all')" id="btn-tab-all" class="pill-btn px-2.5 py-1 rounded-lg text-stone-600 hover:text-stone-900">全部 (0)</button>
-          <button onclick="switchView('math')" id="btn-tab-math" class="pill-btn px-2.5 py-1 rounded-lg text-stone-600 hover:text-stone-900">高等数学 (0)</button>
-          <button onclick="switchView('prob')" id="btn-tab-prob" class="pill-btn px-2.5 py-1 rounded-lg text-stone-600 hover:text-stone-900">概率统计 (0)</button>
-          <button onclick="switchView('ds')" id="btn-tab-ds" class="pill-btn px-2.5 py-1 rounded-lg text-stone-600 hover:text-stone-900">数据结构 (0)</button>
-          <button onclick="switchView('co')" id="btn-tab-co" class="pill-btn px-2.5 py-1 rounded-lg text-stone-600 hover:text-stone-900">计组原理 (0)</button>
-          <button onclick="switchView('os')" id="btn-tab-os" class="pill-btn px-2.5 py-1 rounded-lg text-stone-600 hover:text-stone-900">操作系统 (0)</button>
-          <button onclick="switchView('net')" id="btn-tab-net" class="pill-btn px-2.5 py-1 rounded-lg text-stone-600 hover:text-stone-900">计算机网络 (0)</button>
-          <button onclick="switchView('cs')" id="btn-tab-cs" class="pill-btn px-2.5 py-1 rounded-lg text-stone-600 hover:text-stone-900">408全科 (0)</button>
-        </div>
-      </div>
-
-      <!-- Discipline Header Info -->
-      <div id="discipline-header-card" class="p-5 rounded-2xl border bg-white flex flex-col md:flex-row md:items-center justify-between gap-4">
+    <section id="view-hub" aria-labelledby="hub-title">
+      <div class="hub-heading" data-entrance>
         <div>
-          <div class="flex items-center gap-2 mb-1">
-            <span id="discipline-badge" class="px-2 py-0.5 rounded text-[11px] font-mono font-semibold"></span>
-            <span id="discipline-count" class="text-xs font-mono text-stone-400"></span>
-          </div>
-          <h2 id="discipline-title" class="text-xl font-bold tracking-tight text-stone-900"></h2>
-          <p id="discipline-desc" class="text-xs text-stone-600 mt-1 max-w-2xl leading-relaxed hidden"></p>
+          <p class="eyebrow">交互式教学演示 <span aria-hidden="true">/</span> VISUAL LEARNING</p>
+          <h1 id="hub-title" tabindex="-1">把抽象的过程，看清楚。</h1>
+          <p class="intro">从一条曲线到一次访存，选择学科，进入演示。</p>
         </div>
-        <div class="flex items-center gap-2.5 w-full md:w-auto">
-          <!-- Realtime Search Input -->
-          <div class="relative flex-1 md:w-60">
-            <input type="text" id="filter-search" placeholder="实时过滤演示模块..." oninput="handleSearch(this.value)" class="w-full text-xs bg-[#FAF9F5] border border-[#E5E4DC] focus:border-stone-400 focus:bg-white rounded-lg pl-8 pr-3 py-1.5 outline-none transition-all placeholder:text-stone-400 font-sans">
-            <svg class="w-3.5 h-3.5 text-stone-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
-          </div>
-          <button onclick="switchView('hub')" class="text-xs font-mono text-stone-600 hover:text-stone-900 border border-stone-200 hover:border-stone-400 bg-stone-50 py-1.5 px-3 rounded-lg transition-colors flex items-center gap-1 shadow-sm whitespace-nowrap">
-            <span>&larr; 返回大厅</span>
-          </button>
-        </div>
+        <dl class="collection-stats">
+          <div><dt>交互演示</dt><dd id="hub-total-count">—</dd></div>
+          <div><dt>学科方向</dt><dd>6</dd></div>
+        </dl>
       </div>
 
-      <!-- Cards Grid (Rendered and Filtered Dynamically) -->
-      <div id="projects-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 pt-2"></div>
+      <div class="workbench" data-entrance>
+        <nav class="subject-index" aria-label="选择学科；聚焦可查看概念预览">
+          <div class="index-heading"><span>学科索引</span><span>模块</span></div>
+          <div id="subject-list" class="subject-list"></div>
+          <p class="index-note">指向学科，先看一眼它的过程。</p>
+        </nav>
+        <section class="preview-panel" aria-labelledby="preview-title">
+          <div class="preview-header">
+            <div><p id="preview-code" class="eyebrow">01 / MATHEMATICS</p><h2 id="preview-title">高等数学</h2></div>
+            <span class="preview-label">概念预览</span>
+          </div>
+          <div id="preview-visual" class="preview-visual"></div>
+          <div class="preview-bottom">
+            <div class="preview-list-heading"><span>从这些演示开始</span><a id="preview-open" class="text-link" href="#math">查看学科 <span aria-hidden="true">↗</span></a></div>
+            <div id="preview-links" class="preview-links"></div>
+          </div>
+        </section>
+      </div>
+
+      <div class="hub-bottom" data-entrance>
+        <a class="collection-link" href="#all"><span>浏览全部演示</span><span id="hub-all-count" class="link-count">—</span><span class="link-arrow" aria-hidden="true">→</span></a>
+        <a class="collection-link" href="#cs"><span>计算机 408 全科</span><span id="hub-cs-count" class="link-count">—</span><span class="link-arrow" aria-hidden="true">→</span></a>
+      </div>
     </section>
 
+    <section id="view-catalog" aria-labelledby="catalog-title" hidden>
+      <a class="back-link" href="#hub"><span aria-hidden="true">←</span> 学科大厅</a>
+      <div class="catalog-heading">
+        <div><p id="catalog-code" class="eyebrow">全部学科</p><h1 id="catalog-title" tabindex="-1">全部演示</h1><p id="catalog-description" class="intro"></p></div>
+        <div class="search-area">
+          <label for="filter-search" class="sr-only">搜索当前目录中的演示</label>
+          <div class="search-field">
+            <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="8.5" cy="8.5" r="5.5"/><path d="m12.5 12.5 4 4"/></svg>
+            <input id="filter-search" type="search" placeholder="搜索标题、主题或公式" autocomplete="off" aria-controls="projects-grid" aria-describedby="search-help">
+            <button id="clear-search" class="clear-search" aria-label="清除搜索" hidden>×</button>
+          </div>
+          <p id="search-help">按 <kbd>/</kbd> 聚焦搜索，<kbd>Esc</kbd> 清除关键词</p>
+        </div>
+      </div>
+      <nav class="filter-scroll" aria-label="筛选学科">
+        <div id="subject-filters" class="filter-row"><span id="filter-indicator" class="filter-indicator" aria-hidden="true"></span></div>
+      </nav>
+      <div class="results-heading"><h2>演示目录</h2><p id="result-status" role="status" aria-live="polite" aria-atomic="true"></p></div>
+      <div id="projects-grid" class="projects-grid"></div>
+      <div id="empty-state" class="empty-state" hidden><span class="empty-mark" aria-hidden="true">∅</span><h2>没有匹配的演示</h2><p>试试更短的关键词，或切换学科。</p><button id="empty-clear" class="quiet-button">清除搜索</button></div>
+    </section>
   </main>
 
-  <!-- Footer -->
-  <footer class="border-t border-[#E5E4DC] py-5 px-6 text-center text-xs font-mono text-stone-400">
-    Interactive Visualizer Showcase · High Taste Minimalist Design · 学科层级架构
-  </footer>
-
-  <!-- 引入模块数据库 -->
-  <script src="modules.js"></script>
-
-  <!-- Navigation, Dynamic Rendering & Filtering Logic -->
-  <script>
-    const DISCIPLINE_META = {
-      all: {
-        title: '全部演示模块',
-        badge: '全学科集合',
-        badgeColor: 'bg-stone-100 text-stone-800 border-stone-300',
-        tabName: '全部'
-      },
-      math: {
-        title: '高等数学',
-        badge: '高等数学',
-        badgeColor: 'bg-blue-50 text-blue-700 border-blue-200',
-        dotColor: 'bg-blue-500',
-        hoverBorder: 'group-hover:border-blue-200',
-        hoverText: 'group-hover:text-blue-600',
-        tabName: '高等数学'
-      },
-      prob: {
-        title: '概率论与数理统计',
-        badge: '概率论与数理统计',
-        badgeColor: 'bg-emerald-50 text-emerald-800 border-emerald-200',
-        dotColor: 'bg-emerald-500',
-        hoverBorder: 'group-hover:border-emerald-200',
-        hoverText: 'group-hover:text-emerald-700',
-        tabName: '概率统计'
-      },
-      ds: {
-        title: '数据结构',
-        badge: '数据结构',
-        badgeColor: 'bg-amber-50 text-amber-800 border-amber-200',
-        dotColor: 'bg-amber-500',
-        hoverBorder: 'group-hover:border-amber-200',
-        hoverText: 'group-hover:text-amber-700',
-        tabName: '数据结构'
-      },
-      co: {
-        title: '计算机组成原理',
-        badge: '计算机组成原理',
-        badgeColor: 'bg-rose-50 text-rose-800 border-rose-200',
-        dotColor: 'bg-rose-500',
-        hoverBorder: 'group-hover:border-rose-200',
-        hoverText: 'group-hover:text-rose-700',
-        tabName: '计组原理'
-      },
-      os: {
-        title: '计算机操作系统',
-        badge: '计算机操作系统',
-        badgeColor: 'bg-purple-50 text-purple-700 border-purple-200',
-        dotColor: 'bg-purple-500',
-        hoverBorder: 'group-hover:border-purple-200',
-        hoverText: 'group-hover:text-purple-600',
-        tabName: '操作系统'
-      },
-      net: {
-        title: '计算机网络',
-        badge: '计算机网络',
-        badgeColor: 'bg-indigo-50 text-indigo-700 border-indigo-200',
-        dotColor: 'bg-indigo-500',
-        hoverBorder: 'group-hover:border-indigo-200',
-        hoverText: 'group-hover:text-indigo-600',
-        tabName: '计算机网络'
-      },
-      cs: {
-        title: '计算机专业基础综合 (408 全科)',
-        badge: '408 全科综合',
-        badgeColor: 'bg-stone-800 text-white border-stone-800',
-        tabName: '408全科'
-      }
-    };
-
-    const CS_SUBS = ['ds', 'co', 'os', 'net'];
-    const modules = window.MODULES || [];
-
-    // 初始化渲染与计数统计
-    function initPortal() {
-      const counts = { all: modules.length, math: 0, prob: 0, ds: 0, co: 0, os: 0, net: 0, cs: 0 };
-      const lists = { math: [], prob: [], ds: [], co: [], os: [], net: [] };
-
-      modules.forEach(m => {
-        if (counts[m.discipline] !== undefined) {
-          counts[m.discipline]++;
-          if (lists[m.discipline]) lists[m.discipline].push(m);
-        }
-        if (CS_SUBS.includes(m.discipline)) {
-          counts.cs++;
-        }
-      });
-
-      // 更新 Header 与 Banner 计数
-      document.getElementById('header-all-count').innerText = counts.all;
-      document.getElementById('hub-hero-badge').innerText = `6 大学科门类 · ${counts.all} 个独立系统`;
-      document.getElementById('hub-bottom-all-count').innerText = counts.all;
-      document.getElementById('hub-bottom-cs-count').innerText = counts.cs;
-
-      // 更新一级大厅学科卡片徽章与模块胶囊列表
-      ['math', 'prob', 'ds', 'co', 'os', 'net'].forEach(disc => {
-        const badgeEl = document.getElementById(`hub-badge-${disc}`);
-        if (badgeEl) badgeEl.innerText = `${counts[disc]} 个模块`;
-
-        const listContainer = document.getElementById(`hub-list-${disc}`);
-        if (listContainer) {
-          const cfg = DISCIPLINE_META[disc];
-          listContainer.innerHTML = lists[disc].map(m => `
-            <div class="flex items-center gap-2 text-xs text-stone-800 font-medium py-1.5 px-2.5 rounded-lg bg-stone-50 border border-stone-200/80 ${cfg.hoverBorder} transition-colors">
-              <span class="w-1.5 h-1.5 rounded-full ${cfg.dotColor} flex-shrink-0"></span>
-              <span class="truncate">${m.title}</span>
-            </div>
-          `).join('');
-        }
-      });
-
-      // 更新二级展厅切换胶囊标签数字
-      ['all', 'math', 'prob', 'ds', 'co', 'os', 'net', 'cs'].forEach(key => {
-        const tabBtn = document.getElementById(`btn-tab-${key}`);
-        if (tabBtn) {
-          tabBtn.innerText = `${DISCIPLINE_META[key].tabName} (${counts[key]})`;
-        }
-      });
-
-      // 渲染二级展厅网格卡片
-      const grid = document.getElementById('projects-grid');
-      if (grid) {
-        grid.innerHTML = modules.map(m => {
-          const cfg = DISCIPLINE_META[m.discipline] || DISCIPLINE_META.all;
-          return `
-            <a href="${m.path}" data-discipline="${m.discipline}" class="card-project rounded-2xl p-6 flex flex-col justify-between gap-6 group">
-              <div class="flex flex-col gap-3">
-                <div class="flex items-center justify-between">
-                  <span class="px-2.5 py-1 rounded-md text-[11px] font-mono font-semibold ${cfg.badgeColor}">
-                    ${cfg.badge}
-                  </span>
-                  <span class="text-xs font-mono text-emerald-600 font-medium flex items-center gap-1">
-                    <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
-                    ${m.badge || '60fps 缓动'}
-                  </span>
-                </div>
-                <h3 class="text-lg font-semibold text-stone-900 ${cfg.hoverText} transition-colors">
-                  ${m.title}
-                </h3>
-                <p class="text-xs text-stone-600 leading-relaxed">
-                  ${m.desc || ''}
-                </p>
-              </div>
-              <div class="pt-4 border-t border-[#ECEBE4] flex items-center justify-between font-mono text-xs text-stone-500">
-                <span class="truncate mr-2">${m.formula || ''}</span>
-                <span class="text-stone-900 font-medium group-hover:translate-x-1 transition-transform inline-flex items-center gap-1 whitespace-nowrap">
-                  进入演示 &rarr;
-                </span>
-              </div>
-            </a>
-          `;
-        }).join('');
-      }
-
-      window._PORTAL_COUNTS = counts;
-    }
-
-    // 视图切换控制
-    function switchView(target) {
-      const viewHub = document.getElementById('view-hub');
-      const viewDiscipline = document.getElementById('view-discipline');
-      const navHub = document.getElementById('nav-hub');
-      const navAll = document.getElementById('nav-all');
-
-      if (target === 'hub') {
-        viewDiscipline.classList.add('hidden');
-        viewHub.classList.remove('hidden');
-        window.location.hash = 'hub';
-
-        navHub.classList.add('active');
-        navHub.classList.remove('text-stone-600', 'bg-white');
-        navAll.classList.remove('active');
-        navAll.classList.add('text-stone-600', 'bg-white');
-
-        if (window.gsap) gsap.fromTo(viewHub, { opacity: 0, y: 10 }, { opacity: 1, y: 0, duration: 0.25, ease: 'power2.out' });
-        window.scrollTo({ top: 0, behavior: 'smooth' });
-        return;
-      }
-
-      // Show Discipline View
-      viewHub.classList.add('hidden');
-      viewDiscipline.classList.remove('hidden');
-      window.location.hash = target;
-
-      navHub.classList.remove('active');
-      navHub.classList.add('text-stone-600', 'bg-white');
-      if (target === 'all') {
-        navAll.classList.add('active');
-        navAll.classList.remove('text-stone-600', 'bg-white');
-      } else {
-        navAll.classList.remove('active');
-        navAll.classList.add('text-stone-600', 'bg-white');
-      }
-
-      // Update Tabs in discipline header
-      const tabs = ['all', 'math', 'prob', 'ds', 'co', 'os', 'net', 'cs'];
-      tabs.forEach(t => {
-        const btn = document.getElementById(`btn-tab-${t}`);
-        if (btn) {
-          if (t === target) {
-            btn.classList.add('active');
-            btn.classList.remove('text-stone-600');
-          } else {
-            btn.classList.remove('active');
-            btn.classList.add('text-stone-600');
-          }
-        }
-      });
-
-      // Update Meta
-      const meta = DISCIPLINE_META[target] || DISCIPLINE_META.all;
-      const count = window._PORTAL_COUNTS ? (window._PORTAL_COUNTS[target] || 0) : 0;
-      document.getElementById('breadcrumb-title').innerText = meta.title;
-      document.getElementById('discipline-title').innerText = meta.title;
-      document.getElementById('discipline-count').innerText = `共 ${count} 个独立演示模块`;
-
-      const descEl = document.getElementById('discipline-desc');
-      if (meta.desc) {
-        descEl.innerText = meta.desc;
-        descEl.classList.remove('hidden');
-      } else {
-        descEl.innerText = '';
-        descEl.classList.add('hidden');
-      }
-
-      const badge = document.getElementById('discipline-badge');
-      badge.innerText = meta.badge;
-      badge.className = `px-2 py-0.5 rounded text-[11px] font-mono font-semibold border ${meta.badgeColor}`;
-
-      // Reset search input on view switch
-      const searchInput = document.getElementById('filter-search');
-      if (searchInput) searchInput.value = '';
-
-      // Filter Cards
-      const cards = document.querySelectorAll('#projects-grid > a');
-      cards.forEach(card => {
-        const d = card.getAttribute('data-discipline');
-        if (target === 'all' || d === target || (target === 'cs' && CS_SUBS.includes(d))) {
-          card.classList.remove('hidden');
-        } else {
-          card.classList.add('hidden');
-        }
-      });
-
-      // Smooth Entrance Animation
-      if (window.gsap) gsap.fromTo('#projects-grid > a:not(.hidden)',
-        { opacity: 0, y: 15 },
-        { opacity: 1, y: 0, duration: 0.3, stagger: 0.04, ease: 'power2.out' }
-      );
-
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-    }
-
-    // Real-time search filter function
-    function handleSearch(query) {
-      const q = query.trim().toLowerCase();
-      const currentTarget = window.location.hash.replace('#', '') || 'all';
-      const cards = document.querySelectorAll('#projects-grid > a');
-      cards.forEach(card => {
-        const d = card.getAttribute('data-discipline');
-        const inScope = (currentTarget === 'all' || d === currentTarget || (currentTarget === 'cs' && CS_SUBS.includes(d)));
-        const text = card.textContent.toLowerCase();
-        if (inScope && (!q || text.includes(q))) {
-          card.classList.remove('hidden');
-        } else {
-          card.classList.add('hidden');
-        }
-      });
-    }
-
-    const validDisciplineHashes = ['math', 'prob', 'ds', 'co', 'os', 'net', 'cs', 'all'];
-
-    window.addEventListener('DOMContentLoaded', () => {
-      initPortal();
-      const hash = window.location.hash.replace('#', '');
-      if (validDisciplineHashes.includes(hash)) {
-        switchView(hash);
-      } else {
-        switchView('hub');
-      }
-    });
-
-    window.addEventListener('hashchange', () => {
-      const hash = window.location.hash.replace('#', '');
-      if (validDisciplineHashes.includes(hash)) {
-        switchView(hash);
-      } else if (hash === 'hub' || !hash) {
-        switchView('hub');
-      }
-    });
-  </script>
+  <footer class="site-footer"><div><span>可视化实验室</span><span class="footer-note">观察 · 操作 · 理解</span></div><button id="motion-toggle" class="motion-toggle" aria-pressed="false" disabled><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 6h14M3 14h14"/><circle cx="7" cy="6" r="2"/><circle cx="13" cy="14" r="2"/></svg><span id="motion-label">减少动效</span></button></footer>
 </body>
 </html>
