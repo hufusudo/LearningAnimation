@@ -1,1150 +1,1190 @@
 /**
- * IP分组转发的过程与路由查表 - 408 核心交互逻辑与动画引擎
- * 严格遵循 Taste-Skill Light Editorial 设计哲学与 60fps GSAP 动画规范
+ * IP 分组转发过程 —— 界面层
+ * 只负责把 model.frameOf 算出的画面写进 SVG 与判断台/查表台，
+ * 以及控件、键盘、地址栏、减少动效与降级。
  */
+(function () {
+  'use strict';
 
-// ==========================================================================
-// 1. 场景与步骤元数据定义
-// ==========================================================================
+  const M = window.IPModel;
+  const NS = 'http://www.w3.org/2000/svg';
+  let hasGsap = typeof window.gsap !== 'undefined';
+  const DWELL = 0.9;
 
-const SCENARIOS = {
-  1: {
-    id: 1,
-    name: "非跨网 (H1 → H1b)",
-    title: "场景一：非跨网转发（本地直接交付）",
-    desc: "源主机 H1 发送给同网主机 H1b (128.1.2.195)，经交换机直接交付，无需经过路由器",
-    srcHost: { name: "H1", ip: "128.1.2.194", mask: "255.255.255.192", prefixLen: 26, net: "128.1.2.192" },
-    dstHost: { name: "H1b", ip: "128.1.2.195", mask: "255.255.255.192", prefixLen: 26, net: "128.1.2.192" },
-    steps: [
-      {
-        id: "step-1-1",
-        title: "① 提取并二进制 AND",
-        desc: "H1 提取目的 IP 128.1.2.195，与自身掩码 /26 进行按位与运算，判断网络号是否相同",
-        type: "binary-and"
-      },
-      {
-        id: "step-1-2",
-        title: "② H1 发送至交换机 SW1",
-        desc: "判定属于同一网络，直接交付！H1 封装数据帧发往本地以太网交换机 SW1",
-        type: "forward",
-        path: ["H1", "SW1"]
-      },
-      {
-        id: "step-1-3",
-        title: "③ SW1 转发至 H1b",
-        desc: "SW1 查找本地 MAC 地址表，将帧直接转发给目的主机 H1b，路由器不转发该报文",
-        type: "forward",
-        path: ["SW1", "H1b"]
-      },
-      {
-        id: "step-1-4",
-        title: "④ 交付完成",
-        desc: "主机 H1b 成功接收数据包，本地直接交付圆满完成！",
-        type: "finish"
-      }
-    ]
-  },
-  2: {
-    id: 2,
-    name: "跨网 1 跳 (H1 → H2 对照原图)",
-    title: "场景二：跨网 1 跳转发（间接交付至邻近网络，完全对照原图）",
-    desc: "源主机 H1 发送给 N2 网络中的 H2 (128.1.2.132)，由路由器 R1 查表后直接交付",
-    srcHost: { name: "H1", ip: "128.1.2.194", mask: "255.255.255.192", prefixLen: 26, net: "128.1.2.192" },
-    dstHost: { name: "H2", ip: "128.1.2.132", mask: "255.255.255.192", prefixLen: 26, net: "128.1.2.128" },
-    steps: [
-      {
-        id: "step-2-1",
-        title: "① 提取并二进制 AND",
-        desc: "H1 提取目的 IP 128.1.2.132，与自身掩码 /26 进行按位与，结果为 128.1.2.128，与源网络号不同",
-        type: "binary-and"
-      },
-      {
-        id: "step-2-2",
-        title: "② H1 发送至网关 R1",
-        desc: "判定不在同一网络，属于间接交付！H1 将 IP 分组发往默认网关 R1 接口 0 (128.1.2.193)",
-        type: "forward",
-        path: ["H1", "SW1", "R1_IF0"]
-      },
-      {
-        id: "step-2-3",
-        title: "③ 路由器 R1 查表",
-        desc: "R1 逐行检查路由表，用目的 IP 与各表项掩码 AND，匹配到 128.1.2.128/26 (出接口 1)",
-        type: "router-lookup",
-        router: "R1"
-      },
-      {
-        id: "step-2-4",
-        title: "④ R1 转发至 SW2",
-        desc: "R1 TTL 减 1，从接口 1 (128.1.2.129) 将分组发往 N2 网络交换机 SW2",
-        type: "forward",
-        path: ["R1_IF1", "SW2"]
-      },
-      {
-        id: "step-2-5",
-        title: "⑤ SW2 交付至 H2",
-        desc: "SW2 将数据帧准确转发至目的主机 H2 (128.1.2.132)，跨网直接交付完成！",
-        type: "forward",
-        path: ["SW2", "H2"]
-      },
-      {
-        id: "step-2-6",
-        title: "⑥ 交付完成",
-        desc: "主机 H2 成功接收分组，源 IP (128.1.2.194) 与目的 IP (128.1.2.132) 全程保持不变！",
-        type: "finish"
-      }
-    ]
-  },
-  3: {
-    id: 3,
-    name: "跨网 2 跳 (H1 → H3 双路由)",
-    title: "场景三：跨网 2 跳转发（多路由连续查表转发）",
-    desc: "源主机 H1 发送给 N3 网络中的 H3 (128.1.3.66)，依次经 R1 查表转发至 R2，再由 R2 交付",
-    srcHost: { name: "H1", ip: "128.1.2.194", mask: "255.255.255.192", prefixLen: 26, net: "128.1.2.192" },
-    dstHost: { name: "H3", ip: "128.1.3.66", mask: "255.255.255.192", prefixLen: 26, net: "128.1.3.64" },
-    steps: [
-      {
-        id: "step-3-1",
-        title: "① 提取并二进制 AND",
-        desc: "H1 提取目的 IP 128.1.3.66，与掩码 /26 按位与，结果为 128.1.3.64，不在 N1，交由默认网关 R1",
-        type: "binary-and"
-      },
-      {
-        id: "step-3-2",
-        title: "② H1 发送至网关 R1",
-        desc: "H1 发送数据包经 SW1 送达路由器 R1 的接口 0 (128.1.2.193)",
-        type: "forward",
-        path: ["H1", "SW1", "R1_IF0"]
-      },
-      {
-        id: "step-3-3",
-        title: "③ 路由器 R1 查表",
-        desc: "R1 检查路由表，匹配到 128.1.3.64/26，下一跳为 R2 (128.1.2.130)，由接口 1 发出",
-        type: "router-lookup",
-        router: "R1"
-      },
-      {
-        id: "step-3-4",
-        title: "④ R1 经 N2 转发至 R2",
-        desc: "R1 TTL 减 1，经接口 1 发出，通过 N2 网络送达下一跳路由器 R2 的接口 0 (128.1.2.130)",
-        type: "forward",
-        path: ["R1_IF1", "SW2", "R2_IF0"]
-      },
-      {
-        id: "step-3-5",
-        title: "⑤ 路由器 R2 查表",
-        desc: "R2 检查自身路由表，匹配到 128.1.3.64/26 为直连网络，出接口为接口 1 (128.1.3.65)",
-        type: "router-lookup",
-        router: "R2"
-      },
-      {
-        id: "step-3-6",
-        title: "⑥ R2 转发至 H3",
-        desc: "R2 TTL 再次减 1，从接口 1 发出，经 SW3 最终送达目的主机 H3 (128.1.3.66)",
-        type: "forward",
-        path: ["R2_IF1", "SW3", "H3"]
-      },
-      {
-        id: "step-3-7",
-        title: "⑦ 交付完成",
-        desc: "主机 H3 成功接收分组！经历 2 次跨网路由跳转，TTL 减 2，MAC 换 3 次，IP 地址始终不变！",
-        type: "finish"
-      }
-    ]
+  const $ = (id) => document.getElementById(id);
+  const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+  const fmt = (v) => (Math.round(v * 1000) / 1000).toString();
+  const reduceQuery = window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)') : null;
+
+  const S = {
+    scenario: 1,
+    seq: null,
+    starts: [],
+    total: 0,
+    t: 0,
+    playing: false,
+    speed: 1,
+    reduce: reduceQuery ? reduceQuery.matches : false
+  };
+
+  const els = {
+    stage: $('stage'),
+    track: $('track'),
+    stepCount: $('step-count'),
+    phase: $('phase'),
+    routePill: $('route-pill'),
+    lamp: $('lamp'),
+    caption: $('caption'),
+    inspectBadge: $('inspect-badge'),
+    inspectSub: $('inspect-sub'),
+    inspectLegend: $('inspect-legend'),
+    inspectBody: $('inspect-body'),
+    frameIp: $('frame-ip'),
+    frameSrcMac: $('frame-src-mac'),
+    frameDstMac: $('frame-dst-mac'),
+    frameTtl: $('frame-ttl'),
+    frameSeg: $('frame-seg'),
+    frameSegPips: $('frame-seg-pips'),
+    stageProgressFill: $('stage-progress-fill'),
+    play: $('play'),
+    playIcon: $('play-icon'),
+    playText: $('play-text'),
+    prev: $('prev'),
+    next: $('next'),
+    replay: $('replay'),
+    progress: $('progress'),
+    scrubText: $('scrub-text'),
+    reduce: $('reduce'),
+    notice: $('notice')
+  };
+
+  let stage = null;
+  let tween = null;
+  let dwellTimer = null;
+  let linkTimer = null;
+  let lastInspectorKey = '';
+  let lastTtl = null;
+
+  // ---------- 小工具 ----------
+
+  function setText(el, text) {
+    if (el && el.textContent !== text) el.textContent = text;
   }
-};
 
-// 路由表配置 (符合 408 标准与原图)
-const ROUTING_TABLES = {
-  R1: [
-    { prefix: "128.1.2.192/26", net: "128.1.2.192", mask: "255.255.255.192", nextHop: "直接交付", iface: "接口 0 (128.1.2.193)", type: "direct" },
-    { prefix: "128.1.2.128/26", net: "128.1.2.128", mask: "255.255.255.192", nextHop: "直接交付", iface: "接口 1 (128.1.2.129)", type: "direct" },
-    { prefix: "128.1.3.64/26",  net: "128.1.3.64",  mask: "255.255.255.192", nextHop: "R2 (128.1.2.130)", iface: "接口 1 (128.1.2.129)", type: "indirect" }
-  ],
-  R2: [
-    { prefix: "128.1.2.128/26", net: "128.1.2.128", mask: "255.255.255.192", nextHop: "直接交付", iface: "接口 0 (128.1.2.130)", type: "direct" },
-    { prefix: "128.1.3.64/26",  net: "128.1.3.64",  mask: "255.255.255.192", nextHop: "直接交付", iface: "接口 1 (128.1.3.65)",  type: "direct" },
-    { prefix: "128.1.2.192/26", net: "128.1.2.192", mask: "255.255.255.192", nextHop: "R1 (128.1.2.129)", iface: "接口 0 (128.1.2.130)", type: "indirect" }
-  ]
-};
+  function setAttr(el, name, value) {
+    if (!el) return;
+    const v = String(value);
+    if (el.getAttribute(name) !== v) el.setAttribute(name, v);
+  }
 
-// SVG 节点绝对坐标映射表
-const NODE_COORDINATES = {
-  H1: { x: 80, y: 101 },
-  H1b: { x: 80, y: 231 },
-  SW1: { x: 196, y: 166 },
-  R1_IF0: { x: 316, y: 166 },
-  R1_CENTER: { x: 356, y: 166 },
-  R1_IF1: { x: 396, y: 166 },
-  SW2: { x: 521, y: 166 },
-  H2: { x: 575, y: 231 },
-  R2_IF0: { x: 676, y: 166 },
-  R2_CENTER: { x: 716, y: 166 },
-  R2_IF1: { x: 756, y: 166 },
-  SW3: { x: 861, y: 166 },
-  H3: { x: 965, y: 101 },
-  H3b: { x: 965, y: 231 }
-};
+  function setClass(el, value) {
+    if (el && el.getAttribute('class') !== value) el.setAttribute('class', value);
+  }
 
-// ==========================================================================
-// 2. 状态机与全局变量
-// ==========================================================================
-
-let currentScenarioId = 1;
-let currentStepIndex = 0;
-let isPlaying = false;
-let playSpeed = 1.0;
-let playTimer = null;
-let currentTimeline = null;
-
-// ==========================================================================
-// 3. 辅助数学与二进制工具函数
-// ==========================================================================
-
-function ipToBinaryArray(ipStr) {
-  return ipStr.split('.').map(num => {
-    return parseInt(num, 10).toString(2).padStart(8, '0');
-  });
-}
-
-function binaryArrayToIp(binArr) {
-  return binArr.map(b => parseInt(b, 2)).join('.');
-}
-
-function bitwiseAndIp(ip1, ip2) {
-  const b1 = ipToBinaryArray(ip1);
-  const b2 = ipToBinaryArray(ip2);
-  const res = [];
-  for (let i = 0; i < 4; i++) {
-    let byteRes = '';
-    for (let j = 0; j < 8; j++) {
-      byteRes += (b1[i][j] === '1' && b2[i][j] === '1') ? '1' : '0';
+  function svgEl(tag, attrs, parent) {
+    const node = document.createElementNS(NS, tag);
+    if (attrs) {
+      Object.keys(attrs).forEach((k) => node.setAttribute(k, attrs[k]));
     }
-    res.push(byteRes);
+    if (parent) parent.appendChild(node);
+    return node;
   }
-  return binaryArrayToIp(res);
-}
 
-// ==========================================================================
-// 4. 界面初始化与控制逻辑
-// ==========================================================================
+  function textWidth(text, size) {
+    let w = 0;
+    for (const ch of String(text)) {
+      w += /[\u3000-\u9fff\uff00-\uffef]/.test(ch) ? size : size * 0.62;
+    }
+    return w;
+  }
 
-document.addEventListener('DOMContentLoaded', () => {
-  initScenario(1);
-});
+  function setFrameValue(el, text, flash) {
+    if (!el) return;
+    const prev = el.dataset.v;
+    if (prev === text) return;
+    el.dataset.v = text;
+    el.textContent = text;
+    if (flash && prev !== undefined) {
+      el.classList.remove('flash');
+      void el.offsetWidth;
+      el.classList.add('flash');
+      clearTimeout(el._flashTimer);
+      el._flashTimer = setTimeout(() => el.classList.remove('flash'), 540);
+    }
+  }
 
-function switchScenario(id) {
-  if (isPlaying) togglePlay();
-  currentScenarioId = id;
-  currentStepIndex = 0;
+  function beatStart(index) {
+    return S.starts[clamp(index, 0, S.starts.length - 1)];
+  }
 
-  // 更新胶囊按钮状态
-  [1, 2, 3].forEach(i => {
-    const btn = document.getElementById(`scenario-btn-${i}`);
-    if (i === id) {
-      btn.className = "px-3 py-1.5 rounded-lg font-bold transition-all bg-white text-stone-900 shadow-sm";
+  // ---------- 舞台构建 ----------
+
+  function buildStage() {
+    const svg = els.stage;
+    while (svg.firstChild) svg.removeChild(svg.firstChild);
+    svg.setAttribute('viewBox', M.GEO.viewBox.join(' '));
+
+    const defs = svgEl('defs', {}, svg);
+    const shadow = svgEl('filter', { id: 'soft-shadow', x: '-20%', y: '-20%', width: '140%', height: '140%' }, defs);
+    svgEl('feDropShadow', { dx: '0', dy: '2', stdDeviation: '3', 'flood-opacity': '0.07' }, shadow);
+    const pshadow = svgEl('filter', { id: 'packet-shadow', x: '-40%', y: '-40%', width: '180%', height: '180%' }, defs);
+    svgEl('feDropShadow', { dx: '0', dy: '2', stdDeviation: '2.5', 'flood-opacity': '0.22' }, pshadow);
+
+    const L = {};
+    ['subnets', 'links', 'active', 'nodes', 'pulses', 'trail', 'chevrons', 'packet', 'tags'].forEach((name) => {
+      L[name] = svgEl('g', { class: 'layer layer-' + name }, svg);
+    });
+
+    // 子网
+    const subnets = {};
+    Object.keys(M.GEO.subnets).forEach((id) => {
+      const g0 = M.GEO.subnets[id];
+      const g = svgEl('g', { class: 'subnet', id: 'subnet-' + id }, L.subnets);
+      svgEl('rect', { class: 'subnet-box', x: g0.x, y: g0.y, width: g0.w, height: g0.h, rx: 16 }, g);
+      const name = svgEl('text', { class: 'subnet-name', x: g0.x + 18, y: g0.y + g0.h - 32 }, g);
+      name.textContent = id;
+      const label = svgEl('text', { class: 'subnet-label', x: g0.x + 18, y: g0.y + g0.h - 16 }, g);
+      label.textContent = M.SUBNETS[id].label;
+      subnets[id] = g;
+    });
+
+    // 链路
+    const links = {};
+    Object.keys(M.GEO.paths).forEach((key) => {
+      const p = M.GEO.paths[key];
+      const line = svgEl('line', {
+        class: 'link' + (p.subnet === 'N2' ? ' is-n2' : ''),
+        id: 'link-' + p.id,
+        x1: fmt(p.from.x),
+        y1: fmt(p.from.y),
+        x2: fmt(p.to.x),
+        y2: fmt(p.to.y)
+      }, L.links);
+      links[p.id] = line;
+    });
+
+    const activeHalo = svgEl('line', {
+      class: 'active-halo',
+      x1: 0,
+      y1: 0,
+      x2: 0,
+      y2: 0
+    }, L.active);
+
+    const activeLink = svgEl('line', {
+      class: 'active-link',
+      id: 'active-link',
+      x1: 0,
+      y1: 0,
+      x2: 0,
+      y2: 0
+    }, L.active);
+
+    // 节点
+    const nodes = {};
+    const hostRoles = {};
+
+    Object.keys(M.GEO.hosts).forEach((id) => {
+      const h = M.HOSTS[id];
+      const g0 = M.GEO.hosts[id];
+      const x0 = g0.x - g0.w / 2;
+      const y0 = g0.y - g0.h / 2;
+      const g = svgEl('g', { class: 'node host', id: 'node-' + id, 'data-type': 'host' }, L.nodes);
+      svgEl('rect', { class: 'node-ring', x: fmt(x0 - 4), y: fmt(y0 - 4), width: fmt(g0.w + 8), height: fmt(g0.h + 8), rx: 14 }, g);
+      svgEl('rect', { class: 'host-card', x: fmt(x0), y: fmt(y0), width: g0.w, height: g0.h, rx: 11 }, g);
+      svgEl('rect', { class: 'host-name-bg', x: fmt(x0 + 10), y: fmt(y0 + 11), width: 34, height: 22, rx: 6 }, g);
+      const name = svgEl('text', { class: 'host-name', x: fmt(x0 + 27), y: fmt(y0 + 26), 'text-anchor': 'middle' }, g);
+      name.textContent = id;
+      const ip = svgEl('text', { class: 'host-ip', x: fmt(x0 + 50), y: fmt(y0 + 26) }, g);
+      ip.textContent = h.ip;
+      if (h.gateway) {
+        const gw = svgEl('text', { class: 'host-gw', x: fmt(x0 + 11), y: fmt(y0 + 58) }, g);
+        gw.textContent = '默认网关 ' + h.gateway;
+      }
+      const role = svgEl('text', {
+        class: 'host-role',
+        x: fmt(x0 + g0.w + 6),
+        y: fmt(y0 - 8),
+        'text-anchor': 'start',
+        visibility: 'hidden'
+      }, g);
+      hostRoles[id] = role;
+      nodes[id] = g;
+    });
+
+    Object.keys(M.GEO.switches).forEach((id) => {
+      const g0 = M.GEO.switches[id];
+      const g = svgEl('g', { class: 'node switch', id: 'node-' + id, 'data-type': 'switch' }, L.nodes);
+      svgEl('rect', { class: 'node-ring', x: fmt(g0.x - 26), y: fmt(g0.y - 26), width: 52, height: 52, rx: 12 }, g);
+      svgEl('rect', { class: 'switch-body', x: fmt(g0.x - 22), y: fmt(g0.y - 22), width: 44, height: 44, rx: 10 }, g);
+      svgEl('path', {
+        class: 'switch-icon',
+        d: `M${fmt(g0.x - 12)} ${fmt(g0.y - 7)} L${fmt(g0.x + 12)} ${fmt(g0.y - 7)} M${fmt(g0.x + 8)} ${fmt(g0.y - 11)} L${fmt(g0.x + 12)} ${fmt(g0.y - 7)} L${fmt(g0.x + 8)} ${fmt(g0.y - 3)} M${fmt(g0.x + 12)} ${fmt(g0.y + 7)} L${fmt(g0.x - 12)} ${fmt(g0.y + 7)} M${fmt(g0.x - 8)} ${fmt(g0.y + 3)} L${fmt(g0.x - 12)} ${fmt(g0.y + 7)} L${fmt(g0.x - 8)} ${fmt(g0.y + 11)}`
+      }, g);
+      const label = svgEl('text', { class: 'node-label', x: fmt(g0.x), y: fmt(g0.y + 39) }, g);
+      label.textContent = id;
+      nodes[id] = g;
+    });
+
+    Object.keys(M.GEO.routers).forEach((id) => {
+      const g0 = M.GEO.routers[id];
+      const r = g0.r;
+      const g = svgEl('g', { class: 'node router', id: 'node-' + id, 'data-type': 'router' }, L.nodes);
+      svgEl('circle', { class: 'node-ring', cx: fmt(g0.x), cy: fmt(g0.y), r: r + 8 }, g);
+      svgEl('circle', { class: 'router-body', cx: fmt(g0.x), cy: fmt(g0.y), r: r }, g);
+      svgEl('path', {
+        class: 'router-icon',
+        d: `M${fmt(g0.x - 16)} ${fmt(g0.y)} L${fmt(g0.x + 16)} ${fmt(g0.y)} M${fmt(g0.x + 11)} ${fmt(g0.y - 4)} L${fmt(g0.x + 16)} ${fmt(g0.y)} L${fmt(g0.x + 11)} ${fmt(g0.y + 4)} M${fmt(g0.x + 5)} ${fmt(g0.y - 4)} L${fmt(g0.x)} ${fmt(g0.y)} L${fmt(g0.x + 5)} ${fmt(g0.y + 4)} M${fmt(g0.x)} ${fmt(g0.y - 16)} L${fmt(g0.x)} ${fmt(g0.y + 16)} M${fmt(g0.x - 4)} ${fmt(g0.y - 11)} L${fmt(g0.x)} ${fmt(g0.y - 16)} L${fmt(g0.x + 4)} ${fmt(g0.y - 11)} M${fmt(g0.x - 4)} ${fmt(g0.y + 11)} L${fmt(g0.x)} ${fmt(g0.y + 16)} L${fmt(g0.x + 4)} ${fmt(g0.y + 11)}`
+      }, g);
+      const name = svgEl('text', { class: 'router-name', x: fmt(g0.x), y: fmt(g0.y - r - 12) }, g);
+      name.textContent = id;
+      M.ROUTERS[id].ifaces.forEach((f) => {
+        const x = f.idx === 0 ? g0.x - r : g0.x + r;
+        svgEl('circle', { class: 'iface-dot', cx: fmt(x), cy: fmt(g0.y), r: 5.5 }, g);
+        const num = svgEl('text', { class: 'iface-num', x: fmt(x), y: fmt(g0.y + 2.7) }, g);
+        num.textContent = String(f.idx);
+        const ip = svgEl('text', { class: 'iface-ip', x: fmt(x), y: fmt(g0.y + r + 21), 'text-anchor': 'middle' }, g);
+        ip.textContent = f.ip;
+      });
+      nodes[id] = g;
+    });
+
+    // 到站/交付脉冲
+    const pulses = [];
+    for (let i = 0; i < 3; i++) {
+      pulses.push(svgEl('circle', { class: 'pulse-ring', cx: 0, cy: 0, r: 0, opacity: 0 }, L.pulses));
+    }
+
+    // 链路方向箭头
+    const chevrons = [];
+    for (let i = 0; i < 3; i++) {
+      chevrons.push(svgEl('path', { class: 'chevron', d: 'M-5 -5 L3 0 L-5 5', opacity: 0 }, L.chevrons));
+    }
+
+    // 拖尾
+    const trail = [];
+    for (let i = 0; i < 3; i++) {
+      trail.push(svgEl('circle', { class: 'trail-dot', cx: 0, cy: 0, r: 3.4, opacity: 0 }, L.trail));
+    }
+
+    // 分组
+    const packet = svgEl('g', { class: 'packet', id: 'packet', visibility: 'hidden' }, L.packet);
+    const halo = svgEl('circle', { class: 'packet-halo', cx: 0, cy: 0, r: 29, opacity: 0 }, packet);
+    svgEl('rect', { class: 'packet-bg', x: -32, y: -17, width: 64, height: 34, rx: 9 }, packet);
+    const pTitle = svgEl('text', { class: 'packet-title', x: 0, y: -2 }, packet);
+    pTitle.textContent = 'IP 分组';
+    const pTtl = svgEl('text', { class: 'packet-ttl', x: 0, y: 11 }, packet);
+    pTtl.textContent = 'TTL 64';
+
+    // 浮标
+    const tags = [];
+    for (let i = 0; i < 4; i++) {
+      const g = svgEl('g', { class: 'tag', visibility: 'hidden' }, L.tags);
+      const bg = svgEl('rect', { class: 'tag-bg', x: -40, y: -12, width: 80, height: 24, rx: 12 }, g);
+      const text = svgEl('text', { class: 'tag-text', x: 0, y: 4 }, g);
+      tags.push({ g, bg, text });
+    }
+
+    stage = {
+      svg,
+      subnets,
+      links,
+      activeLink,
+      activeHalo,
+      nodes,
+      hostRoles,
+      pulses,
+      chevrons,
+      trail,
+      packet,
+      halo,
+      pTtl,
+      tags,
+      pips: []
+    };
+  }
+
+  // ---------- 写画面 ----------
+
+  function paint(f) {
+    setText(els.phase, f.phase);
+    setText(els.stepCount, `第 ${f.index + 1} / ${f.count} 步`);
+    setText(els.routePill, f.route);
+    setText(els.caption, f.caption);
+    setText(els.scrubText, `${S.t.toFixed(1)} s / ${S.total.toFixed(1)} s`);
+    els.lamp.classList.toggle('is-running', S.playing);
+    if (els.stageProgressFill) {
+      els.stageProgressFill.style.transform = `scaleX(${((f.index + f.progress) / f.count).toFixed(4)})`;
+    }
+
+    Object.keys(stage.subnets).forEach((id) => {
+      stage.subnets[id].classList.toggle('is-active', f.subnet === id);
+    });
+
+    Object.keys(stage.nodes).forEach((id) => {
+      const type = stage.nodes[id].getAttribute('data-type');
+      const tone = f.focus[id];
+      setClass(stage.nodes[id], 'node ' + type + (tone ? ' is-' + tone : ''));
+    });
+
+    Object.keys(stage.hostRoles).forEach((id) => {
+      const el = stage.hostRoles[id];
+      let role = '';
+      let tone = '';
+      if (id === S.seq.src) {
+        role = '源';
+        tone = 'blue';
+      }
+      if (id === S.seq.dst) {
+        role = f.stats.delivered ? '已收' : '目的';
+        tone = 'green';
+      }
+      setAttr(el, 'visibility', role ? 'visible' : 'hidden');
+      setText(el, role);
+      setClass(el, 'host-role' + (tone ? ' tone-' + tone : ''));
+    });
+
+    if (f.link) {
+      [stage.activeHalo, stage.activeLink].forEach((line) => {
+        setAttr(line, 'x1', fmt(f.link.from.x));
+        setAttr(line, 'y1', fmt(f.link.from.y));
+        setAttr(line, 'x2', fmt(f.link.pos.x));
+        setAttr(line, 'y2', fmt(f.link.pos.y));
+      });
+      setAttr(stage.activeLink, 'opacity', f.link.q > 0 ? '0.9' : '0');
+      setAttr(stage.activeHalo, 'opacity', f.link.q > 0 ? '0.13' : '0');
     } else {
-      btn.className = "px-3 py-1.5 rounded-lg font-medium text-stone-600 hover:text-stone-900 transition-all";
+      setAttr(stage.activeLink, 'opacity', '0');
+      setAttr(stage.activeHalo, 'opacity', '0');
     }
-  });
+    Object.keys(stage.links).forEach((id) => {
+      stage.links[id].classList.toggle('is-current', Boolean(f.link && f.link.id === id));
+    });
 
-  initScenario(id);
-}
+    stage.pulses.forEach((ring, i) => {
+      const pulse = f.pulses[i];
+      if (!pulse || pulse.alpha <= 0.02) {
+        setAttr(ring, 'opacity', '0');
+        return;
+      }
+      setAttr(ring, 'opacity', pulse.alpha.toFixed(3));
+      setAttr(ring, 'cx', fmt(pulse.x));
+      setAttr(ring, 'cy', fmt(pulse.y));
+      setAttr(ring, 'r', fmt(pulse.r));
+      setAttr(ring, 'stroke', pulse.tone === 'green' ? '#2d7d62' : pulse.tone === 'gold' ? '#8f6619' : '#2563eb');
+    });
 
-function initScenario(id) {
-  const scenario = SCENARIOS[id];
-  currentStepIndex = 0;
+    stage.chevrons.forEach((chevron, i) => {
+      const c = f.chevrons[i];
+      if (!c || c.alpha <= 0.02) {
+        setAttr(chevron, 'opacity', '0');
+        return;
+      }
+      setAttr(chevron, 'opacity', c.alpha.toFixed(3));
+      setAttr(chevron, 'transform', `translate(${fmt(c.x)} ${fmt(c.y)}) rotate(${fmt(c.angle)})`);
+    });
 
-  // 更新拓扑区域标题
-  document.getElementById('topology-title').textContent = scenario.title;
-  document.getElementById('topology-desc').textContent = scenario.desc;
+    stage.trail.forEach((dot, i) => {
+      const t = f.trail[i];
+      if (!t) {
+        setAttr(dot, 'opacity', '0');
+        return;
+      }
+      setAttr(dot, 'cx', fmt(t.x));
+      setAttr(dot, 'cy', fmt(t.y));
+      setAttr(dot, 'opacity', t.alpha.toFixed(3));
+    });
 
-  // 渲染步骤指示栏
-  renderStepIndicators(scenario);
+    const p = f.packet;
+    const visible = p.alpha > 0.02;
+    setAttr(stage.packet, 'visibility', visible ? 'visible' : 'hidden');
+    if (visible) {
+      setAttr(stage.packet, 'opacity', p.alpha.toFixed(3));
+      setAttr(stage.packet, 'transform', `translate(${fmt(p.x)} ${fmt(p.y)}) scale(${fmt(p.scale)})`);
+      setAttr(stage.halo, 'opacity', (p.halo * 0.6).toFixed(3));
+      setAttr(stage.halo, 'stroke', f.kind === 'lookup' ? '#8f6619' : '#2563eb');
+      setText(stage.pTtl, 'TTL ' + f.frame.ttl);
+      if (lastTtl !== null && f.frame.ttl !== lastTtl) {
+        stage.pTtl.classList.remove('ttl-flash');
+        void stage.pTtl.getBoundingClientRect();
+        stage.pTtl.classList.add('ttl-flash');
+        clearTimeout(stage._ttlTimer);
+        stage._ttlTimer = setTimeout(() => stage.pTtl.classList.remove('ttl-flash'), 620);
+      }
+    }
+    lastTtl = f.frame.ttl;
 
-  // 初始化二进制推演面板（初始空白）
-  initBinaryAndPanel(scenario);
+    stage.tags.forEach((tagEl, i) => {
+      const t = f.tags[i];
+      if (!t || t.alpha <= 0.02) {
+        setAttr(tagEl.g, 'visibility', 'hidden');
+        return;
+      }
+      setAttr(tagEl.g, 'visibility', 'visible');
+      setAttr(tagEl.g, 'opacity', t.alpha.toFixed(3));
+      setClass(tagEl.g, 'tag tone-' + t.tone);
+      setAttr(tagEl.g, 'transform', `translate(${fmt(t.x)} ${fmt(t.y)})`);
+      setText(tagEl.text, t.text);
+      const w = textWidth(t.text, 10.5) + 24;
+      setAttr(tagEl.bg, 'width', fmt(w));
+      setAttr(tagEl.bg, 'x', fmt(-w / 2));
+    });
 
-  // 初始化路由表面板
-  initRoutingTablePanel("R1");
+    paintFrame(f);
+    paintInspector(f);
 
-  // 复位 SVG 动效元素
-  resetSvgElements();
+    stage.pips.forEach((pip, i) => {
+      pip.classList.toggle('is-current', i === f.index);
+      pip.classList.toggle('is-done', i < f.index);
+      pip.setAttribute('aria-current', i === f.index ? 'step' : 'false');
+    });
 
-  // 初始步骤
-  renderStep(0);
-}
-
-function renderStepIndicators(scenario) {
-  const container = document.getElementById('step-indicators');
-  container.innerHTML = '';
-  scenario.steps.forEach((step, idx) => {
-    const btn = document.createElement('button');
-    btn.id = `step-indicator-${idx}`;
-    btn.className = `px-2.5 py-1 rounded-md text-[11px] font-mono transition-all whitespace-nowrap ${
-      idx === 0
-        ? 'bg-stone-900 text-white font-bold shadow-sm'
-        : 'bg-stone-100 text-stone-600 hover:bg-stone-200'
-    }`;
-    btn.textContent = step.title;
-    btn.onclick = () => jumpToStep(idx, false);
-    container.appendChild(btn);
-  });
-}
-
-function jumpToStep(idx, fromAutoPlay = false) {
-  // 如果非自动播放触发跳转且正在自动播放，暂停播放
-  if (!fromAutoPlay && isPlaying) {
-    togglePlay();
+    if (document.activeElement !== els.progress) els.progress.value = String(S.t);
   }
 
-  if (playTimer) {
-    clearTimeout(playTimer);
-    playTimer = null;
-  }
-  if (currentTimeline) {
-    currentTimeline.kill();
-    currentTimeline = null;
-  }
-
-  currentStepIndex = idx;
-  renderStep(idx);
-}
-
-function stepNext(fromAutoPlay = false) {
-  const scenario = SCENARIOS[currentScenarioId];
-  if (currentStepIndex < scenario.steps.length - 1) {
-    jumpToStep(currentStepIndex + 1, fromAutoPlay);
-  } else {
-    // 已经到达末尾，停止自动播放
-    if (isPlaying) togglePlay();
-  }
-}
-
-function stepPrev() {
-  if (currentStepIndex > 0) {
-    jumpToStep(currentStepIndex - 1, false);
-  }
-}
-
-function resetCurrentScenario() {
-  if (isPlaying) togglePlay();
-  jumpToStep(0, false);
-}
-
-function togglePlay() {
-  isPlaying = !isPlaying;
-  const playIcon = document.getElementById('play-icon');
-  const playText = document.getElementById('play-text');
-  const playBtn = document.getElementById('btn-play-pause');
-
-  if (isPlaying) {
-    playIcon.textContent = "⏸";
-    playText.textContent = "暂停播放";
-    playBtn.classList.remove('btn-tactile-primary');
-    playBtn.classList.add('bg-amber-600', 'text-white', 'border-amber-700');
-
-    // 如果当前已经是最后一步，从第0步重新开始
-    const scenario = SCENARIOS[currentScenarioId];
-    if (currentStepIndex >= scenario.steps.length - 1) {
-      currentStepIndex = 0;
-    }
-    renderStep(currentStepIndex);
-  } else {
-    playIcon.textContent = "▶";
-    playText.textContent = "自动播放";
-    playBtn.classList.add('btn-tactile-primary');
-    playBtn.classList.remove('bg-amber-600', 'text-white', 'border-amber-700');
-    if (playTimer) {
-      clearTimeout(playTimer);
-      playTimer = null;
-    }
-    if (currentTimeline) {
-      currentTimeline.pause();
-    }
-  }
-}
-
-function setSpeed(speed) {
-  playSpeed = speed;
-  ['05', '10', '15'].forEach(s => {
-    const btn = document.getElementById(`speed-${s}`);
-    if (parseFloat(btn.textContent) === speed) {
-      btn.className = "px-1.5 py-0.5 rounded border border-stone-900 bg-stone-900 text-white";
-    } else {
-      btn.className = "px-1.5 py-0.5 rounded border border-stone-200 hover:bg-stone-100";
-    }
-  });
-}
-
-function onStepAnimationComplete() {
-  if (isPlaying) {
-    const pauseTime = 1200 / playSpeed;
-    playTimer = setTimeout(() => {
-      if (isPlaying) {
-        stepNext(true);
-      }
-    }, pauseTime);
-  }
-}
-
-// ==========================================================================
-// 5. 二进制按位与 (AND) 推演面板动画与渲染
-// ==========================================================================
-
-function initBinaryAndPanel(scenario) {
-  // 刚开始下面的判断空白
-  const placeholder = document.getElementById('and-placeholder');
-  const canvas = document.getElementById('and-canvas');
-  if (placeholder) placeholder.classList.remove('hidden');
-  if (canvas) canvas.classList.add('hidden');
-
-  const statusTag = document.getElementById('and-status-tag');
-  if (statusTag) {
-    statusTag.textContent = "等待开始";
-    statusTag.className = "px-2 py-0.5 rounded bg-stone-100 text-stone-600 border border-stone-200";
-  }
-}
-
-function renderBitsRow(containerId, binArr, prefixLen) {
-  const container = document.getElementById(containerId);
-  if (!container) return;
-  container.innerHTML = '';
-
-  let totalBitIdx = 0;
-  binArr.forEach((byteStr, byteIdx) => {
-    // 字节内 8 位
-    for (let bitIdx = 0; bitIdx < 8; bitIdx++) {
-      const bitVal = byteStr[bitIdx];
-      const isPrefix = totalBitIdx < prefixLen;
-      const span = document.createElement('span');
-      span.className = `bit-box ${isPrefix ? 'bit-box-prefix' : 'bit-box-host'}`;
-      if (totalBitIdx === 25) {
-        span.classList.add('prefix-boundary-line');
-      }
-      span.id = `${containerId}-b${totalBitIdx}`;
-      span.textContent = bitVal;
-      span.title = `第 ${totalBitIdx + 1} 位: ${isPrefix ? '网络号部分 (前26位)' : '主机号部分 (后6位)'}`;
-      container.appendChild(span);
-      totalBitIdx++;
-    }
-
-    // 字节分隔点
-    if (byteIdx < 3) {
-      const dot = document.createElement('span');
-      dot.className = "text-stone-400 font-bold px-0.5 self-center text-[10px]";
-      dot.textContent = "•";
-      container.appendChild(dot);
-    }
-  });
-}
-
-// 浮动飞入 IP 动画辅助函数 (从上方 SVG 节点飞至下方推演面板)
-function flyElementFromNode(sourceElId, targetEl, text, badgeBgClass) {
-  const sourceEl = document.getElementById(sourceElId);
-  if (!sourceEl || !targetEl) return gsap.timeline();
-
-  const srcRect = sourceEl.getBoundingClientRect();
-  const targetRect = targetEl.getBoundingClientRect();
-
-  const flyingBadge = document.createElement('div');
-  flyingBadge.className = `fixed z-50 px-3.5 py-1.5 rounded-xl font-mono font-bold text-xs text-white shadow-xl pointer-events-none floating-ip-badge ${badgeBgClass}`;
-  flyingBadge.innerHTML = `<span class="mr-1 opacity-80">📍</span>${text}`;
-  document.body.appendChild(flyingBadge);
-
-  gsap.set(flyingBadge, {
-    left: srcRect.left + srcRect.width / 2,
-    top: srcRect.top + srcRect.height / 2,
-    xPercent: -50,
-    yPercent: -50,
-    scale: 0.6,
-    opacity: 0
-  });
-
-  const tl = gsap.timeline({
-    onComplete: () => {
-      flyingBadge.remove();
-    }
-  });
-
-  tl.to(flyingBadge, {
-    opacity: 1,
-    scale: 1.15,
-    duration: 0.35 / playSpeed,
-    ease: "back.out(2)"
-  })
-  .to(flyingBadge, {
-    left: targetRect.left + 140,
-    top: targetRect.top + 20,
-    scale: 1,
-    duration: 0.8 / playSpeed,
-    ease: "power2.inOut"
-  })
-  .to(flyingBadge, {
-    opacity: 0,
-    scale: 0.9,
-    duration: 0.15 / playSpeed
-  });
-
-  return tl;
-}
-
-function animateBinaryAndStep(onComplete) {
-  if (currentTimeline) {
-    currentTimeline.kill();
-    currentTimeline = null;
-  }
-
-  const scenario = SCENARIOS[currentScenarioId];
-  const srcIp = scenario.srcHost.ip;       // "128.1.2.194"
-  const maskIp = scenario.srcHost.mask;     // "255.255.255.192"
-  const srcNet = scenario.srcHost.net;     // "128.1.2.192"
-  const destIp = scenario.dstHost.ip;      // "128.1.2.132" 等
-  const prefixLen = scenario.srcHost.prefixLen; // 26
-
-  const srcBin = ipToBinaryArray(srcIp);
-  const maskBin = ipToBinaryArray(maskIp);
-  const destBin = ipToBinaryArray(destIp);
-  const calcNet = bitwiseAndIp(destIp, maskIp);
-  const calcBin = ipToBinaryArray(calcNet);
-  const isMatch = (calcNet === srcNet);
-
-  // 目的主机节点 ID
-  const dstNodeId = (currentScenarioId === 1 ? 'node-H1b' : (currentScenarioId === 2 ? 'node-H2' : 'node-H3'));
-
-  // 显示推演画布，隐藏空白占位符
-  const placeholder = document.getElementById('and-placeholder');
-  const canvas = document.getElementById('and-canvas');
-  if (placeholder) placeholder.classList.add('hidden');
-  if (canvas) canvas.classList.remove('hidden');
-
-  const statusTag = document.getElementById('and-status-tag');
-  const stageText = document.getElementById('and-stage-text');
-  const maskRowLabel = document.getElementById('mask-row-label');
-  const maskIpDecimal = document.getElementById('mask-ip-decimal');
-  const destIpDecimal = document.getElementById('dest-ip-decimal');
-  const calcNetDecimal = document.getElementById('calc-net-decimal');
-  const compEl = document.getElementById('and-compare-result');
-  const conclusionEl = document.getElementById('and-conclusion-box');
-
-  statusTag.textContent = "推演中...";
-  statusTag.className = "px-2 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200 font-bold";
-
-  // 复位行状态与发光样式
-  const rowDest = document.getElementById('row-dest-ip');
-  const rowMask = document.getElementById('row-mask-ip');
-  const calcDivider = document.getElementById('and-calc-divider');
-  const rowCalc = document.getElementById('row-calc-net');
-  const rowCompare = document.getElementById('row-compare');
-
-  rowCompare.classList.remove('match-glow-green', 'match-glow-red');
-  conclusionEl.classList.remove('match-glow-green', 'match-glow-red');
-
-  gsap.set([rowDest, rowMask, calcDivider, rowCalc, rowCompare, conclusionEl], {
-    opacity: 0,
-    y: 10
-  });
-
-  // 预装填初始数据
-  renderBitsRow('dest-ip-bits', destBin, prefixLen);
-  renderBitsRow('mask-ip-bits', srcBin, prefixLen); // 首先渲染源主机 IP 的二进制
-  renderBitsRow('calc-net-bits', Array(4).fill('00000000'), prefixLen);
-
-  currentTimeline = gsap.timeline({
-    onComplete: () => {
-      statusTag.textContent = isMatch ? "推演完成 (匹配)" : "推演完成 (不匹配)";
-      statusTag.className = isMatch
-        ? "px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 border border-emerald-300 font-bold"
-        : "px-2 py-0.5 rounded bg-rose-100 text-rose-800 border border-rose-300 font-bold";
-      if (onComplete) onComplete();
-    }
-  });
-
-  // -------------------------------------------------------------
-  // 阶段 1：上方的源主机 IP (128.1.2.194) 移下来，渐渐展开为二进制
-  // -------------------------------------------------------------
-  currentTimeline.call(() => {
-    stageText.textContent = `① 从上方提取源主机 H1 IP (${srcIp})，飞入推演区...`;
-    gsap.fromTo('#node-H1', { scale: 1.1 }, { scale: 1, duration: 0.4 / playSpeed, ease: "back.out(2)" });
-  });
-
-  // 飞行动画从上方 H1 飞至下方 rowMask
-  currentTimeline.add(flyElementFromNode('node-H1', rowMask, `源主机 IP: ${srcIp}`, 'bg-blue-600 shadow-blue-400/50'));
-
-  currentTimeline.call(() => {
-    stageText.textContent = `① 源主机 H1 (IP: ${srcIp}) 展开为 32 位二进制 (前26位网络号，后6位主机号)`;
-    maskRowLabel.innerHTML = `<span class="w-2 h-2 rounded-full bg-blue-500"></span> 源主机 H1 IP`;
-    maskIpDecimal.textContent = srcIp;
-    maskIpDecimal.className = "text-blue-700 font-bold text-sm bg-blue-50 px-2 py-0.5 rounded border border-blue-200";
-    renderBitsRow('mask-ip-bits', srcBin, prefixLen);
-  })
-  .to(rowMask, {
-    opacity: 1,
-    y: 0,
-    duration: 0.5 / playSpeed,
-    ease: "power2.out"
-  })
-  // 32 位二进制平滑展开
-  .fromTo('#mask-ip-bits .bit-box', {
-    scale: 0.4,
-    opacity: 0,
-    y: -8
-  }, {
-    scale: 1,
-    opacity: 1,
-    y: 0,
-    stagger: 0.015 / playSpeed,
-    duration: 0.35 / playSpeed,
-    ease: "back.out(2)"
-  });
-
-  // -------------------------------------------------------------
-  // 阶段 2：然后再渐渐的变为子网掩码 (显眼渐进式翻转动效，杜绝跳变)
-  // -------------------------------------------------------------
-  currentTimeline.to({}, { duration: 0.5 / playSpeed })
-  .call(() => {
-    stageText.textContent = `② 依据 /${prefixLen} 前缀渐变生成子网掩码：前 26 位全部置 1，后 6 位全部置 0`;
-    maskRowLabel.innerHTML = `<span class="w-2 h-2 rounded-full bg-indigo-500 animate-pulse"></span> 渐变为子网掩码 (/26)`;
-  });
-
-  // 字节 0 (第 0~7 位): 翻转为 1，十进制 128 -> 255
-  currentTimeline.to({}, {
-    duration: 0.25 / playSpeed,
-    onStart: () => {
-      for (let b = 0; b < 8; b++) {
-        const el = document.getElementById(`mask-ip-bits-b${b}`);
-        if (el) {
-          el.classList.add('mask-flip-one');
-          el.textContent = '1';
-        }
-      }
-      maskIpDecimal.innerHTML = `<span class="text-blue-700 font-extrabold bg-blue-100 px-1 rounded">255</span>.1.2.194`;
-    }
-  })
-  .to('#mask-ip-bits .bit-box', {
-    duration: 0.15 / playSpeed,
-    onComplete: () => {
-      for (let b = 0; b < 8; b++) {
-        const el = document.getElementById(`mask-ip-bits-b${b}`);
-        if (el) el.classList.remove('mask-flip-one');
-      }
-    }
-  });
-
-  // 字节 1 (第 8~15 位): 翻转为 1，十进制 1 -> 255
-  currentTimeline.to({}, {
-    duration: 0.25 / playSpeed,
-    onStart: () => {
-      for (let b = 8; b < 16; b++) {
-        const el = document.getElementById(`mask-ip-bits-b${b}`);
-        if (el) {
-          el.classList.add('mask-flip-one');
-          el.textContent = '1';
-        }
-      }
-      maskIpDecimal.innerHTML = `255.<span class="text-blue-700 font-extrabold bg-blue-100 px-1 rounded">255</span>.2.194`;
-    }
-  })
-  .to('#mask-ip-bits .bit-box', {
-    duration: 0.15 / playSpeed,
-    onComplete: () => {
-      for (let b = 8; b < 16; b++) {
-        const el = document.getElementById(`mask-ip-bits-b${b}`);
-        if (el) el.classList.remove('mask-flip-one');
-      }
-    }
-  });
-
-  // 字节 2 (第 16~23 位): 翻转为 1，十进制 2 -> 255
-  currentTimeline.to({}, {
-    duration: 0.25 / playSpeed,
-    onStart: () => {
-      for (let b = 16; b < 24; b++) {
-        const el = document.getElementById(`mask-ip-bits-b${b}`);
-        if (el) {
-          el.classList.add('mask-flip-one');
-          el.textContent = '1';
-        }
-      }
-      maskIpDecimal.innerHTML = `255.255.<span class="text-blue-700 font-extrabold bg-blue-100 px-1 rounded">255</span>.194`;
-    }
-  })
-  .to('#mask-ip-bits .bit-box', {
-    duration: 0.15 / playSpeed,
-    onComplete: () => {
-      for (let b = 16; b < 24; b++) {
-        const el = document.getElementById(`mask-ip-bits-b${b}`);
-        if (el) el.classList.remove('mask-flip-one');
-      }
-    }
-  });
-
-  // 字节 3 (第 24~31 位，子网分界字节！): 前 2 位翻为 1，后 6 位翻为 0，十进制 194 -> 192
-  currentTimeline.to({}, {
-    duration: 0.35 / playSpeed,
-    onStart: () => {
-      // 位 24, 25: 属于前 26 位网络前缀 -> 翻为 1
-      for (let b = 24; b < 26; b++) {
-        const el = document.getElementById(`mask-ip-bits-b${b}`);
-        if (el) {
-          el.classList.add('mask-flip-one');
-          el.textContent = '1';
-        }
-      }
-      // 位 26~31: 属于后 6 位主机号 -> 翻为 0
-      for (let b = 26; b < 32; b++) {
-        const el = document.getElementById(`mask-ip-bits-b${b}`);
-        if (el) {
-          el.classList.add('mask-flip-zero');
-          el.textContent = '0';
-        }
-      }
-      maskIpDecimal.innerHTML = `255.255.255.<span class="text-amber-700 font-extrabold bg-amber-100 px-1 rounded">192</span> (/26)`;
-    }
-  })
-  .to('#mask-ip-bits .bit-box', {
-    duration: 0.25 / playSpeed,
-    onComplete: () => {
-      for (let b = 24; b < 26; b++) {
-        const el = document.getElementById(`mask-ip-bits-b${b}`);
-        if (el) el.classList.remove('mask-flip-one');
-      }
-      for (let b = 26; b < 32; b++) {
-        const el = document.getElementById(`mask-ip-bits-b${b}`);
-        if (el) el.classList.remove('mask-flip-zero');
-      }
-    }
-  })
-  // 掩码整体完成，定型收尾
-  .call(() => {
-    maskRowLabel.innerHTML = `<span class="w-2 h-2 rounded-full bg-stone-600"></span> 源主机子网掩码 (Mask /${prefixLen})`;
-    maskIpDecimal.textContent = `${maskIp} (/${prefixLen})`;
-    maskIpDecimal.className = "text-stone-800 font-bold text-sm bg-stone-100 px-2 py-0.5 rounded border border-stone-300";
-    gsap.fromTo(maskIpDecimal, { scale: 1.25 }, { scale: 1, duration: 0.3 / playSpeed, ease: "back.out(2)" });
-  });
-
-  // -------------------------------------------------------------
-  // 阶段 3：上方的目的主机 IP 移下来，渐渐展开为二进制
-  // -------------------------------------------------------------
-  currentTimeline.to({}, { duration: 0.4 / playSpeed })
-  .call(() => {
-    stageText.textContent = `③ 从上方提取目的主机 ${scenario.dstHost.name} IP (${destIp})，飞入推演区...`;
-    gsap.fromTo(`#${dstNodeId}`, { scale: 1.1 }, { scale: 1, duration: 0.4 / playSpeed, ease: "back.out(2)" });
-  });
-
-  // 飞行动画从上方目的主机飞至下方 rowDest
-  currentTimeline.add(flyElementFromNode(dstNodeId, rowDest, `目的主机 IP: ${destIp}`, 'bg-indigo-600 shadow-indigo-400/50'));
-
-  currentTimeline.call(() => {
-    stageText.textContent = `③ 目的主机 IP (${destIp}) 展开为 32 位二进制 (前26位网络号，后6位主机号)`;
-    destIpDecimal.textContent = destIp;
-    renderBitsRow('dest-ip-bits', destBin, prefixLen);
-  })
-  .to(rowDest, {
-    opacity: 1,
-    y: 0,
-    duration: 0.5 / playSpeed,
-    ease: "power2.out"
-  })
-  .fromTo('#dest-ip-bits .bit-box', {
-    scale: 0.4,
-    opacity: 0,
-    y: -8
-  }, {
-    scale: 1,
-    opacity: 1,
-    y: 0,
-    stagger: 0.015 / playSpeed,
-    duration: 0.35 / playSpeed,
-    ease: "back.out(2)"
-  });
-
-  // -------------------------------------------------------------
-  // 阶段 4：与子网掩码从开始按位相与，相与是有显眼的动画！
-  // -------------------------------------------------------------
-  currentTimeline.to({}, { duration: 0.5 / playSpeed })
-  .call(() => {
-    stageText.textContent = `④ 目的 IP 与子网掩码逐位相与 (AND)：1 & 1 = 1，其他皆为 0`;
-    calcNetDecimal.textContent = "逐位相与计算中...";
-    calcNetDecimal.className = "text-amber-700 font-bold text-sm bg-amber-50 px-2 py-0.5 rounded border border-amber-200 animate-pulse";
-  })
-  .to([calcDivider, rowCalc], {
-    opacity: 1,
-    y: 0,
-    duration: 0.4 / playSpeed,
-    ease: "power2.out"
-  });
-
-  // 显眼按位与动画：从第 0 位到第 31 位扫过去
-  const calcFlatBits = calcBin.join('');
-  for (let b = 0; b < 32; b++) {
-    const isSlowDetailed = (b >= 24); // 第 4 字节特写
-    const stepDuration = isSlowDetailed ? (0.14 / playSpeed) : (0.03 / playSpeed);
-
-    currentTimeline.to({}, {
-      duration: stepDuration,
-      onStart: () => {
-        const dEl = document.getElementById(`dest-ip-bits-b${b}`);
-        const mEl = document.getElementById(`mask-ip-bits-b${b}`);
-        const cEl = document.getElementById(`calc-net-bits-b${b}`);
-
-        if (dEl && mEl && cEl) {
-          dEl.classList.add('bit-box-active');
-          mEl.classList.add('bit-box-active');
-
-          cEl.textContent = calcFlatBits[b];
-          cEl.classList.add('bit-box-laser');
-
-          gsap.fromTo(cEl, { scale: 1.6, opacity: 0.4 }, {
-            scale: 1,
-            opacity: 1,
-            duration: 0.2 / playSpeed,
-            ease: "back.out(2)",
-            onComplete: () => {
-              cEl.classList.remove('bit-box-laser');
-              dEl.classList.remove('bit-box-active');
-              mEl.classList.remove('bit-box-active');
-            }
-          });
-        }
-      }
+  function paintFrame(f) {
+    setText(els.frameIp, `${f.frame.ipSrc} → ${f.frame.ipDst}`);
+    setFrameValue(
+      els.frameSrcMac,
+      f.frame.decided ? f.frame.srcMac : '—',
+      true
+    );
+    setFrameValue(
+      els.frameDstMac,
+      f.frame.decided ? f.frame.dstMac : '待判断后封装',
+      true
+    );
+    els.frameDstMac.title = f.frame.decided ? f.frame.macReason : '源主机判断目的网络后再封装帧头';
+    setFrameValue(els.frameTtl, String(f.frame.ttl), true);
+    els.frameTtl.classList.toggle('is-low', f.frame.ttl < 64);
+    setText(els.frameSeg, f.frame.seg === 0 ? '待封装' : `${f.frame.seg}/${f.frame.segTotal}`);
+    els.frameSeg.classList.toggle('is-new', f.frame.seg > 0 && f.frame.seg === f.frame.segTotal);
+    Array.from(els.frameSegPips.children).forEach((pip, i) => {
+      pip.className = 'seg-pip' + (i < f.frame.seg - 1 ? ' is-done' : i === f.frame.seg - 1 ? ' is-current' : '');
     });
   }
 
-  // -------------------------------------------------------------
-  // 阶段 5：相与得到的二进制在渐渐变为 IP 地址
-  // -------------------------------------------------------------
-  currentTimeline.to({}, { duration: 0.5 / playSpeed })
-  .call(() => {
-    stageText.textContent = `⑤ 二进制按 8 位一组，渐变还原为点分十进制网络号 ${calcNet}/${prefixLen}`;
-  })
-  .to('#calc-net-bits .bit-box', {
-    scale: 1.15,
-    stagger: 0.015 / playSpeed,
-    yoyo: true,
-    repeat: 1,
-    duration: 0.15 / playSpeed
-  })
-  .call(() => {
-    calcNetDecimal.textContent = `${calcNet}/${prefixLen}`;
-    calcNetDecimal.className = "text-emerald-700 font-bold text-sm bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200";
-    gsap.fromTo(calcNetDecimal, { scale: 1.35 }, { scale: 1, duration: 0.35 / playSpeed, ease: "back.out(2)" });
-  });
-
-  // -------------------------------------------------------------
-  // 阶段 6：最终判断是否在一个网络 (显眼的匹配/不匹配动画：匹配为绿，不匹配为红)
-  // -------------------------------------------------------------
-  currentTimeline.to({}, { duration: 0.5 / playSpeed })
-  .call(() => {
-    stageText.textContent = `⑥ 最终比对：提取网络号 (${calcNet}) 与源网络号 (${srcNet}) 是否匹配？`;
-    document.getElementById('src-net-decimal').textContent = `${srcNet}/${prefixLen}`;
-
-    if (isMatch) {
-      // 匹配为绿色！显眼动画
-      rowCompare.classList.add('match-glow-green');
-      conclusionEl.classList.add('match-glow-green');
-
-      compEl.innerHTML = `<span class="flex items-center gap-1 text-emerald-800 font-extrabold text-sm"><span class="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-ping"></span>✔ 匹配成功 (绿色)</span>`;
-      compEl.className = "px-3 py-1 rounded-lg bg-emerald-100 border border-emerald-400 shadow-sm";
-
-      for (let b = 0; b < prefixLen; b++) {
-        const cEl = document.getElementById(`calc-net-bits-b${b}`);
-        if (cEl) cEl.classList.add('bit-box-match');
-      }
-
-      conclusionEl.className = "p-3.5 rounded-xl border text-xs leading-relaxed transition-all match-glow-green text-emerald-950";
-      conclusionEl.innerHTML = `
-        <div class="font-bold flex items-center gap-2 mb-1.5 text-emerald-800 text-sm">
-          <span class="text-base">🟢</span> 【匹配成功】源与目的在同一网络 (${calcNet}/26 == ${srcNet}/26)
-        </div>
-        <p class="text-[12px] text-emerald-900 leading-normal">
-          目的主机 <strong>${scenario.dstHost.name} (${destIp})</strong> 提取所得网络号与源主机 <strong>H1</strong> 完全一致！
-        </p>
-        <div class="mt-2 text-[11px] text-emerald-900 font-bold bg-emerald-100/90 p-2.5 rounded-lg border border-emerald-300 flex items-center gap-2">
-          <span>🚀</span> 判定决策：采取<strong>【同网直接交付 (Direct Delivery)】</strong>，直接通过以太网交换机 SW1 转发给目的主机，无需路由器介入！
-        </div>
-      `;
-    } else {
-      // 不匹配为红色！显眼动画
-      rowCompare.classList.add('match-glow-red');
-      conclusionEl.classList.add('match-glow-red');
-
-      compEl.innerHTML = `<span class="flex items-center gap-1 text-rose-800 font-extrabold text-sm"><span class="w-2.5 h-2.5 rounded-full bg-rose-500 animate-ping"></span>✕ 不匹配 (红色)</span>`;
-      compEl.className = "px-3 py-1 rounded-lg bg-rose-100 border border-rose-400 shadow-sm";
-
-      const srcBinFlat = ipToBinaryArray(srcNet).join('');
-      for (let b = 0; b < prefixLen; b++) {
-        const cEl = document.getElementById(`calc-net-bits-b${b}`);
-        if (cEl && calcFlatBits[b] !== srcBinFlat[b]) {
-          cEl.classList.add('bit-box-mismatch');
-        }
-      }
-
-      conclusionEl.className = "p-3.5 rounded-xl border text-xs leading-relaxed transition-all match-glow-red text-rose-950";
-      conclusionEl.innerHTML = `
-        <div class="font-bold flex items-center gap-2 mb-1.5 text-rose-800 text-sm">
-          <span class="text-base">🔴</span> 【不匹配】源与目的不在同一网络 (提取网络 ${calcNet}/26 ≠ 源网络 ${srcNet}/26)
-        </div>
-        <p class="text-[12px] text-rose-900 leading-normal">
-          目的主机 <strong>${scenario.dstHost.name} (${destIp})</strong> 位于外网！H1 本地以太网交换机无法直接交付。
-        </p>
-        <div class="mt-2 text-[11px] text-rose-900 font-bold bg-rose-100/90 p-2.5 rounded-lg border border-rose-300 flex items-center gap-2">
-          <span>📡</span> 判定决策：采取<strong>【跨网间接交付 (Indirect Delivery)】</strong>，必须封装为以太网帧，发往默认网关路由器 <strong>R1 接口 0 (128.1.2.193)</strong> 进行路由查表转发！
-        </div>
-      `;
+  function buildSegPips(total) {
+    els.frameSegPips.innerHTML = '';
+    for (let i = 0; i < total; i++) {
+      const pip = document.createElement('span');
+      pip.className = 'seg-pip';
+      pip.textContent = String(i + 1);
+      els.frameSegPips.appendChild(pip);
     }
-  })
-  .to([rowCompare, conclusionEl], {
-    opacity: 1,
-    y: 0,
-    duration: 0.6 / playSpeed,
-    stagger: 0.15 / playSpeed,
-    ease: "power2.out"
-  });
+  }
 
-  return currentTimeline;
-}
+  // ---------- 判断台 / 查表台 ----------
 
-// ==========================================================================
-// 6. 路由器查表动态匹配动画
-// ==========================================================================
+  function setInspectHead(badge, sub, tone, showLegend) {
+    setText(els.inspectBadge, badge);
+    setClass(els.inspectBadge, 'inspect-badge' + (tone ? ' tone-' + tone : ''));
+    setText(els.inspectSub, sub);
+    els.inspectLegend.style.display = showLegend ? 'flex' : 'none';
+  }
 
-function initRoutingTablePanel(routerName) {
-  document.getElementById('router-table-title').textContent = `② 路由器 ${routerName} 查表动态匹配`;
-  const tableBody = document.getElementById('routing-table-body');
-  tableBody.innerHTML = '';
+  function buildBits(container, bits, baseClass, prefix) {
+    container.innerHTML = '';
+    const cells = [];
+    for (let i = 0; i < 32; i++) {
+      const cell = document.createElement('span');
+      let cls = 'bit ' + baseClass;
+      if (baseClass === 'and') cls = 'bit and';
+      else cls += i < prefix ? ' net' : ' host';
+      if (i === prefix - 1) cls += ' is-boundary';
+      cell.className = cls;
+      cell.textContent = bits[i];
+      container.appendChild(cell);
+      cells.push(cell);
+      if (i % 8 === 7 && i < 31) {
+        const gap = document.createElement('i');
+        gap.className = 'byte-gap';
+        container.appendChild(gap);
+      }
+    }
+    return cells;
+  }
 
-  const tableData = ROUTING_TABLES[routerName] || [];
-  tableData.forEach((row, idx) => {
-    const tr = document.createElement('tr');
-    tr.id = `route-row-${routerName}-${idx}`;
-    tr.className = "route-row hover:bg-stone-50 transition-colors";
-    tr.innerHTML = `
-      <td class="py-2.5 px-2.5 font-bold text-stone-800">${row.prefix}</td>
-      <td class="py-2.5 px-2 text-stone-700">${row.nextHop}</td>
-      <td class="py-2.5 px-2 text-stone-600">${row.iface}</td>
-      <td id="calc-cell-${routerName}-${idx}" class="py-2.5 px-2 text-stone-400 font-mono text-[11px]">-</td>
-      <td id="status-cell-${routerName}-${idx}" class="py-2.5 px-2 text-center text-stone-400 font-bold">-</td>
+  function buildInspector(f) {
+    const key =
+      f.kind === 'lookup'
+        ? 'lookup-' + f.lookup.router
+        : f.kind === 'move'
+          ? 'move-' + S.seq.beats[f.index].fromId + '-' + S.seq.beats[f.index].toId
+          : f.kind === 'finish'
+            ? 'finish-' + S.seq.dst
+            : 'check';
+
+    if (key === lastInspectorKey) return;
+    lastInspectorKey = key;
+    const body = els.inspectBody;
+
+    if (f.kind === 'check') {
+      const c = f.check;
+      body.innerHTML = `
+        <div class="bit-row">
+          <div class="bit-label">目的 IP</div>
+          <div class="bits-scroll"><div class="bits" id="chk-bits-dest"></div></div>
+          <div class="bit-decimal">${c.dstIp}</div>
+        </div>
+        <div class="bit-row">
+          <div class="bit-label">子网掩码 /${c.prefix}</div>
+          <div class="bits-scroll"><div class="bits" id="chk-bits-mask"></div></div>
+          <div class="bit-decimal">${c.mask}</div>
+        </div>
+        <div class="bit-row">
+          <div class="bit-label">按位与 AND</div>
+          <div class="bits-scroll"><div class="bits" id="chk-bits-and"></div></div>
+          <div class="bit-decimal" id="chk-and-dec">…</div>
+        </div>
+        <div class="and-meter">
+          <span class="meter-label" id="chk-scan-label">逐位相与 0 / 32</span>
+          <span class="meter-track"><i id="chk-meter-fill"></i></span>
+        </div>
+        <div class="compare" id="chk-compare">
+          <span>目的网络 <b id="chk-net">…</b></span>
+          <span class="compare-op" id="chk-op">?</span>
+          <span>H1 网络 <b>${c.srcNet}/${c.prefix}</b></span>
+          <span class="compare-badge" id="chk-badge">正在相与</span>
+        </div>
+        <p class="scroll-hint">左右滑动查看完整 32 位</p>
+      `;
+      stage.bits = {
+        dest: buildBits($('chk-bits-dest'), c.destBits, 'dest', c.prefix),
+        mask: buildBits($('chk-bits-mask'), c.maskBits, 'mask', c.prefix),
+        and: buildBits($('chk-bits-and'), c.andBits, 'and', c.prefix)
+      };
+      stage.bitsAndDec = $('chk-and-dec');
+      stage.bitsNet = $('chk-net');
+      stage.bitsOp = $('chk-op');
+      stage.bitsBadge = $('chk-badge');
+      stage.bitsCompare = $('chk-compare');
+      stage.bitsScanLabel = $('chk-scan-label');
+      stage.bitsMeterFill = $('chk-meter-fill');
+      return;
+    }
+
+    if (f.kind === 'lookup') {
+      const lk = f.lookup;
+      body.innerHTML = `
+        <div class="lookup-title">目的 IP <b>${lk.dstIp}</b> · 逐行与掩码相与
+          <span class="scan-count" id="lk-scan">0 / ${lk.rows.length}</span>
+        </div>
+        <div class="table-shell">
+          <span class="route-pointer" id="lk-pointer" aria-hidden="true" title="正在匹配的路由表项"></span>
+          <div class="table-scroll">
+            <table class="route-table">
+            <thead>
+              <tr>
+                <th>目的网络</th>
+                <th>掩码</th>
+                <th>AND 结果</th>
+                <th>下一跳</th>
+                <th>出接口</th>
+                <th style="text-align:center">判定</th>
+              </tr>
+            </thead>
+            <tbody>${lk.rows
+              .map(
+                (row, i) => `
+              <tr class="route-row" data-row="${i}">
+                <td>${row.prefix}</td>
+                <td>${row.mask}</td>
+                <td class="cell-and">···</td>
+                <td>${row.nextHop}</td>
+                <td>${row.iface}</td>
+                <td class="cell-result">—</td>
+              </tr>`
+              )
+                .join('')}</tbody>
+            </table>
+          </div>
+        </div>
+        <p class="scroll-hint">左右滑动查看完整路由表</p>
+        <div class="lookup-result" id="lk-result">逐行扫描…</div>
+      `;
+      stage.lookup = {
+        rows: Array.from(body.querySelectorAll('.route-row')).map((tr) => ({
+          tr,
+          and: tr.querySelector('.cell-and'),
+          result: tr.querySelector('.cell-result')
+        })),
+        result: $('lk-result'),
+        scan: $('lk-scan'),
+        pointer: $('lk-pointer'),
+        shell: body.querySelector('.table-shell')
+      };
+      return;
+    }
+
+    if (f.kind === 'move') {
+      const b = S.seq.beats[f.index];
+      const path = S.seq.meta.nodePath;
+      const fromIndex = path.indexOf(b.fromId);
+      const toIndex = path.indexOf(b.toId);
+      body.innerHTML = `
+        <div class="link-view">
+          <div class="link-head">
+            <span>${b.fromId}</span><span class="arrow">→</span><span>${b.toId}</span>
+            <span class="link-tag" id="mv-seg">帧头 —</span>
+          </div>
+          <div class="link-explain" id="mv-explain"></div>
+          <div class="mini-route">${path
+            .map(
+              (id, i) =>
+                `<span class="node-chip${i === toIndex ? ' is-now' : i <= fromIndex ? ' is-past' : ''}">${id}</span>`
+            )
+            .join('<span>·</span>')}</div>
+        </div>
+      `;
+      stage.move = {
+        seg: $('mv-seg'),
+        explain: $('mv-explain')
+      };
+      return;
+    }
+
+    body.innerHTML = `
+      <div class="finish-title"><span class="tick">✓</span><span id="fn-title">收到分组</span></div>
+      <div class="finish-grid">
+        <div class="finish-cell"><span class="fk">IP 地址</span><b id="fn-ip"></b><em>端到端不变</em></div>
+        <div class="finish-cell"><span class="fk">TTL</span><b id="fn-ttl"></b><em id="fn-hops"></em></div>
+        <div class="finish-cell"><span class="fk">帧头</span><b id="fn-seg"></b><em>每跳重写</em></div>
+      </div>
     `;
-    tableBody.appendChild(tr);
-  });
-
-  const statusTag = document.getElementById('lookup-status-tag');
-  statusTag.textContent = "就绪";
-  statusTag.className = "text-[11px] font-mono px-2 py-0.5 rounded bg-stone-100 text-stone-600 border border-stone-200";
-
-  const conclusionBox = document.getElementById('lookup-conclusion-box');
-  conclusionBox.className = "p-3 rounded-xl border border-stone-200 bg-stone-50 text-xs text-stone-600";
-  conclusionBox.innerHTML = `<span class="font-bold text-stone-700">查表状态：</span>当分组到达路由器时，将启动最长前缀匹配查表动画。`;
-}
-
-function animateRouterLookup(routerName, destIp, matchedRowIdx, onComplete) {
-  if (currentTimeline) {
-    currentTimeline.kill();
-    currentTimeline = null;
+    stage.finish = {
+      title: $('fn-title'),
+      ip: $('fn-ip'),
+      ttl: $('fn-ttl'),
+      hops: $('fn-hops'),
+      seg: $('fn-seg')
+    };
   }
 
-  initRoutingTablePanel(routerName);
-  const statusTag = document.getElementById('lookup-status-tag');
-  statusTag.textContent = `路由器 ${routerName} 正在逐行查表...`;
-  statusTag.className = "text-[11px] font-mono px-2 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200 font-bold";
-
-  const conclusionBox = document.getElementById('lookup-conclusion-box');
-  const tableData = ROUTING_TABLES[routerName];
-
-  currentTimeline = gsap.timeline({
-    onComplete: () => {
-      if (onComplete) onComplete();
-    }
-  });
-
-  tableData.forEach((row, idx) => {
-    const rowEl = document.getElementById(`route-row-${routerName}-${idx}`);
-    const calcCell = document.getElementById(`calc-cell-${routerName}-${idx}`);
-    const statusCell = document.getElementById(`status-cell-${routerName}-${idx}`);
-
-    // 计算 Dest IP & 掩码
-    const andResult = bitwiseAndIp(destIp, row.mask);
-    const isRowMatch = (andResult === row.net);
-
-    // 步骤 1: 光标扫描到此行
-    currentTimeline.to(rowEl, {
-      backgroundColor: "#FEF3C7",
-      duration: 0.3 / playSpeed,
-      onStart: () => {
-        rowEl.classList.add('scanning');
-        calcCell.innerHTML = `<span class="text-amber-800 font-bold">${destIp} & /26 = ${andResult}</span>`;
+  function paintBits(cells, bits, alphas, opts) {
+    const srcBits = opts && opts.srcBits;
+    cells.forEach((cell, i) => {
+      const a = clamp(alphas[i] || 0, 0, 1);
+      const isScan = Boolean(opts && opts.and && i === opts.scanIdx);
+      cell.style.opacity = (isScan ? Math.max(a, 0.8) : a).toFixed(3);
+      cell.style.transform = `scale(${(isScan ? 1.16 : 0.78 + 0.22 * a).toFixed(3)})`;
+      if (opts && opts.and) {
+        cell.textContent = a > 0.08 ? bits[i] : '·';
+        if (a > 0.5 && i < 26) {
+          cell.classList.toggle('is-match', Boolean(opts.match));
+          cell.classList.toggle('is-diff', opts.match === false && srcBits && bits[i] !== srcBits[i]);
+        } else {
+          cell.classList.remove('is-match', 'is-diff');
+        }
       }
-    }, `+=${0.2 / playSpeed}`);
-
-    // 步骤 2: 判定是否匹配
-    currentTimeline.add(() => {
-      rowEl.classList.remove('scanning');
-      if (isRowMatch) {
-        rowEl.classList.add('matched');
-        calcCell.innerHTML = `<span class="text-emerald-700 font-bold">${destIp} & /26 = ${andResult} == 前缀</span>`;
-        statusCell.innerHTML = `<span class="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 font-bold text-[10px]">✓ 匹配成功</span>`;
-      } else {
-        rowEl.classList.add('mismatched');
-        calcCell.innerHTML = `<span class="text-stone-400 line-through">${destIp} & /26 = ${andResult} ≠ 前缀</span>`;
-        statusCell.innerHTML = `<span class="px-1.5 py-0.5 rounded bg-rose-50 text-rose-600 font-bold text-[10px]">✕ 不匹配</span>`;
-      }
-    }, `+=${0.3 / playSpeed}`);
-
-    // 如果是匹配行，锁定并展示结论
-    if (isRowMatch) {
-      currentTimeline.add(() => {
-        statusTag.textContent = `查表完成：已锁定路由`;
-        statusTag.className = "text-[11px] font-mono px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 font-bold";
-
-        conclusionBox.className = "p-3 rounded-xl border border-emerald-200 bg-emerald-50/80 text-xs text-emerald-950 leading-relaxed";
-        conclusionBox.innerHTML = `
-          <div class="font-bold text-emerald-800 flex items-center gap-1 mb-1">
-            <span>🎯</span> 路由查表命中：${row.prefix}
-          </div>
-          <p>目的 IP <strong>${destIp}</strong> 与表项子网掩码 AND 运算结果与前缀匹配！</p>
-          <div class="mt-1.5 text-[11px] text-emerald-800 font-semibold bg-white/70 p-2 rounded-lg border border-emerald-200">
-            &bull; 下一跳方式：<strong>${row.nextHop}</strong><br>
-            &bull; 转发接口：<strong>${row.iface}</strong>
-          </div>
-        `;
-      });
-    }
-  });
-
-  return currentTimeline;
-}
-
-// ==========================================================================
-// 7. SVG 动效与数据包转发动画
-// ==========================================================================
-
-function resetSvgElements() {
-  const packetGroup = document.getElementById('packet-group');
-  if (packetGroup) {
-    gsap.set(packetGroup, { opacity: 0, x: 0, y: 0, scale: 1 });
-  }
-
-  // 重置网络高亮边框
-  ['rect-N1', 'rect-N2', 'rect-N3'].forEach(id => {
-    const el = document.getElementById(id);
-    if (el) el.setAttribute('class', 'network-boundary');
-  });
-
-  // 重置连线
-  document.querySelectorAll('line[id^="line-"]').forEach(line => {
-    line.setAttribute('stroke', '#94A3B8');
-    line.setAttribute('stroke-width', '2');
-  });
-
-  // 重置状态标签
-  const badge = document.getElementById('packet-status-badge');
-  badge.innerHTML = `<span class="pulse-led pulse-led-blue"></span><span id="packet-badge-text">准备就绪</span>`;
-}
-
-function animatePacketAlongPath(nodeKeys, infoText, onComplete) {
-  if (currentTimeline) {
-    currentTimeline.kill();
-    currentTimeline = null;
-  }
-
-  const packetGroup = document.getElementById('packet-group');
-  const label = document.getElementById('packet-fly-label');
-  const badgeText = document.getElementById('packet-badge-text');
-
-  if (!packetGroup || nodeKeys.length < 2) {
-    if (onComplete) onComplete();
-    return;
-  }
-
-  label.textContent = infoText || "IP 分组转发中...";
-  badgeText.textContent = infoText || "数据包正在链路上传输";
-
-  // 获取路径起点与后续各个关键节点
-  const startCoord = NODE_COORDINATES[nodeKeys[0]];
-  gsap.set(packetGroup, {
-    x: startCoord.x,
-    y: startCoord.y,
-    opacity: 1,
-    scale: 0.5
-  });
-
-  currentTimeline = gsap.timeline({
-    onComplete: () => {
-      if (onComplete) onComplete();
-    }
-  });
-
-  // 弹入数据包
-  currentTimeline.to(packetGroup, { scale: 1, duration: 0.2 / playSpeed, ease: "back.out(2)" });
-
-  // 依次补间位移至后续节点
-  for (let i = 1; i < nodeKeys.length; i++) {
-    const targetCoord = NODE_COORDINATES[nodeKeys[i]];
-    const legDistance = Math.hypot(targetCoord.x - NODE_COORDINATES[nodeKeys[i-1]].x, targetCoord.y - NODE_COORDINATES[nodeKeys[i-1]].y);
-    const legDuration = Math.max(0.45, (legDistance / 260)) / playSpeed;
-
-    currentTimeline.to(packetGroup, {
-      x: targetCoord.x,
-      y: targetCoord.y,
-      duration: legDuration,
-      ease: "power1.inOut"
+      cell.classList.toggle('is-scan', isScan);
     });
   }
 
-  return currentTimeline;
-}
+  function paintInspector(f) {
+    buildInspector(f);
 
-// ==========================================================================
-// 8. 场景步骤主调度渲染函数
-// ==========================================================================
-
-function renderStep(stepIndex) {
-  const scenario = SCENARIOS[currentScenarioId];
-  const step = scenario.steps[stepIndex];
-
-  // 更新步骤指示条高亮
-  scenario.steps.forEach((s, idx) => {
-    const btn = document.getElementById(`step-indicator-${idx}`);
-    if (!btn) return;
-    if (idx === stepIndex) {
-      btn.className = 'px-2.5 py-1 rounded-md text-[11px] font-mono transition-all whitespace-nowrap bg-stone-900 text-white font-bold shadow-sm';
-    } else if (idx < stepIndex) {
-      btn.className = 'px-2.5 py-1 rounded-md text-[11px] font-mono transition-all whitespace-nowrap bg-emerald-100 text-emerald-800 font-semibold';
-    } else {
-      btn.className = 'px-2.5 py-1 rounded-md text-[11px] font-mono transition-all whitespace-nowrap bg-stone-100 text-stone-600 hover:bg-stone-200';
+    if (f.kind === 'check') {
+      const c = f.check;
+      setInspectHead('源端判断', `H1 目的 ${c.dstIp} · /${c.prefix}`, 'blue', true);
+      const revealed = c.andAlpha.filter((a) => a > 0.55).length;
+      const srcBits = M.ipBits(c.srcNet);
+      let diffCount = 0;
+      for (let i = 0; i < c.prefix; i++) {
+        if (c.andBits[i] !== srcBits[i]) diffCount++;
+      }
+      let scanIdx = -1;
+      for (let i = 0; i < c.andAlpha.length; i++) {
+        if (c.andAlpha[i] > 0.08 && c.andAlpha[i] < 0.95) {
+          scanIdx = i;
+          break;
+        }
+      }
+      paintBits(stage.bits.dest, c.destBits, c.destAlpha, {});
+      paintBits(stage.bits.mask, c.maskBits, c.maskAlpha, {});
+      paintBits(stage.bits.and, c.andBits, c.andAlpha, {
+        and: true,
+        match: c.match,
+        srcBits,
+        scanIdx
+      });
+      const andDone = revealed >= 32;
+      setText(stage.bitsAndDec, andDone ? c.andNet : '…');
+      setText(stage.bitsNet, c.match === null ? '…' : c.andNet);
+      if (andDone && c.match === false) {
+        setText(stage.bitsScanLabel, `相与完成 · ${diffCount} 位不同`);
+      } else if (andDone && c.match === true) {
+        setText(stage.bitsScanLabel, '相与完成 · 全部一致');
+      } else if (andDone) {
+        setText(stage.bitsScanLabel, '相与完成');
+      } else {
+        setText(stage.bitsScanLabel, `逐位相与 ${revealed} / 32`);
+      }
+      setClass(stage.bitsScanLabel, 'meter-label' + (c.match === false ? ' is-diff' : ''));
+      stage.bitsMeterFill.style.width = `${(revealed / 32) * 100}%`;
+      stage.bitsMeterFill.style.background =
+        andDone && c.match !== null ? (c.match ? 'var(--green)' : 'var(--red)') : 'var(--blue)';
+      setClass(stage.bitsCompare, 'compare' + (c.match === false ? ' is-diff-result' : ''));
+      if (c.match === null) {
+        setText(stage.bitsOp, '?');
+        setText(stage.bitsBadge, '正在相与');
+        setClass(stage.bitsBadge, 'compare-badge');
+        stage.bitsBadge.style.opacity = '0.55';
+      } else {
+        setText(stage.bitsOp, c.match ? '=' : '≠');
+        setText(stage.bitsBadge, c.match ? '同网 · 直接交付' : `不同网 · ${diffCount} 位不同`);
+        setClass(stage.bitsBadge, 'compare-badge tone-' + (c.match ? 'green' : 'red') + ' is-resolved');
+        stage.bitsBadge.style.opacity = String(c.compareAlpha);
+      }
+      return;
     }
-  });
 
-  const badgeText = document.getElementById('packet-badge-text');
+    if (f.kind === 'lookup') {
+      const lk = f.lookup;
+      setInspectHead('路由查表', `${lk.router} 路由表 · 目的 ${lk.dstIp}`, 'gold', false);
+      const scanned = lk.rows.filter((r) => r.state === 'scan' || r.state === 'match' || r.state === 'miss').length;
+      const hasMatch = lk.rows.some((r) => r.state === 'match');
+      setText(stage.lookup.scan, lk.resolved || hasMatch ? '已命中' : `已扫描 ${scanned} / ${lk.rows.length}`);
+      setClass(stage.lookup.scan, 'scan-count' + (lk.resolved || hasMatch ? ' is-hit' : ''));
 
-  // 根据当前步骤类型执行对应逻辑
-  if (step.type === 'binary-and') {
-    badgeText.textContent = `步骤 1: 源主机 ${scenario.srcHost.name} 进行二进制相与判断`;
-    animateBinaryAndStep(onStepAnimationComplete);
-  } else if (step.type === 'forward') {
-    badgeText.textContent = step.desc;
-    animatePacketAlongPath(step.path, `IP: ${scenario.srcHost.ip} → ${scenario.dstHost.ip}`, onStepAnimationComplete);
-  } else if (step.type === 'router-lookup') {
-    badgeText.textContent = `路由器 ${step.router} 正在查表匹配下一跳`;
-    animateRouterLookup(step.router, scenario.dstHost.ip, 1, onStepAnimationComplete);
-  } else if (step.type === 'finish') {
-    badgeText.textContent = `交付成功！IP 分组已顺利抵达目的主机 ${scenario.dstHost.name}`;
-    const packetGroup = document.getElementById('packet-group');
-    if (packetGroup) {
-      currentTimeline = gsap.timeline({
-        onComplete: () => {
-          onStepAnimationComplete();
+      // 指针：优先指向正在扫描的行，其次命中行，最后指向下一条待扫描行
+      let scanningIdx = lk.rows.findIndex((r) => r.state === 'scan');
+      let matchIdx = lk.rows.findIndex((r) => r.state === 'match');
+      let lastMiss = -1;
+      lk.rows.forEach((r, i) => {
+        if (r.state === 'miss') lastMiss = i;
+      });
+      let pointerIdx = scanningIdx >= 0 ? scanningIdx : matchIdx >= 0 ? matchIdx : Math.min(lastMiss + 1, lk.rows.length - 1);
+      if (pointerIdx < 0) pointerIdx = 0;
+      const pointerRow = lk.rows[pointerIdx];
+      const pointerSlot = stage.lookup.rows[pointerIdx];
+      if (pointerRow && pointerSlot && stage.lookup.pointer && stage.lookup.shell) {
+        const shellRect = stage.lookup.shell.getBoundingClientRect();
+        const rowRect = pointerSlot.tr.getBoundingClientRect();
+        const center = rowRect.top - shellRect.top + rowRect.height / 2;
+        stage.lookup.pointer.style.transform = `translateY(${center.toFixed(1)}px)`;
+        stage.lookup.pointer.style.opacity = pointerRow.state === 'idle' ? '0.78' : '1';
+        const tone =
+          pointerRow.state === 'match' ? ' is-match' : pointerRow.state === 'miss' ? ' is-miss' : '';
+        setClass(stage.lookup.pointer, 'route-pointer' + tone);
+      }
+      lk.rows.forEach((row, i) => {
+        const slot = stage.lookup.rows[i];
+        if (!slot) return;
+        let cls = 'route-row';
+        if (row.state === 'scan') cls += ' is-scan';
+        else if (row.state === 'match') cls += ' is-match';
+        else if (row.state === 'miss') cls += ' is-miss';
+        setClass(slot.tr, cls);
+        slot.tr.style.opacity = row.alpha > 0.02 ? row.alpha.toFixed(3) : '0.35';
+        setText(slot.and, row.andAlpha > 0.05 ? row.andResult : '···');
+        if (row.badgeAlpha > 0.05) {
+          setText(slot.result, row.state === 'match' ? '命中' : row.state === 'miss' ? '≠' : '扫描');
+          setClass(
+            slot.result,
+            'cell-result' + (row.state === 'match' ? ' cell-confirm' : row.state === 'miss' ? ' cell-miss' : '')
+          );
+        } else {
+          setText(slot.result, '—');
+          setClass(slot.result, 'cell-result');
         }
       });
-      currentTimeline.to(packetGroup, {
-        scale: 1.4,
-        duration: 0.25 / playSpeed,
-        yoyo: true,
-        repeat: 3,
-        ease: "power2.inOut"
+
+      if (lk.resolved) {
+        const row = lk.rows[lk.matchedIdx];
+        setClass(stage.lookup.result, 'lookup-result tone-green');
+        const html =
+          `命中 <b>${row.prefix}</b> → 下一跳 <b>${row.nextHop}</b> · ${row.iface}<br>` +
+          `TTL <b>${lk.ttlFrom}→${lk.ttlTo}</b>，重封装为第 ${lk.segTo}/${f.frame.segTotal} 段帧头`;
+        if (stage.lookup.result.dataset.html !== html) {
+          stage.lookup.result.innerHTML = html;
+          stage.lookup.result.dataset.html = html;
+        }
+        stage.lookup.result.style.opacity = String(lk.receiptAlpha);
+      } else if (lk.rows.some((r) => r.state === 'match')) {
+        setClass(stage.lookup.result, 'lookup-result tone-gold');
+        setText(stage.lookup.result, '已找到匹配表项，正在锁定出接口…');
+        stage.lookup.result.style.opacity = '1';
+      } else {
+        setClass(stage.lookup.result, 'lookup-result');
+        setText(stage.lookup.result, '逐行用目的 IP 与表项掩码相与…');
+        stage.lookup.result.style.opacity = '1';
+      }
+      return;
+    }
+
+    if (f.kind === 'move') {
+      const b = S.seq.beats[f.index];
+      setInspectHead('链路转发', `本跳 ${b.fromId} → ${b.toId}`, 'blue', false);
+      setText(stage.move.seg, f.frame.decided ? `帧头 ${f.frame.seg}/${f.frame.segTotal}` : '帧头 —');
+      let text = '交换机只按帧的目的 MAC 转发，不修改 IP 头。';
+      if (f.frame.macReason === '目的 MAC = 默认网关') {
+        text = '目的 MAC 填默认网关；交换机只按帧的目的 MAC 转发，不修改 IP 头。';
+      } else if (f.frame.macReason === '目的 MAC = 下一跳路由器') {
+        text = '源 MAC 换成出接口地址，目的 MAC 填下一跳路由器；源、目的 IP 地址不变。';
+      } else if (f.frame.macReason === '目的 MAC = 目的主机') {
+        text = '源 MAC 换成最后一段出接口地址，目的 MAC 填目的主机；源、目的 IP 地址不变。';
+      }
+      setText(stage.move.explain, text);
+      return;
+    }
+
+    const dstName = S.seq.dst;
+    setInspectHead('交付完成', `目的 ${S.seq.dstIp} · 已收下`, 'green', false);
+    setText(stage.finish.title, `${dstName} 收到分组`);
+    setText(stage.finish.ip, `${f.frame.ipSrc} → ${f.frame.ipDst}`);
+    setText(stage.finish.ttl, `${S.seq.ttl0} → ${f.frame.ttl}`);
+    setText(stage.finish.hops, f.stats.routerIndex === 0 ? '未经路由器' : `经 ${f.stats.routerIndex} 台路由器`);
+    setText(stage.finish.seg, `${f.frame.seg} 段`);
+  }
+
+  // ---------- 步骤轨道 ----------
+
+  function buildTrack() {
+    els.track.innerHTML = '';
+    const pips = [];
+    let currentGroup = null;
+    let row = null;
+    S.seq.beats.forEach((beat, i) => {
+      if (beat.group !== currentGroup) {
+        currentGroup = beat.group;
+        const wrap = document.createElement('div');
+        wrap.className = 'track-group';
+        const label = document.createElement('span');
+        label.className = 'track-label';
+        label.textContent = beat.group;
+        row = document.createElement('div');
+        row.className = 'track-pips';
+        wrap.appendChild(label);
+        wrap.appendChild(row);
+        els.track.appendChild(wrap);
+      }
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'pip';
+      btn.textContent = String(i + 1);
+      btn.title = `${beat.phase} · ${beat.caption}`;
+      btn.setAttribute('aria-label', `第 ${i + 1} 步：${beat.phase}，${beat.caption}`);
+      btn.addEventListener('click', () => {
+        pause();
+        setTime(beatStart(i) + 0.001);
       });
-    } else {
-      onStepAnimationComplete();
+      row.appendChild(btn);
+      pips.push(btn);
+    });
+    stage.pips = pips;
+  }
+
+  // ---------- 控件 ----------
+
+  function syncUI() {
+    const end = S.total > 0 && S.t >= S.total - 0.002;
+    els.progress.max = String(S.total);
+    setText(els.playText, S.playing ? '暂停' : '播放');
+    setText(els.playIcon, S.playing ? '❚❚' : '▶');
+    els.play.disabled = !hasGsap && !S.reduce;
+    els.prev.disabled = S.t <= 0.001;
+    els.next.disabled = end;
+    els.lamp.classList.toggle('is-running', S.playing);
+    document.body.classList.toggle('is-playing', S.playing);
+    document.body.classList.toggle('is-reduced', S.reduce);
+    els.reduce.checked = S.reduce;
+    document.querySelectorAll('[data-scenario]').forEach((b) => {
+      b.setAttribute('aria-pressed', String(Number(b.dataset.scenario) === S.scenario));
+    });
+    document.querySelectorAll('[data-speed]').forEach((b) => {
+      b.setAttribute('aria-pressed', String(Number(b.dataset.speed) === S.speed));
+    });
+    els.notice.hidden = hasGsap;
+    if (!hasGsap) {
+      setText(
+        els.notice,
+        S.reduce
+          ? '未加载动画引擎（GSAP）。减少动效模式下仍可自动播放，每步直接跳转。'
+          : '未加载动画引擎（GSAP），播放已停用。可开启「减少动效」自动播放，或用单步与进度条浏览。'
+      );
     }
   }
-}
+
+  function killTween() {
+    if (tween) {
+      tween.kill();
+      tween = null;
+    }
+  }
+
+  function clearDwell() {
+    if (dwellTimer) {
+      clearTimeout(dwellTimer);
+      dwellTimer = null;
+    }
+  }
+
+  function setTime(t, keepPlaying) {
+    killTween();
+    clearDwell();
+    S.t = clamp(Number(t) || 0, 0, S.total);
+    if (!keepPlaying) S.playing = false;
+    render();
+    writeLink();
+  }
+
+  function render() {
+    if (!S.seq || !stage) return;
+    const loc = M.locate(S.seq, S.t);
+    S.i = loc.index;
+    S.p = loc.p;
+    paint(M.frameOf(S.seq, loc.index, loc.p));
+    syncUI();
+  }
+
+  function play() {
+    if (!S.seq || (!hasGsap && !S.reduce)) return;
+    if (S.t >= S.total - 0.002) {
+      S.t = 0;
+      render();
+    }
+    S.playing = true;
+    if (S.reduce) stepLoop();
+    else startTween();
+    syncUI();
+  }
+
+  function startTween() {
+    if (!hasGsap) return;
+    const obj = { t: S.t };
+    tween = window.gsap.to(obj, {
+      t: S.total,
+      duration: Math.max(0.02, S.total - S.t),
+      ease: 'none',
+      onUpdate: () => {
+        S.t = obj.t;
+        render();
+      },
+      onComplete: () => {
+        tween = null;
+        S.t = S.total;
+        S.playing = false;
+        render();
+        writeLink();
+      }
+    });
+    tween.timeScale(S.speed);
+  }
+
+  function stepLoop() {
+    if (!S.playing) return;
+    const loc = M.locate(S.seq, S.t);
+    if (loc.index >= S.seq.beats.length - 1 && S.t >= S.total - 0.002) {
+      S.playing = false;
+      render();
+      writeLink();
+      return;
+    }
+    dwellTimer = setTimeout(() => {
+      dwellTimer = null;
+      const next = S.starts[loc.index + 1];
+      if (next == null) {
+        S.t = S.total;
+        S.playing = false;
+        render();
+        writeLink();
+        return;
+      }
+      S.t = next;
+      render();
+      writeLink();
+      stepLoop();
+    }, (DWELL * 1000) / S.speed);
+  }
+
+  function pause() {
+    killTween();
+    clearDwell();
+    S.playing = false;
+    render();
+    writeLink();
+  }
+
+  function togglePlay() {
+    if (S.playing) pause();
+    else play();
+  }
+
+  function stepBy(dir) {
+    killTween();
+    clearDwell();
+    S.playing = false;
+    const loc = M.locate(S.seq, S.t);
+    if (dir > 0) {
+      const target = S.starts[loc.index + 1];
+      setTime(target == null ? S.total : target);
+    } else {
+      const target = loc.p > 0.06 ? S.starts[loc.index] : S.starts[Math.max(0, loc.index - 1)];
+      setTime(target);
+    }
+  }
+
+  function setSpeed(speed) {
+    S.speed = speed;
+    if (tween) tween.timeScale(speed);
+    syncUI();
+    writeLink();
+  }
+
+  function loadScenario(id, opts) {
+    const keepTime = opts && opts.keepTime;
+    S.scenario = id;
+    S.seq = M.buildSequence(id);
+    buildSegPips(S.seq.segTotal);
+    lastTtl = null;
+    const b = M.beatStarts(S.seq);
+    S.starts = b.starts;
+    S.total = b.total;
+    S.playing = false;
+    killTween();
+    clearDwell();
+    lastInspectorKey = '';
+    buildTrack();
+    if (!keepTime) S.t = 0;
+    S.t = clamp(S.t, 0, S.total);
+    render();
+    writeLink();
+  }
+
+  // ---------- 地址栏 ----------
+
+  function writeLink() {
+    if (linkTimer) {
+      clearTimeout(linkTimer);
+      linkTimer = null;
+    }
+    const wait = S.playing ? 300 : 0;
+    if (wait > 0) {
+      linkTimer = setTimeout(() => {
+        linkTimer = null;
+        writeLinkNow();
+      }, wait);
+      return;
+    }
+    writeLinkNow();
+  }
+
+  function writeLinkNow() {
+    try {
+      const params = new URLSearchParams();
+      params.set('s', String(S.scenario));
+      params.set('t', S.t.toFixed(2));
+      history.replaceState(null, '', '#' + params.toString());
+    } catch (e) {
+      // 本地环境可能不允许改写地址，演示照常可用
+    }
+  }
+
+  function readLink() {
+    const out = { scenario: 1, t: 0 };
+    try {
+      const params = new URLSearchParams(location.hash.slice(1));
+      const s = Number(params.get('s'));
+      if (s === 1 || s === 2 || s === 3) out.scenario = s;
+      const t = Number(params.get('t'));
+      if (Number.isFinite(t) && t >= 0) out.t = t;
+    } catch (e) {
+      // 地址栏不可读时按默认状态开始
+    }
+    return out;
+  }
+
+  // ---------- 事件 ----------
+
+  function bind() {
+    els.play.addEventListener('click', togglePlay);
+    els.prev.addEventListener('click', () => stepBy(-1));
+    els.next.addEventListener('click', () => stepBy(1));
+    els.replay.addEventListener('click', () => setTime(0));
+    els.progress.addEventListener('input', () => setTime(Number(els.progress.value)));
+    els.reduce.addEventListener('change', () => {
+      S.reduce = els.reduce.checked;
+      if (S.playing) {
+        killTween();
+        clearDwell();
+        if (S.reduce) stepLoop();
+        else startTween();
+      }
+      syncUI();
+    });
+
+    document.querySelectorAll('[data-scenario]').forEach((b) => {
+      b.addEventListener('click', () => {
+        const id = Number(b.dataset.scenario);
+        if (id === S.scenario) return;
+        S.t = 0;
+        loadScenario(id);
+      });
+    });
+
+    document.querySelectorAll('[data-speed]').forEach((b) => {
+      b.addEventListener('click', () => setSpeed(Number(b.dataset.speed)));
+    });
+
+    document.addEventListener('keydown', (e) => {
+      const el = e.target instanceof Element ? e.target : null;
+      if (el && el.closest('input, select, textarea, button, a')) return;
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      if (e.code === 'Space') {
+        e.preventDefault();
+        togglePlay();
+      } else if (e.code === 'ArrowRight') {
+        e.preventDefault();
+        stepBy(1);
+      } else if (e.code === 'ArrowLeft') {
+        e.preventDefault();
+        stepBy(-1);
+      } else if (e.code === 'Home') {
+        e.preventDefault();
+        setTime(0);
+      }
+    });
+
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden && S.playing) pause();
+    });
+  }
+
+  function watchGsap() {
+    if (hasGsap) return;
+    let tries = 0;
+    const timer = setInterval(() => {
+      tries++;
+      if (window.gsap) {
+        hasGsap = true;
+        clearInterval(timer);
+        syncUI();
+      } else if (tries > 50) {
+        clearInterval(timer);
+      }
+    }, 200);
+  }
+
+  function init() {
+    const start = readLink();
+    buildStage();
+    bind();
+    if (window.__gsapReady && !hasGsap) hasGsap = true;
+    window.addEventListener('gsap-ready', () => {
+      hasGsap = true;
+      syncUI();
+    });
+    loadScenario(start.scenario, { keepTime: true });
+    S.t = clamp(start.t, 0, S.total);
+    render();
+    writeLinkNow();
+    watchGsap();
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
+})();
