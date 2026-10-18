@@ -1,1235 +1,624 @@
 /**
- * 伙伴系统 (Buddy System) 动态分区内存管理与回收
- * 动效与决策增强版：
- * 1. 划分未达到目的时，上方显著提示过大并继续划分
- * 2. 每次划分产生的新伙伴块均平滑移动并链接到对应空闲链表
- * 3. 达到目的时进程从左侧平滑移入占用
- * 4. 进程回收时检测伙伴块占用阻断合并，作为独立伙伴块平滑移入链表
+ * 伙伴系统动态分区的界面控制器。
+ * BuddyModel.buildRun 给出逐步快照，BuddyChoreo.scene 决定每个元素在这一刻的样子；
+ * 这里只负责把结果写进 SVG 与 HTML、按钮与键盘，以及本模块自己的补间与计时器（切换或复位时清理）。
  */
-
 (function () {
   'use strict';
 
-  const TOTAL_MEMORY = 1024; // 1024 KB
+  const M = window.BuddyModel;
+  const C = window.BuddyChoreo;
+  const hasGsap = typeof window.gsap !== 'undefined';
+  const SVG_NS = 'http://www.w3.org/2000/svg';
+  const DWELL = 0.9;                       // 减少动效时，每一步跳到步末后停留的秒数（1× 速度）
+  const { BAR, LIST, CARD } = C;
+  const INK2 = '#5D655F';
+  const BLUE = '#2563EB';
+  const RED = '#B42318';
 
-  // 完整 8 阶段细粒度演进定义 (Step 0 ~ 7)
-  const STEPS = [
-    {
-      id: 0,
-      badge: 'STEP 0 / 7',
-      actionTag: '初始整块就绪',
-      actionDesc: '物理内存为单一整块 1024KB 空间，直接挂入 1024KB 空闲链表，各进程处于待申请状态。',
-      banner: {
-        icon: '💡',
-        main: '初始状态：物理内存为单一整块 1024KB 空间，挂入 1024KB 空闲双向链表',
-        sub: '系统准备接收进程申请，三进程 P1(70K)、P2(256K)、P3(190K) 在左侧就绪',
-        badgeText: '1024K 就绪',
-        styleClass: 'bg-stone-50 border-stone-300 text-stone-800',
-        badgeClass: 'bg-stone-200 text-stone-700'
-      },
-      procs: {
-        p1: { status: '待申请', badgeClass: 'bg-white text-stone-600 border border-stone-200' },
-        p2: { status: '待申请', badgeClass: 'bg-white text-stone-600 border border-stone-200' },
-        p3: { status: '待申请', badgeClass: 'bg-white text-stone-600 border border-stone-200' }
-      },
-      memoryBlocks: [
-        { start: 0, size: 1024, status: 'free', proc: null, label: '1024 KB 空闲整块' }
-      ],
-      freeLists: {
-        1024: [{ start: 0, size: 1024 }],
-        512: [],
-        256: [],
-        128: [],
-        64: []
-      },
-      treeNodes: [
-        { id: '1024_0', label: '1024K [0..1024K]', status: 'free', level: 0, x: 380, y: 25 }
-      ],
-      treeEdges: [],
-      motion: null
-    },
+  const $ = (id) => document.getElementById(id);
+  const els = {
+    gStatic: $('g-static'),
+    gCards: $('g-cards'),
+    gBar: $('g-bar'),
+    gLists: $('g-lists'),
+    gTree: $('g-tree'),
+    gFx: $('g-fx'),
+    lamp: $('lamp'),
+    stepCount: $('step-count'),
+    phase: $('phase'),
+    reqLine: $('req-line'),
+    narr: $('narr'),
+    phaseNav: $('phase-nav'),
+    scrub: $('scrub'),
+    scrubText: $('scrub-text'),
+    replay: $('btn-replay'),
+    prev: $('btn-prev'),
+    next: $('btn-next'),
+    play: $('btn-play'),
+    playText: $('play-text'),
+    reduce: $('reduce'),
+    notice: $('notice')
+  };
+  const reduceQuery = window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)') : null;
 
-    {
-      id: 1,
-      badge: 'STEP 1 / 7',
-      actionTag: 'P1 首次划分 (1024K➔512K)',
-      actionDesc: 'P1 申请 70KB ➔ 目标需 128KB ➔ 首次划分 1024K 得到 512K 块，区域过大继续划分！新伙伴 [512..1024K] 移动链接入 512K 链表。',
-      banner: {
-        icon: '⚠️',
-        main: 'P1 申请 70K (需 128K)：首次划分块大小为 512K，区域过大，继续折半划分！',
-        sub: '右半部分 [512K..1024K] 作为新伙伴块，平滑移入下方 512KB 空闲链表建立链接',
-        badgeText: '区域过大 · 继续划分',
-        styleClass: 'bg-amber-50 border-amber-300 text-amber-900',
-        badgeClass: 'bg-amber-200 text-amber-900'
-      },
-      procs: {
-        p1: { status: '折半划分中 (512K过大)...', badgeClass: 'bg-amber-100 text-amber-800 font-bold' },
-        p2: { status: '待申请', badgeClass: 'bg-white text-stone-600 border border-stone-200' },
-        p3: { status: '待申请', badgeClass: 'bg-white text-stone-600 border border-stone-200' }
-      },
-      memoryBlocks: [
-        { start: 0, size: 512, status: 'splitting', proc: null, label: '512 KB (过大·待继续折半)' },
-        { start: 512, size: 512, status: 'new_buddy', proc: null, label: '512 KB (新伙伴块 ➔ 移入512K链表)' }
-      ],
-      freeLists: {
-        1024: [],
-        512: [{ start: 512, size: 512, isNew: true }],
-        256: [],
-        128: [],
-        64: []
-      },
-      treeNodes: [
-        { id: '1024_0', label: '1024K [0..1024K]', status: 'split', level: 0, x: 380, y: 25 },
-        { id: '512_0', label: '512K [0..512K] (过大)', status: 'split', level: 1, x: 200, y: 70 },
-        { id: '512_1', label: '512K [512..1024K]', status: 'free', level: 1, x: 560, y: 70 }
-      ],
-      treeEdges: [
-        { from: '1024_0', to: '512_0' },
-        { from: '1024_0', to: '512_1' }
-      ],
-      motion: {
-        type: 'split_and_link_buddy',
-        splitLaserPct: 50,
-        buddyFrom: 'block-512-1024',
-        buddyToList: 'list-row-512',
-        buddyText: '新伙伴块 [512..1024K] ➔ 链接入 512KB 链表'
-      }
-    },
-
-    {
-      id: 2,
-      badge: 'STEP 2 / 7',
-      actionTag: 'P1 二次划分 (512K➔256K)',
-      actionDesc: 'P1 目标为 128KB ➔ 对 [0..512K] 再次划分得到 256K 块，区域仍然过大，继续折半划分！新伙伴 [256..512K] 移动链接入 256K 链表。',
-      banner: {
-        icon: '⚠️',
-        main: 'P1 需 128K：本次划分块大小为 256K，区域仍然过大，继续折半划分！',
-        sub: '右半部分 [256K..512K] 作为新伙伴块，平滑移入下方 256KB 空闲链表建立链接',
-        badgeText: '仍然过大 · 继续划分',
-        styleClass: 'bg-amber-50 border-amber-300 text-amber-900',
-        badgeClass: 'bg-amber-200 text-amber-900'
-      },
-      procs: {
-        p1: { status: '折半划分中 (256K仍过大)...', badgeClass: 'bg-amber-100 text-amber-800 font-bold' },
-        p2: { status: '待申请', badgeClass: 'bg-white text-stone-600 border border-stone-200' },
-        p3: { status: '待申请', badgeClass: 'bg-white text-stone-600 border border-stone-200' }
-      },
-      memoryBlocks: [
-        { start: 0, size: 256, status: 'splitting', proc: null, label: '256 KB (仍过大·待继续折半)' },
-        { start: 256, size: 256, status: 'new_buddy', proc: null, label: '256 KB (新伙伴块 ➔ 移入256K链表)' },
-        { start: 512, size: 512, status: 'free', proc: null, label: '512 KB 空闲伙伴' }
-      ],
-      freeLists: {
-        1024: [],
-        512: [{ start: 512, size: 512 }],
-        256: [{ start: 256, size: 256, isNew: true }],
-        128: [],
-        64: []
-      },
-      treeNodes: [
-        { id: '1024_0', label: '1024K [0..1024K]', status: 'split', level: 0, x: 380, y: 25 },
-        { id: '512_0', label: '512K [0..512K]', status: 'split', level: 1, x: 200, y: 70 },
-        { id: '512_1', label: '512K [512..1024K]', status: 'free', level: 1, x: 560, y: 70 },
-        { id: '256_0', label: '256K [0..256K] (仍过大)', status: 'split', level: 2, x: 110, y: 115 },
-        { id: '256_1', label: '256K [256..512K]', status: 'free', level: 2, x: 290, y: 115 }
-      ],
-      treeEdges: [
-        { from: '1024_0', to: '512_0' },
-        { from: '1024_0', to: '512_1' },
-        { from: '512_0', to: '256_0' },
-        { from: '512_0', to: '256_1' }
-      ],
-      motion: {
-        type: 'split_and_link_buddy',
-        splitLaserPct: 25,
-        buddyFrom: 'block-256-512',
-        buddyToList: 'list-row-256',
-        buddyText: '新伙伴块 [256..512K] ➔ 链接入 256KB 链表'
-      }
-    },
-
-    {
-      id: 3,
-      badge: 'STEP 3 / 7',
-      actionTag: 'P1 达到目标并占用',
-      actionDesc: '本次划分块大小为 128K，恰好达到 P1 目标大小！右伙伴 [128..256K] 移入 128K 链表；P1 从左侧平滑移入主存占用 [0..128K]！',
-      banner: {
-        icon: '✨',
-        main: '本次划分块大小为 128K，恰好达到 P1 目标大小！',
-        sub: '右伙伴 [128..256K] 移入 128KB 链表建立链接；左伙伴 [0..128K] 由 P1 从左侧平滑移入占用！',
-        badgeText: '达到目标 · 移入占用',
-        styleClass: 'bg-blue-50 border-blue-300 text-blue-900',
-        badgeClass: 'bg-blue-600 text-white'
-      },
-      procs: {
-        p1: { status: '已移入内存 (70K/128K)', badgeClass: 'bg-blue-600 text-white font-bold' },
-        p2: { status: '待申请', badgeClass: 'bg-white text-stone-600 border border-stone-200' },
-        p3: { status: '待申请', badgeClass: 'bg-white text-stone-600 border border-stone-200' }
-      },
-      memoryBlocks: [
-        {
-          start: 0, size: 128, status: 'allocated',
-          proc: { pid: 'P1', reqSize: 70, color: 'p1', fragSize: 58 },
-          label: 'P1 (70K / 128K)'
-        },
-        { start: 128, size: 128, status: 'new_buddy', proc: null, label: '128 KB (新伙伴块 ➔ 移入128K链表)' },
-        { start: 256, size: 256, status: 'free', proc: null, label: '256 KB (伙伴块在链表)' },
-        { start: 512, size: 512, status: 'free', proc: null, label: '512 KB (伙伴块在链表)' }
-      ],
-      freeLists: {
-        1024: [],
-        512: [{ start: 512, size: 512 }],
-        256: [{ start: 256, size: 256 }],
-        128: [{ start: 128, size: 128, isNew: true }],
-        64: []
-      },
-      treeNodes: [
-        { id: '1024_0', label: '1024K [0..1024K]', status: 'split', level: 0, x: 380, y: 25 },
-        { id: '512_0', label: '512K [0..512K]', status: 'split', level: 1, x: 200, y: 70 },
-        { id: '512_1', label: '512K [512..1024K]', status: 'free', level: 1, x: 560, y: 70 },
-        { id: '256_0', label: '256K [0..256K]', status: 'split', level: 2, x: 110, y: 115 },
-        { id: '256_1', label: '256K [256..512K]', status: 'free', level: 2, x: 290, y: 115 },
-        { id: '128_0', label: 'P1: 128K (70K实占)', status: 'p1', level: 3, x: 60, y: 160 },
-        { id: '128_1', label: '128K [128..256K]', status: 'free', level: 3, x: 160, y: 160 }
-      ],
-      treeEdges: [
-        { from: '1024_0', to: '512_0' },
-        { from: '1024_0', to: '512_1' },
-        { from: '512_0', to: '256_0' },
-        { from: '512_0', to: '256_1' },
-        { from: '256_0', to: '128_0' },
-        { from: '256_0', to: '128_1' }
-      ],
-      motion: {
-        type: 'proc_and_buddy',
-        procId: 'p1',
-        fromProc: 'proc-card-p1',
-        toBlock: 'block-0-128',
-        buddyFrom: 'block-128-256',
-        buddyToList: 'list-row-128',
-        buddyText: '新伙伴块 [128..256K] ➔ 链接入 128KB 链表'
-      }
-    },
-
-    {
-      id: 4,
-      badge: 'STEP 4 / 7',
-      actionTag: 'P2 等额命中移入',
-      actionDesc: 'P2 申请 256KB ➔ 恰好等额吻合 256K 链表中的伙伴块 [256..512K] ➔ 链表节点移出 ➔ P2 从左侧平滑移入主存占用 (0 内部碎片)！',
-      banner: {
-        icon: '★',
-        main: 'P2 申请 256K：直接命中 256KB 空闲链表中的伙伴块，出链分配！',
-        sub: '申请空间刚好是切分块大小，无需再次划分，零内部碎片！P2 从左侧平滑移入占用',
-        badgeText: '等额命中 · 零碎片',
-        styleClass: 'bg-emerald-50 border-emerald-300 text-emerald-900',
-        badgeClass: 'bg-emerald-600 text-white'
-      },
-      procs: {
-        p1: { status: '已在内存运行 (70K/128K)', badgeClass: 'bg-blue-600 text-white font-bold' },
-        p2: { status: '已移入内存 (256K 满额)', badgeClass: 'bg-emerald-600 text-white font-bold' },
-        p3: { status: '待申请', badgeClass: 'bg-white text-stone-600 border border-stone-200' }
-      },
-      memoryBlocks: [
-        {
-          start: 0, size: 128, status: 'allocated',
-          proc: { pid: 'P1', reqSize: 70, color: 'p1', fragSize: 58 },
-          label: 'P1 (70K / 128K)'
-        },
-        { start: 128, size: 128, status: 'free', proc: null, label: '128 KB 空闲' },
-        {
-          start: 256, size: 256, status: 'allocated',
-          proc: { pid: 'P2', reqSize: 256, color: 'p2', fragSize: 0 },
-          label: 'P2 (256K / 256K 等额)'
-        },
-        { start: 512, size: 512, status: 'free', proc: null, label: '512 KB 空闲' }
-      ],
-      freeLists: {
-        1024: [],
-        512: [{ start: 512, size: 512 }],
-        256: [], // 刚才的 256K 伙伴块被 P2 取出占用，平滑移动变空
-        128: [{ start: 128, size: 128 }],
-        64: []
-      },
-      treeNodes: [
-        { id: '1024_0', label: '1024K [0..1024K]', status: 'split', level: 0, x: 380, y: 25 },
-        { id: '512_0', label: '512K [0..512K]', status: 'split', level: 1, x: 200, y: 70 },
-        { id: '512_1', label: '512K [512..1024K]', status: 'free', level: 1, x: 560, y: 70 },
-        { id: '256_0', label: '256K [0..256K]', status: 'split', level: 2, x: 110, y: 115 },
-        { id: '256_1', label: 'P2: 256K (满额占用)', status: 'p2', level: 2, x: 290, y: 115 },
-        { id: '128_0', label: 'P1: 128K (70K实占)', status: 'p1', level: 3, x: 60, y: 160 },
-        { id: '128_1', label: '128K [128..256K]', status: 'free', level: 3, x: 160, y: 160 }
-      ],
-      treeEdges: [
-        { from: '1024_0', to: '512_0' },
-        { from: '1024_0', to: '512_1' },
-        { from: '512_0', to: '256_0' },
-        { from: '512_0', to: '256_1' },
-        { from: '256_0', to: '128_0' },
-        { from: '256_0', to: '128_1' }
-      ],
-      motion: {
-        type: 'proc_from_left_and_list_pull',
-        procId: 'p2',
-        fromProc: 'proc-card-p2',
-        toBlock: 'block-256-512',
-        pullFromList: 'list-row-256'
-      }
-    },
-
-    {
-      id: 5,
-      badge: 'STEP 5 / 7',
-      actionTag: 'P3 划分 512K 并占用',
-      actionDesc: 'P3 申请 190KB (需 256KB) ➔ 256K 链表为空 ➔ 取出 512K 块折半切分 ➔ 新伙伴 [768..1024K] 移动链接入 256K 链表 ➔ P3 从左侧平滑移入主存 [512..768K]！',
-      banner: {
-        icon: '⚡',
-        main: 'P3 申请 190K (需 256K)：256K 链表为空，划分 512K 伙伴块得到 256K 刚好满足！',
-        sub: '新伙伴 [768..1024K] 平滑移入 256KB 链表建立链接；左半部分由 P3 从左侧移入占用！',
-        badgeText: '折半满足 · 移入占用',
-        styleClass: 'bg-purple-50 border-purple-300 text-purple-900',
-        badgeClass: 'bg-purple-600 text-white'
-      },
-      procs: {
-        p1: { status: '已在内存运行', badgeClass: 'bg-blue-600 text-white font-bold' },
-        p2: { status: '已在内存运行', badgeClass: 'bg-emerald-600 text-white font-bold' },
-        p3: { status: '已移入内存 (190K/256K)', badgeClass: 'bg-purple-600 text-white font-bold' }
-      },
-      memoryBlocks: [
-        {
-          start: 0, size: 128, status: 'allocated',
-          proc: { pid: 'P1', reqSize: 70, color: 'p1', fragSize: 58 },
-          label: 'P1 (70K / 128K)'
-        },
-        { start: 128, size: 128, status: 'free', proc: null, label: '128 KB 空闲' },
-        {
-          start: 256, size: 256, status: 'allocated',
-          proc: { pid: 'P2', reqSize: 256, color: 'p2', fragSize: 0 },
-          label: 'P2 (256K / 256K 等额)'
-        },
-        {
-          start: 512, size: 256, status: 'allocated',
-          proc: { pid: 'P3', reqSize: 190, color: 'p3', fragSize: 66 },
-          label: 'P3 (190K / 256K)'
-        },
-        { start: 768, size: 256, status: 'new_buddy', proc: null, label: '256 KB (新伙伴块 ➔ 移入256K链表)' }
-      ],
-      freeLists: {
-        1024: [],
-        512: [],
-        256: [{ start: 768, size: 256, isNew: true }],
-        128: [{ start: 128, size: 128 }],
-        64: []
-      },
-      treeNodes: [
-        { id: '1024_0', label: '1024K [0..1024K]', status: 'split', level: 0, x: 380, y: 25 },
-        { id: '512_0', label: '512K [0..512K]', status: 'split', level: 1, x: 200, y: 70 },
-        { id: '512_1', label: '512K [512..1024K]', status: 'split', level: 1, x: 560, y: 70 },
-        { id: '256_0', label: '256K [0..256K]', status: 'split', level: 2, x: 110, y: 115 },
-        { id: '256_1', label: 'P2: 256K (满额)', status: 'p2', level: 2, x: 290, y: 115 },
-        { id: '256_2', label: 'P3: 256K (190K实占)', status: 'p3', level: 2, x: 470, y: 115 },
-        { id: '256_3', label: '256K [768..1024K]', status: 'free', level: 2, x: 650, y: 115 },
-        { id: '128_0', label: 'P1: 128K (70K实占)', status: 'p1', level: 3, x: 60, y: 160 },
-        { id: '128_1', label: '128K [128..256K]', status: 'free', level: 3, x: 160, y: 160 }
-      ],
-      treeEdges: [
-        { from: '1024_0', to: '512_0' },
-        { from: '1024_0', to: '512_1' },
-        { from: '512_0', to: '256_0' },
-        { from: '512_0', to: '256_1' },
-        { from: '512_1', to: '256_2' },
-        { from: '512_1', to: '256_3' },
-        { from: '256_0', to: '128_0' },
-        { from: '256_0', to: '128_1' }
-      ],
-      motion: {
-        type: 'proc_and_buddy',
-        procId: 'p3',
-        fromProc: 'proc-card-p3',
-        toBlock: 'block-512-768',
-        buddyFrom: 'block-768-1024',
-        buddyToList: 'list-row-256',
-        buddyText: '新伙伴块 [768..1024K] ➔ 链接入 256KB 链表'
-      }
-    },
-
-    {
-      id: 6,
-      badge: 'STEP 6 / 7',
-      actionTag: 'P2回收 · 伙伴被占阻断合并',
-      actionDesc: 'P2 进程释放回收 ➔ 计算伙伴基址 256 ⊕ 256 = 0 [0..256K] ➔ 检验发现伙伴块内仍有 P1 运行(仍被占用) ➔ 无法合并！该块变为独立空闲块，平滑移动下移至 256KB 链表建立链接！',
-      banner: {
-        icon: '⛔',
-        main: 'P2 释放回收：检验伙伴基址 0 发现 [0..256K] 仍被 P1 占用，无法合并！',
-        sub: '回收块 [256..512K] 独立作为新伙伴块，平滑移动下移至 256KB 链表重新建立双向链接！',
-        badgeText: '伙伴被占 · 移入链表',
-        styleClass: 'bg-red-50 border-red-300 text-red-900',
-        badgeClass: 'bg-red-600 text-white'
-      },
-      procs: {
-        p1: { status: '仍占用 [0..128K] (阻塞P2合并)', badgeClass: 'bg-blue-600 text-white font-bold animate-pulse' },
-        p2: { status: '已回收释放', badgeClass: 'bg-stone-200 text-stone-700 font-bold' },
-        p3: { status: '已在内存运行', badgeClass: 'bg-purple-600 text-white font-bold' }
-      },
-      memoryBlocks: [
-        {
-          start: 0, size: 128, status: 'allocated',
-          proc: { pid: 'P1', reqSize: 70, color: 'p1', fragSize: 58 },
-          label: 'P1 (运行中·阻碍合并)'
-        },
-        { start: 128, size: 128, status: 'free', proc: null, label: '128 KB 空闲' },
-        { start: 256, size: 256, status: 'new_buddy', proc: null, label: '256 KB (P2回收 ➔ 伙伴被占 ➔ 移入256K链表)' },
-        {
-          start: 512, size: 256, status: 'allocated',
-          proc: { pid: 'P3', reqSize: 190, color: 'p3', fragSize: 66 },
-          label: 'P3 (190K / 256K)'
-        },
-        { start: 768, size: 256, status: 'free', proc: null, label: '256 KB 空闲伙伴' }
-      ],
-      freeLists: {
-        1024: [],
-        512: [],
-        256: [
-          { start: 256, size: 256, isNew: true },
-          { start: 768, size: 256 }
-        ],
-        128: [{ start: 128, size: 128 }],
-        64: []
-      },
-      treeNodes: [
-        { id: '1024_0', label: '1024K [0..1024K]', status: 'split', level: 0, x: 380, y: 25 },
-        { id: '512_0', label: '512K [0..512K]', status: 'split', level: 1, x: 200, y: 70 },
-        { id: '512_1', label: '512K [512..1024K]', status: 'split', level: 1, x: 560, y: 70 },
-        { id: '256_0', label: '256K [0..256K] (P1占用中)', status: 'split', level: 2, x: 110, y: 115 },
-        { id: '256_1', label: '256K [256..512K] (P2释放)', status: 'free', level: 2, x: 290, y: 115 },
-        { id: '256_2', label: 'P3: 256K (190K实占)', status: 'p3', level: 2, x: 470, y: 115 },
-        { id: '256_3', label: '256K [768..1024K]', status: 'free', level: 2, x: 650, y: 115 },
-        { id: '128_0', label: 'P1: 128K (70K实占)', status: 'p1', level: 3, x: 60, y: 160 },
-        { id: '128_1', label: '128K [128..256K]', status: 'free', level: 3, x: 160, y: 160 }
-      ],
-      treeEdges: [
-        { from: '1024_0', to: '512_0' },
-        { from: '1024_0', to: '512_1' },
-        { from: '512_0', to: '256_0' },
-        { from: '512_0', to: '256_1' },
-        { from: '512_1', to: '256_2' },
-        { from: '512_1', to: '256_3' },
-        { from: '256_0', to: '128_0' },
-        { from: '256_0', to: '128_1' }
-      ],
-      motion: {
-        type: 'recycle_blocked_coalesce',
-        procId: 'p2',
-        fromBlock: 'block-256-512',
-        busyBuddyBlock: 'block-0-128',
-        toList: 'list-row-256',
-        buddyText: '回收块 [256..512K] (伙伴被占 ➔ 链接入 256KB 链表)'
-      }
-    },
-
-    {
-      id: 7,
-      badge: 'STEP 7 / 7',
-      actionTag: '全景稳定状态',
-      actionDesc: '各空闲伙伴块已平滑归位各自链表：256K 链表维护两个空闲块，128K 链表维护一个空闲块。',
-      banner: {
-        icon: '🏁',
-        main: '全流程演示完毕：内存占用稳定，伙伴链表维护全部空闲块',
-        sub: '256K 链表链接两个空闲块 [256..512K] 与 [768..1024K]，128K 链表链接 [128..256K]',
-        badgeText: '稳定状态',
-        styleClass: 'bg-stone-50 border-stone-300 text-stone-800',
-        badgeClass: 'bg-stone-800 text-white'
-      },
-      procs: {
-        p1: { status: '运行中 (70K/128K)', badgeClass: 'bg-blue-600 text-white font-bold' },
-        p2: { status: '已回收释放', badgeClass: 'bg-stone-200 text-stone-700 font-bold' },
-        p3: { status: '运行中 (190K/256K)', badgeClass: 'bg-purple-600 text-white font-bold' }
-      },
-      memoryBlocks: [
-        {
-          start: 0, size: 128, status: 'allocated',
-          proc: { pid: 'P1', reqSize: 70, color: 'p1', fragSize: 58 },
-          label: 'P1 (70K / 128K)'
-        },
-        { start: 128, size: 128, status: 'free', proc: null, label: '128 KB 空闲伙伴' },
-        { start: 256, size: 256, status: 'free', proc: null, label: '256 KB 空闲伙伴' },
-        {
-          start: 512, size: 256, status: 'allocated',
-          proc: { pid: 'P3', reqSize: 190, color: 'p3', fragSize: 66 },
-          label: 'P3 (190K / 256K)'
-        },
-        { start: 768, size: 256, status: 'free', proc: null, label: '256 KB 空闲伙伴' }
-      ],
-      freeLists: {
-        1024: [],
-        512: [],
-        256: [
-          { start: 256, size: 256 },
-          { start: 768, size: 256 }
-        ],
-        128: [{ start: 128, size: 128 }],
-        64: []
-      },
-      treeNodes: [
-        { id: '1024_0', label: '1024K [0..1024K]', status: 'split', level: 0, x: 380, y: 25 },
-        { id: '512_0', label: '512K [0..512K]', status: 'split', level: 1, x: 200, y: 70 },
-        { id: '512_1', label: '512K [512..1024K]', status: 'split', level: 1, x: 560, y: 70 },
-        { id: '256_0', label: '256K [0..256K]', status: 'split', level: 2, x: 110, y: 115 },
-        { id: '256_1', label: '256K [256..512K] (空闲)', status: 'free', level: 2, x: 290, y: 115 },
-        { id: '256_2', label: 'P3: 256K (190K实占)', status: 'p3', level: 2, x: 470, y: 115 },
-        { id: '256_3', label: '256K [768..1024K]', status: 'free', level: 2, x: 650, y: 115 },
-        { id: '128_0', label: 'P1: 128K (70K实占)', status: 'p1', level: 3, x: 60, y: 160 },
-        { id: '128_1', label: '128K [128..256K]', status: 'free', level: 3, x: 160, y: 160 }
-      ],
-      treeEdges: [
-        { from: '1024_0', to: '512_0' },
-        { from: '1024_0', to: '512_1' },
-        { from: '512_0', to: '256_0' },
-        { from: '512_0', to: '256_1' },
-        { from: '512_1', to: '256_2' },
-        { from: '512_1', to: '256_3' },
-        { from: '256_0', to: '128_0' },
-        { from: '256_0', to: '128_1' }
-      ],
-      motion: null
-    }
-  ];
-
-  // 运行控制器
-  let currentStepIndex = 0;
-  let isPlaying = false;
-  let playTimer = null;
-  let playSpeed = 1.0;
-
-  // DOM 元素引用
-  const dom = {
-    memBar: document.getElementById('memory-bar'),
-    freeListsContainer: document.getElementById('free-lists-container'),
-    buddyTreeSvg: document.getElementById('buddy-tree-svg'),
-    stepBadge: document.getElementById('step-badge'),
-    currentActionTag: document.getElementById('current-action-tag'),
-    actionDesc: document.getElementById('action-desc'),
-    splitAlert: document.getElementById('split-alert'),
-    splitAlertText: document.getElementById('split-alert-text'),
-    splitAlertTag: document.getElementById('split-alert-tag'),
-    timelineContainer: document.getElementById('step-timeline-container'),
-
-    // 上方核心决策看板
-    decisionBanner: document.getElementById('decision-banner'),
-    decisionIcon: document.getElementById('decision-icon'),
-    decisionMainText: document.getElementById('decision-main-text'),
-    decisionSubText: document.getElementById('decision-sub-text'),
-    decisionBadge: document.getElementById('decision-badge'),
-
-    // 进程卡状态
-    p1Status: document.getElementById('p1-status'),
-    p2Status: document.getElementById('p2-status'),
-    p3Status: document.getElementById('p3-status'),
-    procCardP1: document.getElementById('proc-card-p1'),
-    procCardP2: document.getElementById('proc-card-p2'),
-    procCardP3: document.getElementById('proc-card-p3'),
-
-    // 控制按钮
-    btnPlay: document.getElementById('btn-play'),
-    playIcon: document.getElementById('play-icon'),
-    playText: document.getElementById('play-text'),
-    btnPrev: document.getElementById('btn-prev'),
-    btnNext: document.getElementById('btn-next'),
-    btnReset: document.getElementById('btn-reset'),
-
-    // 速度按钮
-    speed05: document.getElementById('speed-05'),
-    speed10: document.getElementById('speed-10'),
-    speed15: document.getElementById('speed-15')
+  const S = {
+    run: null,
+    i: 0,            // 已完成的步数；p > 0 时表示第 i 步正在进行
+    p: 0,            // 当前步内进度 0–1
+    playing: false,
+    speed: 1,
+    reduce: Boolean(reduceQuery && reduceQuery.matches)
   };
 
-  // =========================================================================
-  // 核心渲染逻辑 (Render Step)
-  // =========================================================================
+  let tween = null;        // GSAP 补间（一步一个），暂停时保留以便续播
+  let dwellTimer = null;   // 减少动效下的停留计时器
+  let cards = [];          // 进程卡的文字元素
+  let rows = [];           // 链表行：高亮框与 NULL 字样
+  let phaseBtns = [];
 
-  function renderStep(index, animate = true) {
-    if (index < 0) index = 0;
-    if (index >= STEPS.length) index = STEPS.length - 1;
-    currentStepIndex = index;
+  // 按键保存元素：每帧只更新本帧用到的元素，其余隐藏
+  const pools = {
+    bar: new Map(), node: new Map(), arrow: new Map(), edge: new Map(), tree: new Map(),
+    ring: new Map(), flight: new Map(), tag: new Map(), xor: new Map()
+  };
 
-    const step = STEPS[index];
+  // ---------- 工具 ----------
 
-    // 更新标签与指示
-    dom.stepBadge.textContent = step.badge;
-    dom.currentActionTag.textContent = step.actionTag;
-    dom.actionDesc.textContent = step.actionDesc;
+  const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+  const fmt = (v) => String(Math.round(v * 1000) / 1000);
+  const setText = (el, t) => { if (el.textContent !== t) el.textContent = t; };
+  const setAttr = (el, name, v) => {
+    const s = typeof v === 'number' ? fmt(v) : String(v);
+    if (el.getAttribute(name) !== s) el.setAttribute(name, s);
+  };
+  const applyText = (el, tv) => {
+    setText(el, tv.text);
+    el.style.opacity = fmt(tv.alpha);
+  };
 
-    // 更新上方核心决策提示横幅
-    if (step.banner) {
-      dom.decisionIcon.textContent = step.banner.icon;
-      dom.decisionMainText.textContent = step.banner.main;
-      dom.decisionSubText.textContent = step.banner.sub;
-      dom.decisionBadge.textContent = step.banner.badgeText;
-      dom.decisionBanner.className = `mb-3 py-2.5 px-4 rounded-xl border font-mono transition-all flex items-center justify-between shadow-xs ${step.banner.styleClass}`;
-      dom.decisionBadge.className = `px-2.5 py-1 rounded-lg text-[11px] font-bold flex-shrink-0 ml-3 ${step.banner.badgeClass}`;
+  function svgEl(tag, attrs, parent) {
+    const el = document.createElementNS(SVG_NS, tag);
+    Object.keys(attrs || {}).forEach((k) => el.setAttribute(k, attrs[k]));
+    if (parent) parent.appendChild(el);
+    return el;
+  }
 
-      // 若有 GSAP，横幅轻微弹入
-      if (animate && window.gsap) {
-        gsap.fromTo(dom.decisionBanner, { y: -4, opacity: 0.8 }, { y: 0, opacity: 1, duration: 0.35, ease: 'power2.out' });
-      }
+  // 取得（或创建）按键对应的元素，并标记为本帧使用
+  function pooled(name, layer, key, make) {
+    const pool = pools[name];
+    let el = pool.get(key);
+    if (!el) {
+      el = make(layer);
+      pool.set(key, el);
     }
+    el.hit = true;
+    el.g.style.display = '';
+    return el;
+  }
 
-    if (step.splitAlert) {
-      dom.splitAlertText.textContent = step.splitAlert.text;
-      dom.splitAlertTag.textContent = step.splitAlert.tag;
-      dom.splitAlert.classList.remove('opacity-0');
-      dom.splitAlert.classList.add('opacity-100');
+  // 本帧没用到的元素隐藏；hit 标记在每帧结束时清零
+  function sweep() {
+    Object.keys(pools).forEach((name) => {
+      pools[name].forEach((el) => {
+        if (el.hit) {
+          el.hit = false;
+        } else {
+          el.g.style.display = 'none';
+        }
+      });
+    });
+  }
+
+  function rectTo(el, r, opacity) {
+    setAttr(el, 'x', r.x);
+    setAttr(el, 'y', r.y);
+    setAttr(el, 'width', r.w);
+    setAttr(el, 'height', r.h);
+    if (opacity !== undefined) setAttr(el, 'opacity', opacity);
+  }
+
+  function labelTo(el, label) {
+    setText(el, label.text);
+    setAttr(el, 'x', label.x);
+    setAttr(el, 'y', label.y);
+    setAttr(el, 'fill', label.fill);
+    setAttr(el, 'opacity', label.alpha);
+  }
+
+  // ---------- 舞台：静态部分（刻度、链表行、标题、进程卡） ----------
+
+  function buildStatic() {
+    const total = S.run.total;
+    const g = els.gStatic;
+
+    svgEl('text', { class: 'axis-title', x: BAR.x, y: 232 }, g).textContent = `物理内存 · ${total} KB（按地址）`;
+    [0, 128, 256, 512, 768, 1024].forEach((addr) => {
+      const anchor = addr === 0 ? 'start' : addr === total ? 'end' : 'middle';
+      svgEl('text', { class: 'ruler', x: C.xOf(addr, total), y: 214, 'text-anchor': anchor }, g).textContent = `${addr}K`;
+    });
+    svgEl('text', { class: 'list-head', x: LIST.x, y: LIST.headY }, g).textContent = '空闲伙伴链表（按阶）';
+    svgEl('text', { class: 'list-head', x: 600, y: C.TREE_HEAD_Y }, g).textContent = '伙伴二叉树（分裂层次）';
+
+    rows = [];
+    for (let i = 0; i < 5; i++) {
+      const size = total >> i;
+      const y = LIST.top + i * LIST.pitch;
+      svgEl('rect', { class: 'row-bg', x: LIST.x, y, width: LIST.w, height: LIST.h, rx: 8 }, g);
+      const hi = svgEl('rect', { class: 'row-hi', x: LIST.x, y, width: LIST.w, height: LIST.h, rx: 8, opacity: 0, stroke: BLUE }, g);
+      svgEl('text', { class: 'row-size', x: LIST.x + 12, y: y + LIST.h / 2 + 4 }, g).textContent = `${size}K`;
+      svgEl('text', { class: 'row-pow', x: LIST.x + 74, y: y + LIST.h / 2 + 4 }, g).textContent = `2^${Math.round(Math.log2(size))}`;
+      const nul = svgEl('text', { class: 'row-null', x: LIST.x0, y: y + LIST.h / 2 + 4 }, g);
+      nul.textContent = 'NULL（空链）';
+      rows.push({ hi, nul });
+    }
+  }
+
+  function buildCards() {
+    const seen = [];
+    S.run.ops.forEach((o) => { if (o.op === 'alloc' && !seen.includes(o.pid)) seen.push(o.pid); });
+    cards = seen.slice(0, CARD.xs.length).map((pid, idx) => {
+      const x = CARD.xs[idx];
+      const req = S.run.ops.find((o) => o.op === 'alloc' && o.pid === pid).size;
+      const g = svgEl('g', { class: 'card' }, els.gCards);
+      svgEl('rect', { class: 'card-body', x, y: CARD.y, width: CARD.w, height: CARD.h, rx: 12 }, g);
+      svgEl('rect', { class: 'card-stripe', x: x + 1, y: CARD.y + 12, width: 5, height: CARD.h - 24, rx: 2.5, fill: C.pidColor(pid).deep }, g);
+      svgEl('text', { class: 'card-title', x: x + 18, y: CARD.y + 24 }, g).textContent = `${pid} 申请 ${req}K`;
+      const sub = svgEl('text', { class: 'card-sub', x: x + 18, y: CARD.y + 44 }, g);
+      const extra = svgEl('text', { class: 'card-extra', x: x + 18, y: CARD.y + 62 }, g);
+      return { pid, sub, extra };
+    });
+  }
+
+  function buildPhaseNav() {
+    const run = S.run;
+    phaseBtns = run.ops.map((o, j) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'seg-btn';
+      b.textContent = `${o.op === 'alloc' ? '分配' : '释放'} ${o.pid}`;
+      b.addEventListener('click', () => onPhase(j));
+      return b;
+    });
+    els.phaseNav.replaceChildren(...phaseBtns);
+  }
+
+  // ---------- 舞台：动态元素 ----------
+
+  function makeBlock(layer) {
+    const g = svgEl('g', { class: 'blk' }, layer);
+    const base = svgEl('rect', { class: 'blk-base', rx: 6 }, g);
+    const used = svgEl('rect', { class: 'blk-used' }, g);
+    const frag = svgEl('rect', { class: 'blk-frag', fill: 'url(#frag-hatch)' }, g);
+    const label = svgEl('text', { class: 'blk-label', 'text-anchor': 'middle' }, g);
+    const fragLabel = svgEl('text', { class: 'blk-frag-label', 'text-anchor': 'middle' }, g);
+    return { g, base, used, frag, label, fragLabel };
+  }
+
+  function paintBlock(el, it) {
+    setAttr(el.g, 'opacity', it.alpha);
+    rectTo(el.base, it);
+    setAttr(el.base, 'fill', it.fill);
+    setAttr(el.base, 'stroke', it.stroke);
+    setAttr(el.base, 'stroke-dasharray', it.dash ? '5 4' : 'none');
+    if (it.used) {
+      rectTo(el.used, { ...it.used, y: it.y, h: it.h }, it.used.alpha);
+      setAttr(el.used, 'fill', it.used.fill);
     } else {
-      dom.splitAlert.classList.remove('opacity-100');
-      dom.splitAlert.classList.add('opacity-0');
+      setAttr(el.used, 'opacity', 0);
     }
-
-    // 更新左侧进程卡片状态
-    updateProcessCards(step.procs);
-
-    // 渲染主存物理条
-    renderMemoryBar(step.memoryBlocks);
-
-    // 渲染伙伴树 SVG
-    renderBuddyTree(step.treeNodes, step.treeEdges);
-
-    // 渲染空闲双向链表
-    renderFreeLists(step.freeLists, animate);
-
-    // 更新时间线节点
-    updateTimelineNav(index);
-
-    // 按钮禁用状态
-    dom.btnPrev.disabled = (index === 0);
-    dom.btnNext.disabled = (index === STEPS.length - 1);
-
-    // 触发平滑位移动画
-    if (animate && step.motion) {
-      runStepMotion(step.motion);
+    if (it.frag) {
+      rectTo(el.frag, { x: it.frag.x, y: it.y, w: it.frag.w, h: it.h }, it.frag.alpha);
+    } else {
+      setAttr(el.frag, 'opacity', 0);
+    }
+    labelTo(el.label, it.label);
+    if (it.fragLabel) {
+      labelTo(el.fragLabel, { ...it.fragLabel, fill: INK2 });
+    } else {
+      setAttr(el.fragLabel, 'opacity', 0);
     }
   }
 
-  // =========================================================================
-  // 渲染主存连续条
-  // =========================================================================
+  function makeNode(layer) {
+    const g = svgEl('g', { class: 'node' }, layer);
+    const rect = svgEl('rect', { class: 'node-rect', rx: 6, fill: '#FFFFFF', stroke: '#8A9089' }, g);
+    const text = svgEl('text', { class: 'node-text', 'text-anchor': 'middle' }, g);
+    return { g, rect, text };
+  }
 
-  function renderMemoryBar(blocks) {
-    dom.memBar.innerHTML = '';
+  function paintNode(el, nd) {
+    setAttr(el.g, 'opacity', nd.alpha);
+    rectTo(el.rect, nd);
+    setText(el.text, nd.label);
+    setAttr(el.text, 'x', nd.x + nd.w / 2);
+    setAttr(el.text, 'y', nd.y + nd.h / 2 + 4);
+  }
 
-    blocks.forEach((block) => {
-      const widthPct = (block.size / TOTAL_MEMORY) * 100;
-      const blockEl = document.createElement('div');
-      blockEl.className = 'mem-block h-full relative flex items-center justify-center border-r border-stone-300 overflow-hidden';
-      blockEl.style.width = `${widthPct}%`;
-      blockEl.id = `block-${block.start}-${block.start + block.size}`;
+  function makeLine(layer) {
+    const g = svgEl('g', { class: 'arrow' }, layer);
+    const line = svgEl('line', { x1: 0, y1: 0, x2: 0, y2: 0 }, g);
+    return { g, line };
+  }
 
-      if (block.status === 'allocated' && block.proc) {
-        const proc = block.proc;
-        let bgClass = 'bg-blue-50';
-        let borderClass = 'border-blue-500';
-        let badgeBg = 'bg-blue-600 text-white';
+  function makeEdge(layer) {
+    const g = svgEl('g', { class: 'tree-edge' }, layer);
+    const line = svgEl('line', {}, g);
+    return { g, line };
+  }
 
-        if (proc.color === 'p2') {
-          bgClass = 'bg-emerald-50';
-          borderClass = 'border-emerald-500';
-          badgeBg = 'bg-emerald-600 text-white';
-        } else if (proc.color === 'p3') {
-          bgClass = 'bg-purple-50';
-          borderClass = 'border-purple-500';
-          badgeBg = 'bg-purple-600 text-white';
-        }
+  function paintEdge(el, e) {
+    setAttr(el.g, 'opacity', e.alpha);
+    setAttr(el.line, 'x1', e.x1);
+    setAttr(el.line, 'y1', e.y1);
+    setAttr(el.line, 'x2', e.x2);
+    setAttr(el.line, 'y2', e.y2);
+  }
 
-        blockEl.className += ` ${bgClass} border-2 ${borderClass}`;
+  function makeTreeNode(layer) {
+    const g = svgEl('g', { class: 'tree-node' }, layer);
+    const layersEl = [0, 1].map(() => {
+      const rect = svgEl('rect', { class: 'tree-rect', rx: 6 }, g);
+      const text = svgEl('text', { class: 'tree-text', 'text-anchor': 'middle' }, g);
+      return { rect, text };
+    });
+    return { g, layersEl };
+  }
 
-        const usedPct = (proc.reqSize / block.size) * 100;
-        const fragPct = 100 - usedPct;
-
-        let innerContent = `
-          <div class="h-full flex w-full relative">
-            <div style="width: ${usedPct}%;" class="h-full flex flex-col items-center justify-center p-1 relative z-10">
-              <span class="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold ${badgeBg}">
-                ${proc.pid}
-              </span>
-              <span class="font-mono text-[10.5px] text-stone-800 font-bold mt-0.5 whitespace-nowrap">
-                ${proc.reqSize} KB
-              </span>
-              <span class="font-mono text-[9px] text-stone-500">已占用</span>
-            </div>
-        `;
-
-        if (fragPct > 0.01) {
-          innerContent += `
-            <div style="width: ${fragPct}%;" class="h-full pattern-fragment border-l border-dashed border-red-300 flex flex-col items-center justify-center p-1 relative z-10">
-              <span class="font-mono text-[9.5px] text-red-600 font-bold whitespace-nowrap">
-                内部碎片 ${proc.fragSize}K
-              </span>
-              <span class="font-mono text-[8.5px] text-red-400 font-semibold">
-                (${Math.round(fragPct)}%)
-              </span>
-            </div>
-          `;
-        }
-
-        innerContent += `</div>
-          <span class="absolute bottom-0.5 left-1 font-mono text-[8.5px] text-stone-400">
-            [${block.start}K~${block.start + block.size}K]
-          </span>
-        `;
-        blockEl.innerHTML = innerContent;
-
-      } else if (block.status === 'splitting') {
-        blockEl.className += ' bg-amber-50 highlight-split';
-        blockEl.innerHTML = `
-          <div class="flex flex-col items-center justify-center p-1 text-center">
-            <span class="px-1.5 py-0.5 rounded text-[9px] font-mono font-bold bg-amber-600 text-white animate-pulse">
-              折半划分中...
-            </span>
-            <span class="font-mono text-[10px] text-amber-900 font-bold mt-0.5">${block.size} KB</span>
-            <span class="font-mono text-[8.5px] text-amber-600">[${block.start}K~${block.start + block.size}K]</span>
-          </div>
-        `;
-      } else if (block.status === 'new_buddy') {
-        blockEl.className += ' highlight-buddy';
-        blockEl.innerHTML = `
-          <div class="flex flex-col items-center justify-center p-1 text-center">
-            <span class="px-1.5 py-0.5 rounded text-[9px] font-mono font-bold bg-orange-600 text-white">
-              ★ 产生新伙伴块
-            </span>
-            <span class="font-mono text-[10.5px] text-orange-800 font-bold mt-0.5">
-              ${block.size} KB
-            </span>
-            <span class="font-mono text-[8.5px] text-orange-600">
-              [${block.start}K~${block.start + block.size}K]
-            </span>
-          </div>
-        `;
-      } else {
-        blockEl.className += ' bg-[#FAFAF9]';
-        blockEl.innerHTML = `
-          <div class="flex flex-col items-center justify-center p-1 text-center">
-            <span class="font-mono text-[11px] text-stone-600 font-semibold">
-              ${block.size} KB 空闲
-            </span>
-            <span class="font-mono text-[9px] text-stone-400">
-              [${block.start}K ~ ${block.start + block.size}K]
-            </span>
-          </div>
-        `;
+  function paintTreeNode(el, n) {
+    el.layersEl.forEach((ly, k) => {
+      const L = n.layers[k];
+      if (!L) {
+        setAttr(ly.rect, 'opacity', 0);
+        setAttr(ly.text, 'opacity', 0);
+        return;
       }
-
-      dom.memBar.appendChild(blockEl);
+      rectTo(ly.rect, n, L.alpha);
+      setAttr(ly.rect, 'fill', L.fill);
+      setAttr(ly.rect, 'stroke', L.stroke);
+      setAttr(ly.rect, 'stroke-dasharray', L.dash ? '4 3' : 'none');
+      setText(ly.text, n.label);
+      setAttr(ly.text, 'x', n.x + n.w / 2);
+      setAttr(ly.text, 'y', n.y + n.h / 2 + 4);
+      setAttr(ly.text, 'fill', L.text);
+      setAttr(ly.text, 'opacity', L.alpha);
     });
   }
 
-  // =========================================================================
-  // 渲染伙伴块空闲双向链表数组 (平滑移动与链接)
-  // =========================================================================
-
-  function renderFreeLists(freeLists, animate = false) {
-    dom.freeListsContainer.innerHTML = '';
-
-    const listSizes = [1024, 512, 256, 128, 64];
-
-    listSizes.forEach((size) => {
-      const blocks = freeLists[size] || [];
-      const row = document.createElement('div');
-      row.className = 'list-row flex items-center gap-2 p-2 rounded-xl border border-stone-200 bg-[#FAF9F5]';
-      row.id = `list-row-${size}`;
-
-      // 链表头
-      const headBadge = document.createElement('div');
-      headBadge.className = 'w-28 flex-shrink-0 flex items-center justify-between px-2.5 py-1.5 rounded-lg bg-white border border-stone-300 font-mono text-xs shadow-xs';
-      headBadge.innerHTML = `
-        <span class="font-bold text-stone-800">${size} KB</span>
-        <span class="text-[10px] text-stone-400 font-semibold">2^${Math.log2(size)}</span>
-      `;
-      row.appendChild(headBadge);
-
-      // 节点链容器
-      const nodesContainer = document.createElement('div');
-      nodesContainer.className = 'flex-1 flex items-center gap-2 overflow-x-auto py-0.5';
-
-      // Head ➔
-      const headArrow = document.createElement('span');
-      headArrow.className = 'pointer-arrow font-mono text-stone-400 text-xs flex-shrink-0';
-      headArrow.innerHTML = '&rarr;';
-      nodesContainer.appendChild(headArrow);
-
-      if (blocks.length === 0) {
-        const nullNode = document.createElement('span');
-        nullNode.className = 'px-2 py-0.5 rounded text-[10.5px] font-mono text-stone-400 italic bg-stone-100/70 border border-dashed border-stone-200 flex-shrink-0';
-        nullNode.textContent = 'NULL (空链)';
-        nodesContainer.appendChild(nullNode);
-      } else {
-        blocks.forEach((node) => {
-          const nodeEl = document.createElement('div');
-          const isNewClass = node.isNew ? 'node-new bg-orange-50 border-orange-400' : 'bg-white border-stone-300';
-
-          nodeEl.className = `list-node flex-shrink-0 px-2.5 py-1.5 rounded-lg border shadow-xs font-mono text-xs flex items-center gap-2 ${isNewClass}`;
-          nodeEl.id = `freenode-${size}-${node.start}`;
-
-          nodeEl.innerHTML = `
-            <div class="flex flex-col">
-              <span class="font-bold text-stone-800 text-[11px] flex items-center gap-1">
-                ${node.isNew ? '<span class="w-1.5 h-1.5 rounded-full bg-orange-500 animate-pulse"></span>' : ''}
-                基址: ${node.start} KB
-              </span>
-              <span class="text-[9.5px] text-stone-500">区间 [${node.start}..${node.start + node.size}K]</span>
-            </div>
-            <div class="border-l border-stone-200 pl-1.5 flex flex-col text-[8.5px] text-stone-400 leading-tight">
-              <span>prev</span>
-              <span>next</span>
-            </div>
-          `;
-
-          nodesContainer.appendChild(nodeEl);
-
-          // 连线箭头
-          const nextArrow = document.createElement('span');
-          nextArrow.className = 'pointer-arrow font-mono text-stone-400 text-xs flex-shrink-0';
-          nextArrow.innerHTML = '&rarr;';
-          nodesContainer.appendChild(nextArrow);
-
-          // 新入链节点的平滑滑入动效
-          if (animate && node.isNew && window.gsap) {
-            gsap.fromTo(nodeEl,
-              { opacity: 0, x: -28, scale: 0.85 },
-              { opacity: 1, x: 0, scale: 1, duration: 0.65 / playSpeed, ease: 'power2.out' }
-            );
-          }
-        });
-
-        const nullTail = document.createElement('span');
-        nullTail.className = 'font-mono text-[10px] text-stone-400 font-semibold flex-shrink-0';
-        nullTail.textContent = 'NULL';
-        nodesContainer.appendChild(nullTail);
-      }
-
-      row.appendChild(nodesContainer);
-      dom.freeListsContainer.appendChild(row);
-    });
+  function makeRing(layer) {
+    const rect = svgEl('rect', { class: 'ring', rx: 10, fill: 'none', 'stroke-width': 2 }, layer);
+    return { g: rect };
   }
 
-  // =========================================================================
-  // 渲染二叉树 SVG
-  // =========================================================================
-
-  function renderBuddyTree(nodes, edges) {
-    dom.buddyTreeSvg.innerHTML = '';
-
-    edges.forEach((edge) => {
-      const fromNode = nodes.find(n => n.id === edge.from);
-      const toNode = nodes.find(n => n.id === edge.to);
-      if (!fromNode || !toNode) return;
-
-      const line = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-      const d = `M ${fromNode.x} ${fromNode.y + 11} L ${toNode.x} ${toNode.y - 11}`;
-      line.setAttribute('d', d);
-      line.setAttribute('stroke', '#CBD5E1');
-      line.setAttribute('stroke-width', '1.5');
-      line.setAttribute('stroke-dasharray', '3 2');
-      dom.buddyTreeSvg.appendChild(line);
-    });
-
-    nodes.forEach((n) => {
-      const group = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-      group.setAttribute('transform', `translate(${n.x}, ${n.y})`);
-
-      let rectFill = '#FFFFFF';
-      let rectStroke = '#94A3B8';
-      let textColor = '#1E293B';
-
-      if (n.status === 'split') {
-        rectFill = '#F1F5F9';
-        rectStroke = '#CBD5E1';
-        textColor = '#64748B';
-      } else if (n.status === 'p1') {
-        rectFill = '#EFF6FF';
-        rectStroke = '#3B82F6';
-        textColor = '#1D4ED8';
-      } else if (n.status === 'p2') {
-        rectFill = '#ECFDF5';
-        rectStroke = '#10B981';
-        textColor = '#047857';
-      } else if (n.status === 'p3') {
-        rectFill = '#F5F3FF';
-        rectStroke = '#8B5CF6';
-        textColor = '#6D28D9';
-      } else if (n.status === 'free') {
-        rectFill = '#FFFFFF';
-        rectStroke = '#64748B';
-        textColor = '#334155';
-      }
-
-      const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-      const textWidth = Math.max(90, n.label.length * 7.2);
-      rect.setAttribute('x', -textWidth / 2);
-      rect.setAttribute('y', -11);
-      rect.setAttribute('width', textWidth);
-      rect.setAttribute('height', 22);
-      rect.setAttribute('rx', '5');
-      rect.setAttribute('fill', rectFill);
-      rect.setAttribute('stroke', rectStroke);
-      rect.setAttribute('stroke-width', '1.2');
-      group.appendChild(rect);
-
-      const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-      text.setAttribute('text-anchor', 'middle');
-      text.setAttribute('dy', '3.5');
-      text.setAttribute('font-family', 'JetBrains Mono, monospace');
-      text.setAttribute('font-size', '9.5');
-      text.setAttribute('font-weight', '600');
-      text.setAttribute('fill', textColor);
-      text.textContent = n.label;
-      group.appendChild(text);
-
-      dom.buddyTreeSvg.appendChild(group);
-    });
+  function paintRing(el, r) {
+    rectTo(el.g, r, r.alpha);
+    setAttr(el.g, 'stroke', r.tone === 'warn' ? RED : BLUE);
   }
 
-  // =========================================================================
-  // 核心动效引擎：平滑移动与链接动效 (Smooth Motion Engine)
-  // =========================================================================
+  function makeFlight(layer) {
+    const g = svgEl('g', { class: 'flight' }, layer);
+    const rect = svgEl('rect', { rx: 8, 'stroke-width': 1.4 }, g);
+    const text = svgEl('text', { class: 'flight-text', 'text-anchor': 'middle' }, g);
+    return { g, rect, text };
+  }
 
-  function runStepMotion(motion) {
-    if (!window.gsap || !motion) return;
+  function paintFlight(el, f) {
+    setAttr(el.g, 'opacity', f.alpha);
+    rectTo(el.rect, f);
+    const isProc = f.tone === 'proc';
+    const pid = f.text.split(' ')[0];
+    const pc = isProc ? C.pidColor(pid) : null;
+    setAttr(el.rect, 'fill', isProc ? pc.soft : '#FFFFFF');
+    setAttr(el.rect, 'stroke', isProc ? pc.deep : BLUE);
+    setText(el.text, f.text);
+    setAttr(el.text, 'x', f.x + f.w / 2);
+    setAttr(el.text, 'y', f.y + f.h / 2 + 4);
+    setAttr(el.text, 'fill', isProc ? pc.deep : '#1D4ED8');
+  }
 
-    const dur = 0.95 / playSpeed;
+  function makeTag(layer) {
+    const g = svgEl('g', { class: 'tag' }, layer);
+    const rect = svgEl('rect', { class: 'tag-bg', rx: 8 }, g);
+    const text = svgEl('text', { class: 'tag-text', 'text-anchor': 'middle' }, g);
+    return { g, rect, text };
+  }
 
-    // 0. 激光切分线指示 (Laser Divide Animation)
-    if (motion.splitLaserPct) {
-      const laser = document.createElement('div');
-      laser.className = 'split-laser-line';
-      laser.style.left = `${motion.splitLaserPct}%`;
-      dom.memBar.appendChild(laser);
+  function paintTag(el, t, cls) {
+    setAttr(el.g, 'opacity', t.alpha);
+    setAttr(el.g, 'class', `tag ${cls}`);
+    rectTo(el.rect, t);
+    setText(el.text, t.text);
+    setAttr(el.text, 'x', t.tx);
+    setAttr(el.text, 'y', t.ty);
+  }
 
-      gsap.to(laser, {
-        opacity: 0,
-        duration: 0.8 / playSpeed,
-        delay: 0.6 / playSpeed,
-        onComplete: () => {
-          if (laser.parentNode) laser.parentNode.removeChild(laser);
-        }
+  // ---------- 每一帧：把 scene 写进舞台 ----------
+
+  function paint(sc) {
+    sc.cards.forEach((c, k) => {
+      const el = cards[k];
+      if (!el) return;
+      applyText(el.sub, c.sub);
+      applyText(el.extra, c.extra);
+    });
+
+    sc.bar.forEach((it) => paintBlock(pooled('bar', els.gBar, it.key, makeBlock), it));
+
+    sc.lists.forEach((row, k) => {
+      setAttr(rows[k].hi, 'opacity', row.highlight);
+      setAttr(rows[k].nul, 'opacity', row.nullAlpha);
+      row.nodes.forEach((nd) => paintNode(pooled('node', els.gLists, nd.key, makeNode), nd));
+      row.arrows.forEach((a, j) => {
+        const el = pooled('arrow', els.gLists, `a:${row.size}:${j}`, makeLine);
+        setAttr(el.g, 'opacity', a.alpha);
+        setAttr(el.line, 'x1', a.x1);
+        setAttr(el.line, 'y1', row.mid);
+        setAttr(el.line, 'x2', a.x2);
+        setAttr(el.line, 'y2', row.mid);
       });
-    }
-
-    // 1. 进程平滑移入主存动画 (Left Card ➔ Memory Block)
-    if (motion.fromProc && motion.toBlock) {
-      const srcEl = document.getElementById(motion.fromProc);
-      const dstEl = document.getElementById(motion.toBlock);
-
-      if (srcEl && dstEl) {
-        const srcRect = srcEl.getBoundingClientRect();
-        const dstRect = dstEl.getBoundingClientRect();
-
-        let cardBg = '#EFF6FF';
-        let cardBorder = '#3B82F6';
-        let cardText = '#1D4ED8';
-        let procName = 'P1 (70 KB)';
-
-        if (motion.procId === 'p2') {
-          cardBg = '#ECFDF5';
-          cardBorder = '#10B981';
-          cardText = '#047857';
-          procName = 'P2 (256 KB 等额)';
-        } else if (motion.procId === 'p3') {
-          cardBg = '#F5F3FF';
-          cardBorder = '#8B5CF6';
-          cardText = '#6D28D9';
-          procName = 'P3 (190 KB)';
-        }
-
-        const flyingCard = document.createElement('div');
-        flyingCard.className = 'moving-process-card';
-        flyingCard.style.left = `${srcRect.left}px`;
-        flyingCard.style.top = `${srcRect.top}px`;
-        flyingCard.style.width = `${srcRect.width}px`;
-        flyingCard.style.height = `${srcRect.height}px`;
-        flyingCard.style.backgroundColor = cardBg;
-        flyingCard.style.borderColor = cardBorder;
-        flyingCard.style.color = cardText;
-        flyingCard.innerHTML = `
-          <span class="text-xs font-bold font-mono">✈ 正在移动并占用...</span>
-          <span class="text-sm font-extrabold font-mono mt-0.5">${procName}</span>
-        `;
-
-        document.body.appendChild(flyingCard);
-
-        gsap.fromTo(dstEl, { opacity: 0.35 }, { opacity: 1, duration: dur, ease: 'power2.out', delay: dur * 0.4 });
-
-        gsap.to(flyingCard, {
-          left: dstRect.left,
-          top: dstRect.top,
-          width: dstRect.width,
-          height: dstRect.height,
-          scale: 0.98,
-          duration: dur,
-          ease: 'power2.inOut',
-          onComplete: () => {
-            if (flyingCard.parentNode) {
-              flyingCard.parentNode.removeChild(flyingCard);
-            }
-            gsap.fromTo(dstEl, { scale: 0.96 }, { scale: 1, duration: 0.35, ease: 'back.out(2)' });
-          }
-        });
-      }
-    }
-
-    // 2. 伙伴块平滑移动入链表 (Memory Bar ➔ Free List)
-    if (motion.buddyFrom && motion.buddyToList) {
-      setTimeout(() => {
-        const bSrc = document.getElementById(motion.buddyFrom);
-        const bDst = document.getElementById(motion.buddyToList);
-
-        if (bSrc && bDst) {
-          const sRect = bSrc.getBoundingClientRect();
-          const dRect = bDst.getBoundingClientRect();
-
-          const flyingBuddy = document.createElement('div');
-          flyingBuddy.className = 'moving-buddy-block';
-          flyingBuddy.style.left = `${sRect.left}px`;
-          flyingBuddy.style.top = `${sRect.top}px`;
-          flyingBuddy.style.width = `${sRect.width}px`;
-          flyingBuddy.style.height = `${sRect.height}px`;
-          flyingBuddy.innerHTML = `
-            <span class="text-[11px] font-bold">★ 新伙伴块平滑移入链表</span>
-            <span class="text-xs font-extrabold mt-0.5">${motion.buddyText}</span>
-          `;
-
-          document.body.appendChild(flyingBuddy);
-
-          gsap.to(flyingBuddy, {
-            left: dRect.left + 140,
-            top: dRect.top + 4,
-            width: 170,
-            height: 40,
-            opacity: 0.95,
-            duration: dur,
-            ease: 'power2.inOut',
-            onComplete: () => {
-              if (flyingBuddy.parentNode) {
-                flyingBuddy.parentNode.removeChild(flyingBuddy);
-              }
-              // 高亮链表行，指示新节点链接完成
-              bDst.classList.add('bg-orange-50', 'border-orange-300');
-              setTimeout(() => {
-                bDst.classList.remove('bg-orange-50', 'border-orange-300');
-              }, 700);
-            }
-          });
-        }
-      }, 300 / playSpeed);
-    }
-
-    // 3. STEP 6: P2 回收，检测伙伴块被占用阻断合并，并平滑移动入 256K 链表
-    if (motion.type === 'recycle_blocked_coalesce') {
-      const busyBuddy = document.getElementById(motion.busyBuddyBlock);
-      const freedBlock = document.getElementById(motion.fromBlock);
-      const targetList = document.getElementById(motion.toList);
-
-      if (busyBuddy && freedBlock && targetList) {
-        busyBuddy.classList.add('highlight-busy-buddy');
-        const alertSpan = document.createElement('div');
-        alertSpan.className = 'absolute top-1 left-1/2 -translate-x-1/2 z-30 bg-red-600 text-white font-mono text-[9.5px] px-2 py-0.5 rounded shadow-lg font-bold whitespace-nowrap animate-bounce';
-        alertSpan.textContent = '⛔ 伙伴块仍被占用中！';
-        busyBuddy.appendChild(alertSpan);
-
-        setTimeout(() => {
-          busyBuddy.classList.remove('highlight-busy-buddy');
-          if (alertSpan.parentNode) alertSpan.parentNode.removeChild(alertSpan);
-
-          const fRect = freedBlock.getBoundingClientRect();
-          const tRect = targetList.getBoundingClientRect();
-
-          const ghostRecycle = document.createElement('div');
-          ghostRecycle.className = 'moving-buddy-block';
-          ghostRecycle.style.left = `${fRect.left}px`;
-          ghostRecycle.style.top = `${fRect.top}px`;
-          ghostRecycle.style.width = `${fRect.width}px`;
-          ghostRecycle.style.height = `${fRect.height}px`;
-          ghostRecycle.innerHTML = `
-            <span class="text-[10.5px] font-bold">无法合并 ➔ 移入空闲链表</span>
-            <span class="text-xs font-extrabold mt-0.5">[256..512K] 256 KB</span>
-          `;
-          document.body.appendChild(ghostRecycle);
-
-          gsap.to(ghostRecycle, {
-            left: tRect.left + 140,
-            top: tRect.top + 4,
-            width: 175,
-            height: 40,
-            duration: dur * 1.1,
-            ease: 'power2.inOut',
-            onComplete: () => {
-              if (ghostRecycle.parentNode) {
-                ghostRecycle.parentNode.removeChild(ghostRecycle);
-              }
-              targetList.classList.add('bg-orange-50', 'border-orange-300');
-              setTimeout(() => {
-                targetList.classList.remove('bg-orange-50', 'border-orange-300');
-              }, 700);
-            }
-          });
-
-        }, 1100 / playSpeed);
-      }
-    }
-  }
-
-  // =========================================================================
-  // 更新左侧进程卡状态
-  // =========================================================================
-
-  function updateProcessCards(procs) {
-    if (!procs) return;
-
-    if (procs.p1) {
-      dom.p1Status.textContent = procs.p1.status;
-      dom.p1Status.className = `px-2 py-0.5 rounded text-[10px] font-mono ${procs.p1.badgeClass}`;
-    }
-    if (procs.p2) {
-      dom.p2Status.textContent = procs.p2.status;
-      dom.p2Status.className = `px-2 py-0.5 rounded text-[10px] font-mono ${procs.p2.badgeClass}`;
-    }
-    if (procs.p3) {
-      dom.p3Status.textContent = procs.p3.status;
-      dom.p3Status.className = `px-2 py-0.5 rounded text-[10px] font-mono ${procs.p3.badgeClass}`;
-    }
-  }
-
-  // =========================================================================
-  // 顶部步骤导航条
-  // =========================================================================
-
-  function initTimelineNav() {
-    dom.timelineContainer.innerHTML = '';
-
-    STEPS.forEach((step, idx) => {
-      const btn = document.createElement('button');
-      btn.className = `timeline-step whitespace-nowrap`;
-      btn.id = `step-btn-${idx}`;
-      btn.innerHTML = `<span>${step.badge} ${step.actionTag}</span>`;
-
-      btn.addEventListener('click', () => {
-        pause();
-        renderStep(idx, true);
-      });
-
-      dom.timelineContainer.appendChild(btn);
     });
+
+    sc.tree.edges.forEach((e) => paintEdge(pooled('edge', els.gTree, e.key, makeEdge), e));
+    sc.tree.nodes.forEach((n) => paintTreeNode(pooled('tree', els.gTree, n.key, makeTreeNode), n));
+
+    sc.rings.forEach((r) => paintRing(pooled('ring', els.gFx, r.key, makeRing), r));
+    sc.flights.forEach((f) => paintFlight(pooled('flight', els.gFx, f.key, makeFlight), f));
+    sc.tags.forEach((t) => paintTag(pooled('tag', els.gFx, t.key, makeTag), t, `tone-${t.tone}`));
+    sc.xor.forEach((x) => paintTag(pooled('xor', els.gFx, x.key, makeTag), x, 'tone-note tag-formula'));
+
+    sweep();
   }
 
-  function updateTimelineNav(activeIdx) {
-    STEPS.forEach((step, idx) => {
-      const btn = document.getElementById(`step-btn-${idx}`);
-      if (!btn) return;
-      btn.classList.remove('active', 'passed');
-      if (idx === activeIdx) {
-        btn.classList.add('active');
-      } else if (idx < activeIdx) {
-        btn.classList.add('passed');
-      }
+  // ---------- 文字与控件 ----------
+
+  function paintTexts(sc) {
+    applyText(els.stepCount, sc.count);
+    applyText(els.phase, sc.phase);
+    applyText(els.reqLine, sc.req);
+    applyText(els.narr, sc.caption);
+    setText(els.scrubText, sc.count.text);
+  }
+
+  // 当前所在的操作：最后一个起点不晚于当前步的操作
+  function currentOp() {
+    const starts = S.run.opStart;
+    let j = 0;
+    starts.forEach((s, k) => { if (s <= S.i) j = k; });
+    return j;
+  }
+
+  function paintControls() {
+    const N = S.run.N;
+    const atStart = S.i === 0 && S.p === 0;
+    els.prev.disabled = N === 0 || atStart;
+    els.next.disabled = N === 0 || S.i >= N;
+    els.play.disabled = N === 0 || (!hasGsap && !S.reduce);
+    setText(els.playText, S.playing ? '❚❚ 暂停' : '▶ 播放');
+    els.lamp.classList.toggle('is-running', S.playing);
+    els.reduce.checked = S.reduce;
+    document.body.classList.toggle('is-reduced', S.reduce);
+    els.notice.hidden = hasGsap;
+    if (!hasGsap) {
+      setText(els.notice, S.reduce
+        ? '未能加载动画引擎（GSAP）。减少动效下仍可自动播放，每步直接跳转。'
+        : '未能加载动画引擎（GSAP），播放已停用。可开启「减少动效」后自动播放，或用单步浏览。');
+    }
+    const op = currentOp();
+    phaseBtns.forEach((b, j) => b.setAttribute('aria-pressed', String(j === op)));
+    document.querySelectorAll('[data-speed]').forEach((b) => {
+      b.setAttribute('aria-pressed', String(Number(b.dataset.speed) === S.speed));
     });
+    els.scrub.max = String(N);
+    if (document.activeElement !== els.scrub) els.scrub.value = String(S.i);
   }
 
-  // =========================================================================
-  // 控制器：自动演示、单步前进、后退、重置与调速
-  // =========================================================================
+  function render() {
+    if (!S.run) return;
+    const view = M.sampleAt(S.run, S.i, S.p);
+    const sc = C.scene(view, S.run);
+    paint(sc);
+    paintTexts(sc);
+    paintControls();
+  }
 
-  function play() {
-    if (isPlaying) return;
-    isPlaying = true;
-    dom.playIcon.textContent = '⏸';
-    dom.playText.textContent = '暂停';
-    dom.btnPlay.classList.remove('bg-stone-900');
-    dom.btnPlay.classList.add('bg-blue-600');
+  // ---------- 推演与导航 ----------
 
-    runPlayLoop();
+  function killTween() {
+    if (tween) {
+      tween.kill();
+      tween = null;
+    }
+  }
+
+  function clearDwell() {
+    if (dwellTimer) {
+      clearTimeout(dwellTimer);
+      dwellTimer = null;
+    }
+  }
+
+  // 跳到第 i 步的第 p 进度并停止播放；画面由 render 按这两个数重算
+  function goTo(i, p) {
+    killTween();
+    clearDwell();
+    S.i = clamp(Math.floor(Number(i)) || 0, 0, S.run.N);
+    S.p = p;
+    render();
   }
 
   function pause() {
-    isPlaying = false;
-    if (playTimer) {
-      clearTimeout(playTimer);
-      playTimer = null;
+    S.playing = false;
+    if (tween) {
+      tween.pause();
+    } else if (dwellTimer) {
+      // 减少动效的停留中暂停：视为本步已做完，下次从下一步开始
+      clearDwell();
+      S.i += 1;
+      S.p = 0;
     }
-    dom.playIcon.textContent = '▶';
-    dom.playText.textContent = '自动连续演示';
-    dom.btnPlay.classList.remove('bg-blue-600');
-    dom.btnPlay.classList.add('bg-stone-900');
+    render();
+  }
+
+  function play() {
+    if (!S.run || S.run.N === 0 || (!hasGsap && !S.reduce)) return;
+    if (S.i >= S.run.N) goTo(0, 0);
+    S.playing = true;
+    if (tween) tween.play();
+    else runLoop();
+    render();
   }
 
   function togglePlay() {
-    if (isPlaying) {
-      pause();
-    } else {
-      if (currentStepIndex >= STEPS.length - 1) {
-        currentStepIndex = 0;
-        renderStep(0, false);
+    if (S.playing) pause();
+    else play();
+  }
+
+  function runLoop() {
+    if (!S.playing) return;
+    if (S.i >= S.run.N) {
+      S.playing = false;
+      render();
+      return;
+    }
+    animateStep();
+  }
+
+  // 播放第 S.i 步：GSAP 补间推进步内进度；减少动效则直接跳到步末并停留
+  function animateStep() {
+    const i = S.i;
+    const step = S.run.steps[i];
+    if (S.reduce || !hasGsap) {
+      S.p = 1;
+      render();
+      dwellTimer = setTimeout(() => {
+        dwellTimer = null;
+        S.i = i + 1;
+        S.p = 0;
+        render();
+        runLoop();
+      }, (DWELL * 1000) / S.speed);
+      return;
+    }
+    const obj = { p: S.p };
+    tween = gsap.to(obj, {
+      p: 1,
+      duration: step.dur * (1 - S.p),
+      ease: 'none',
+      onUpdate: () => {
+        S.p = obj.p;
+        render();
+      },
+      onComplete: () => {
+        tween = null;
+        S.i = i + 1;
+        S.p = 0;
+        render();
+        runLoop();
       }
-      play();
-    }
-  }
-
-  function runPlayLoop() {
-    if (!isPlaying) return;
-
-    if (currentStepIndex < STEPS.length - 1) {
-      playTimer = setTimeout(() => {
-        currentStepIndex++;
-        renderStep(currentStepIndex, true);
-        runPlayLoop();
-      }, 2700 / playSpeed);
-    } else {
-      pause();
-    }
-  }
-
-  function stepNext() {
-    pause();
-    if (currentStepIndex < STEPS.length - 1) {
-      renderStep(currentStepIndex + 1, true);
-    }
-  }
-
-  function stepPrev() {
-    pause();
-    if (currentStepIndex > 0) {
-      renderStep(currentStepIndex - 1, false);
-    }
-  }
-
-  function reset() {
-    pause();
-    renderStep(0, false);
-  }
-
-  function setSpeed(speed, activeBtn) {
-    playSpeed = speed;
-    [dom.speed05, dom.speed10, dom.speed15].forEach(btn => {
-      btn.className = 'px-2 py-0.5 rounded border border-stone-200 hover:border-stone-400 text-stone-600';
     });
-    activeBtn.className = 'px-2 py-0.5 rounded border border-stone-900 bg-stone-900 text-white font-bold';
+    tween.timeScale(S.speed);
   }
 
-  // =========================================================================
-  // 事件绑定与装载入口
-  // =========================================================================
+  // 单步：播放下一步的动画后停住；若一步正在进行，则直接做完
+  function stepNext() {
+    if (!S.run || S.i >= S.run.N) return;
+    const N = S.run.N;
+    S.playing = false;
+    if (tween) {
+      // GSAP 正在播放这一步：直接做完
+      killTween();
+      S.i += 1;
+      S.p = 0;
+      render();
+      return;
+    }
+    if (dwellTimer) {
+      // 减少动效的停留中，这一步的终态已经显示：直接进入下一步的终态
+      clearDwell();
+      S.i = Math.min(N, S.i + 1);
+    }
+    if (S.reduce || !hasGsap) {
+      S.i = Math.min(N, S.i + 1);
+      S.p = 0;
+      render();
+      return;
+    }
+    animateStep();
+  }
+
+  // 上一步：正在进行的一步回到开头；否则回到上一步的开头
+  function stepPrev() {
+    if (!S.run) return;
+    const mid = S.p > 0;
+    S.playing = false;
+    goTo(mid ? S.i : Math.max(0, S.i - 1), 0);
+  }
+
+  function replay() {
+    S.playing = false;
+    goTo(0, 0);
+  }
+
+  function onPhase(j) {
+    S.playing = false;
+    goTo(S.run.opStart[j], 0);
+  }
+
+  function setSpeed(v) {
+    S.speed = v;
+    if (tween) tween.timeScale(v);
+    render();
+  }
+
+  function setReduce(v) {
+    S.reduce = Boolean(v);
+    killTween();
+    clearDwell();
+    if (S.playing) runLoop();
+    render();
+  }
+
+  function onKey(e) {
+    const el = e.target instanceof Element ? e.target : null;
+    if (el && el.closest('input, select, textarea, button, a')) return;
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    if (e.code === 'Space') { e.preventDefault(); togglePlay(); }
+    if (e.code === 'ArrowRight') { e.preventDefault(); stepNext(); }
+    if (e.code === 'ArrowLeft') { e.preventDefault(); stepPrev(); }
+    if (e.code === 'Home') { e.preventDefault(); replay(); }
+  }
 
   function bindEvents() {
-    dom.btnPlay.addEventListener('click', togglePlay);
-    dom.btnNext.addEventListener('click', stepNext);
-    dom.btnPrev.addEventListener('click', stepPrev);
-    dom.btnReset.addEventListener('click', reset);
-
-    dom.speed05.addEventListener('click', () => setSpeed(0.5, dom.speed05));
-    dom.speed10.addEventListener('click', () => setSpeed(1.0, dom.speed10));
-    dom.speed15.addEventListener('click', () => setSpeed(1.5, dom.speed15));
+    els.play.addEventListener('click', togglePlay);
+    els.next.addEventListener('click', stepNext);
+    els.prev.addEventListener('click', stepPrev);
+    els.replay.addEventListener('click', replay);
+    els.scrub.addEventListener('input', () => {
+      S.playing = false;
+      goTo(Number(els.scrub.value), 0);
+    });
+    document.querySelectorAll('[data-speed]').forEach((b) => {
+      b.addEventListener('click', () => setSpeed(Number(b.dataset.speed)));
+    });
+    els.reduce.addEventListener('change', () => setReduce(els.reduce.checked));
+    document.addEventListener('keydown', onKey);
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden && S.playing) pause();
+    });
+    if (reduceQuery && reduceQuery.addEventListener) {
+      reduceQuery.addEventListener('change', (e) => setReduce(e.matches));
+    }
   }
 
-  window.addEventListener('DOMContentLoaded', () => {
-    initTimelineNav();
+  function init() {
+    S.run = M.buildRun();
+    buildStatic();
+    buildCards();
+    buildPhaseNav();
     bindEvents();
-    renderStep(0, false);
-  });
+    goTo(0, 0);
+  }
 
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
+  else init();
 })();
