@@ -255,8 +255,8 @@ window.MODULES = [
     "title": "以太网 VLAN 划分与 802.1Q 帧封装机制",
     "discipline": "net",
     "path": "以太网VLAN与802.1Q帧/index.html",
-    "badge": "60fps 双交换机与802.1Q转发",
-    "desc": "基于经典双交换机拓扑与 VID 端口映射，全景呈现 802.1Q 帧格式（TPID、TCI、VID、1518B → 1522B 演进及 42B/46B 最小载荷推导）；动态演示主机 A 发送标准以太网帧（红色方块）至 E、同 VLAN 本地广播、跨 VLAN 隔离剪裁（❌ 阻断）以及跨交换机 Trunk 链路 802.1Q 打标中继（绿色方块）与出向标签剥离全流程。",
+    "badge": "打标 · 转发 · 隔离 · 剥标",
+    "desc": "跟着同一颗帧从主机 A 走到主机 E：Access 入口按 PVID 打标（插入 4B 标签，1518 → 1522 B）、交换机按 VID 查表把帧复制给同广播域端口、异 VLAN 端口隔离、Trunk 链路保留标签跨交换机、出向剥标后 E 收到的仍是原始标准帧；帧结构条对照 TPID/TCI/VID 与最小帧 46B/42B 推导。",
     "formula": "IEEE 802.1Q · Access (Untag) · Trunk (Tag) · VID"
   },
   {
