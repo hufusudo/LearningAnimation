@@ -1,1023 +1,1155 @@
-/**
- * DNS 查询全景：域与区的划分及迭代/递归查询机制
- * 核心交互状态机与 60fps GSAP 动画引擎
- */
+(function () {
+  'use strict';
 
-// 1. 域名树节点坐标配置 (基于左侧 SVG: 540 x 440)
-const TREE_COORDS = {
-  'root':    { x: 270, y: 42,  label: '根域 (.)', level: 0 },
-  'org':     { x: 90,  y: 110, label: 'org (顶级域)', level: 1 },
-  'com':     { x: 270, y: 110, label: 'com (顶级域)', level: 1 },
-  'edu':     { x: 450, y: 110, label: 'edu (顶级域)', level: 1 },
-  'abc':     { x: 195, y: 185, label: 'abc (二级域)', level: 2 },
-  'xyz':     { x: 370, y: 185, label: 'xyz (二级域)', level: 2 },
-  'x':       { x: 135, y: 265, label: 'x (三级域)', level: 3 },
-  'y':       { x: 280, y: 265, label: 'y (三级域)', level: 3 },
-  'u':       { x: 90,  y: 350, label: 'u (主机)', level: 4 },
-  'v':       { x: 135, y: 350, label: 'v (主机)', level: 4 },
-  'w':       { x: 180, y: 350, label: 'w (主机)', level: 4 },
-  't':       { x: 280, y: 350, label: 't (目标主机)', level: 4 },
-  'dns-xyz': { x: 340, y: 265, label: 'dns.xyz.com', level: 3 },
-  'm-xyz':   { x: 410, y: 265, label: 'm.xyz.com', level: 3 }
-};
+  const NS = 'http://www.w3.org/2000/svg';
+  const D = window.DNSData;
+  const M = window.DNSModel;
+  const C = window.DNSChoreo;
+  const $ = id => document.getElementById(id);
+  const pad = value => String(value).padStart(2, '0');
+  const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
+  const hash = new URLSearchParams(location.hash.slice(1));
+  const media = matchMedia('(prefers-reduced-motion: reduce)');
 
-// 2. 物理服务器拓扑节点坐标 (基于右侧 SVG: 540 x 460)
-const TOPO_COORDS = {
-  'client': { x: 120, y: 395, name: 'm.xyz.com' },
-  'local':  { x: 120, y: 260, name: 'dns.xyz.com' },
-  'root':   { x: 120, y: 75,  name: '根域名服务器' },
-  'tld':    { x: 420, y: 75,  name: 'dns.com (TLD)' },
-  'auth':   { x: 420, y: 260, name: 'dns.abc.com' },
-  'authy':  { x: 420, y: 395, name: 'dns.y.abc.com' }
-};
+  let COLORS = {
+    blue: '#285FB4',
+    pine: '#2F7D68',
+    ochre: '#B07A2E',
+    ink: '#343C38',
+    white: '#FFFEFA'
+  };
 
-// 3. 全局状态容器
-const State = {
-  zoneMode: 'single',        // 'single' | 'two'
-  queryMode: 'iterative',    // 'iterative' | 'recursive'
-  targetHost: 't.y.abc.com', // 't.y.abc.com' | 'u.x.abc.com'
-  currentStep: 0,
-  totalSteps: 4,
-  isPlaying: false,
-  speed: 1.0,
-  outboundCount: 0,
-  playTimer: null,
-  activeTimeline: null,
-  steps: []
-};
+  let state = {
+    zone: 'single',
+    mode: 'iterative',
+    target: 't',
+    time: 0,
+    speed: 1,
+    reduced: media.matches,
+    playing: false
+  };
+  let sequence = null;
+  let timeline = null;
+  let lastIndex = -1;
+  let lastComplete = false;
+  let lastMatch = '';
+  let lastMessageKey = '';
+  let lastWrite = 0;
+  let motionOverride = false;
+  let zoneTweens = [];
+  let routeTweens = [];
+  let targetTween = null;
 
-// 4. 时序步骤生成器 (严密覆盖 2种区划 x 2种查询 x 2种目标主机 = 8种场景)
-function generateSteps(zoneMode, queryMode, targetHost) {
-  const isTargetT = (targetHost === 't.y.abc.com');
-  const steps = [];
+  const refs = {
+    nodes: {},
+    baseEdges: {},
+    litEdges: {},
+    routeBase: {},
+    routeDone: {},
+    cards: {}
+  };
 
-  // ====================== 场景 A: 迭代查询 ======================
-  if (queryMode === 'iterative') {
-    if (isTargetT) {
-      if (zoneMode === 'single') {
-        // [迭代 · 单区 · t.y.abc.com] - 总计 4 步, 最终对外计数: 3 次
-        steps.push({
-          stepNum: 1,
-          title: '客户端发起域名查询',
-          desc: '主机 m.xyz.com 向本地域名服务器发起递归查询请求（RD=1）。本地 DNS 缓存未命中，启动对外迭代查询。本地对外计数保持为 0。',
-          outboundTotal: 0,
-          probeNode: 'root',
-          probeLabel: '定位目标域: .',
-          isFinal: false,
-          flights: [
-            { from: 'client', to: 'local', seq: '①', label: 'Query', summary: 'Query: t.y.abc.com', cable: 'cable-client-local' }
-          ],
-          inspector: { qr: 0, op: 0, aa: 0, rd: 1, an: 0, ns: 0, ar: 0, tag: '客户端请求', detail: 'Questions: t.y.abc.com (A记录), RD=1' }
-        });
-
-        steps.push({
-          stepNum: 2,
-          title: '本地 DNS 向根服务器查询',
-          desc: '本地 DNS 向根服务器发出请求报文（本地节点徽标跳升至 1！）；左侧树指针锁定根节点 .；根服务器无法直答最终 IP，但识别 .com 顶级域，返回管辖 TLD 服务器地址。',
-          outboundTotal: 1,
-          probeNode: 'root',
-          probeLabel: '锁定: . (根)',
-          isFinal: false,
-          flights: [
-            { from: 'local', to: 'root', seq: '②', label: 'Query', summary: 'Query: t.y.abc.com', cable: 'cable-local-root' },
-            { from: 'root', to: 'local', seq: '③', label: 'Referral', summary: 'Referral: TLD .com (dns.com)', cable: 'cable-local-root' }
-          ],
-          inspector: { qr: 1, op: 0, aa: 0, rd: 0, an: 0, ns: 1, ar: 1, tag: '根服务器推荐', detail: 'Authority: com NS dns.com; Additional: dns.com A 192.5.6.30' }
-        });
-
-        steps.push({
-          stepNum: 3,
-          title: '本地 DNS 向顶级 .com 查询',
-          desc: '本地 DNS 向顶级服务器发出请求（本地节点徽标跳升至 2！）；左侧树指针滑移至 com 节点；顶级服务器返回二级域 abc.com 权限服务器地址。',
-          outboundTotal: 2,
-          probeNode: 'com',
-          probeLabel: '匹配: com (顶级域)',
-          isFinal: false,
-          flights: [
-            { from: 'local', to: 'tld', seq: '④', label: 'Query', summary: 'Query: t.y.abc.com', cable: 'cable-local-tld' },
-            { from: 'tld', to: 'local', seq: '⑤', label: 'Referral', summary: 'Referral: Auth abc.com', cable: 'cable-local-tld' }
-          ],
-          inspector: { qr: 1, op: 0, aa: 0, rd: 0, an: 0, ns: 1, ar: 1, tag: '顶级服务器推荐', detail: 'Authority: abc.com NS dns.abc.com; Additional: A 198.51.100.2' }
-        });
-
-        steps.push({
-          stepNum: 4,
-          title: '权限服务器单区权威应答并送达',
-          desc: '本地 DNS 向 abc.com 权限服务器发出请求（本地节点徽标跳升至 3！）；左侧树指针滑移至 abc 并直接探底锁定 t 节点全绿高亮！单区模式下直接拥有主机 t 的权威记录，返回最终 IP 并交付客户端（最终计数：3 次）。',
-          outboundTotal: 3,
-          probeNode: 't',
-          probeLabel: '命中权威: t (已锁定)',
-          isFinal: true,
-          flights: [
-            { from: 'local', to: 'auth', seq: '⑥', label: 'Query', summary: 'Query: t.y.abc.com', cable: 'cable-local-auth' },
-            { from: 'auth', to: 'local', seq: '⑦', label: 'Answer', summary: 'Answer: IP 192.0.2.88 (AA=1)', cable: 'cable-local-auth' },
-            { from: 'local', to: 'client', seq: '⑧', label: 'Answer', summary: 'Answer: Delivered to Client', cable: 'cable-client-local' }
-          ],
-          inspector: { qr: 1, op: 0, aa: 1, rd: 1, an: 1, ns: 1, ar: 0, tag: '权威应答命中', detail: 'Answer: t.y.abc.com A 192.0.2.88 (AA=1 权威应答, TTL=3600)' }
-        });
-
-      } else {
-        // [迭代 · 两区 · t.y.abc.com] - 总计 5 步, 最终对外计数: 4 次
-        steps.push({
-          stepNum: 1,
-          title: '客户端发起域名查询',
-          desc: '主机 m.xyz.com 向本地 DNS 发起查询请求。本地 DNS 缓存未命中，启动对外迭代查询。本地对外计数保持为 0。',
-          outboundTotal: 0,
-          probeNode: 'root',
-          probeLabel: '准备解析: .',
-          isFinal: false,
-          flights: [
-            { from: 'client', to: 'local', seq: '①', label: 'Query', summary: 'Query: t.y.abc.com', cable: 'cable-client-local' }
-          ],
-          inspector: { qr: 0, op: 0, aa: 0, rd: 1, an: 0, ns: 0, ar: 0, tag: '客户端请求', detail: 'Questions: t.y.abc.com (A记录)' }
-        });
-
-        steps.push({
-          stepNum: 2,
-          title: '本地 DNS 向根服务器查询',
-          desc: '本地 DNS 向根服务器发出请求（本地节点徽标跳升至 1！）；左侧树指针锁定根节点 .；根返回顶级 .com 服务器地址。',
-          outboundTotal: 1,
-          probeNode: 'root',
-          probeLabel: '锁定: . (根)',
-          isFinal: false,
-          flights: [
-            { from: 'local', to: 'root', seq: '②', label: 'Query', summary: 'Query: t.y.abc.com', cable: 'cable-local-root' },
-            { from: 'root', to: 'local', seq: '③', label: 'Referral', summary: 'Referral: TLD .com (dns.com)', cable: 'cable-local-root' }
-          ],
-          inspector: { qr: 1, op: 0, aa: 0, rd: 0, an: 0, ns: 1, ar: 1, tag: '根服务器推荐', detail: 'Authority: com NS dns.com' }
-        });
-
-        steps.push({
-          stepNum: 3,
-          title: '本地 DNS 向顶级 .com 查询',
-          desc: '本地 DNS 向顶级服务器发出请求（本地节点徽标跳升至 2！）；左侧树指针滑移至 com 节点；顶级返回 abc.com 权限服务器地址。',
-          outboundTotal: 2,
-          probeNode: 'com',
-          probeLabel: '匹配: com (顶级域)',
-          isFinal: false,
-          flights: [
-            { from: 'local', to: 'tld', seq: '④', label: 'Query', summary: 'Query: t.y.abc.com', cable: 'cable-local-tld' },
-            { from: 'tld', to: 'local', seq: '⑤', label: 'Referral', summary: 'Referral: Auth abc.com', cable: 'cable-local-tld' }
-          ],
-          inspector: { qr: 1, op: 0, aa: 0, rd: 0, an: 0, ns: 1, ar: 1, tag: '顶级服务器推荐', detail: 'Authority: abc.com NS dns.abc.com' }
-        });
-
-        steps.push({
-          stepNum: 4,
-          title: '识别独立区：abc.com 委派重定向',
-          desc: '本地 DNS 向 abc.com 发出请求（本地节点徽标跳升至 3！）；左侧树指针滑移至 abc 节点。两区模式下，abc 识别出 y 已独立成区并委派，返回委派给 dns.y.abc.com 的响应；报文飞回本地 DNS。',
-          outboundTotal: 3,
-          probeNode: 'abc',
-          probeLabel: '匹配: abc (识别独立委派)',
-          isFinal: false,
-          flights: [
-            { from: 'local', to: 'auth', seq: '⑥', label: 'Query', summary: 'Query: t.y.abc.com', cable: 'cable-local-auth' },
-            { from: 'auth', to: 'local', seq: '⑦', label: 'Referral', summary: 'Referral: 委派 dns.y.abc.com', cable: 'cable-local-auth' }
-          ],
-          inspector: { qr: 1, op: 0, aa: 0, rd: 0, an: 0, ns: 1, ar: 1, tag: '委派授权响应', detail: 'Authority: y.abc.com NS dns.y.abc.com (已独立委派成区); Additional: dns.y.abc.com A 198.51.100.99' }
-        });
-
-        steps.push({
-          stepNum: 5,
-          title: '向独立区权限服务器查询并完成',
-          desc: '本地 DNS 向 dns.y.abc.com 发出额外请求（本地节点徽标跳升至 4！）；左侧树指针跨区进入独立气泡锁定 t 节点全绿高亮！独立区服务器返回最终 IP，报文回送客户端（最终计数：4 次）。',
-          outboundTotal: 4,
-          probeNode: 't',
-          probeLabel: '跨区命中权威: t',
-          isFinal: true,
-          flights: [
-            { from: 'local', to: 'authy', seq: '⑧', label: 'Query', summary: 'Query: t.y.abc.com', cable: 'cable-local-authy' },
-            { from: 'authy', to: 'local', seq: '⑨', label: 'Answer', summary: 'Answer: IP 192.0.2.88 (AA=1)', cable: 'cable-local-authy' },
-            { from: 'local', to: 'client', seq: '⑩', label: 'Answer', summary: 'Answer: Delivered to Client', cable: 'cable-client-local' }
-          ],
-          inspector: { qr: 1, op: 0, aa: 1, rd: 1, an: 1, ns: 1, ar: 0, tag: '独立区权威命中', detail: 'Answer: t.y.abc.com A 192.0.2.88 (AA=1 独立区权威, TTL=3600)' }
-        });
+  /* ── 基础工具 ─────────────────────────────────────── */
+  function make(tag, attrs, parent, text) {
+    const el = document.createElementNS(NS, tag);
+    if (attrs) {
+      for (const [key, value] of Object.entries(attrs)) {
+        if (value !== undefined && value !== null) el.setAttribute(key, String(value));
       }
-    } else {
-      // [迭代 · 对照目标 u.x.abc.com] - 无论单区还是两区，x 和 u 均在 abc.com 区内，总计 4 步, 最终对外计数: 3 次
-      steps.push({
-        stepNum: 1,
-        title: '客户端发起 u.x.abc.com 查询',
-        desc: '主机向本地 DNS 发起对 u.x.abc.com 的解析请求。本地对外计数为 0。',
-        outboundTotal: 0,
-        probeNode: 'root',
-        probeLabel: '对照目标: u.x.abc.com',
-        isFinal: false,
-        flights: [
-          { from: 'client', to: 'local', seq: '①', label: 'Query', summary: 'Query: u.x.abc.com', cable: 'cable-client-local' }
-        ],
-        inspector: { qr: 0, op: 0, aa: 0, rd: 1, an: 0, ns: 0, ar: 0, tag: '客户端请求', detail: 'Questions: u.x.abc.com (A记录)' }
-      });
-
-      steps.push({
-        stepNum: 2,
-        title: '本地 DNS 向根服务器查询',
-        desc: '本地向根服务器查询（本地徽标跳升至 1！）；探针锁定根 .；根返回顶级 .com 服务器。',
-        outboundTotal: 1,
-        probeNode: 'root',
-        probeLabel: '锁定: . (根)',
-        isFinal: false,
-        flights: [
-          { from: 'local', to: 'root', seq: '②', label: 'Query', summary: 'Query: u.x.abc.com', cable: 'cable-local-root' },
-          { from: 'root', to: 'local', seq: '③', label: 'Referral', summary: 'Referral: TLD .com', cable: 'cable-local-root' }
-        ],
-        inspector: { qr: 1, op: 0, aa: 0, rd: 0, an: 0, ns: 1, ar: 1, tag: '根推荐', detail: 'Authority: com NS dns.com' }
-      });
-
-      steps.push({
-        stepNum: 3,
-        title: '本地 DNS 向顶级 .com 查询',
-        desc: '本地向顶级 .com 查询（本地徽标跳升至 2！）；探针滑移至 com；返回 abc.com 权限服务器。',
-        outboundTotal: 2,
-        probeNode: 'com',
-        probeLabel: '匹配: com',
-        isFinal: false,
-        flights: [
-          { from: 'local', to: 'tld', seq: '④', label: 'Query', summary: 'Query: u.x.abc.com', cable: 'cable-local-tld' },
-          { from: 'tld', to: 'local', seq: '⑤', label: 'Referral', summary: 'Referral: Auth abc.com', cable: 'cable-local-tld' }
-        ],
-        inspector: { qr: 1, op: 0, aa: 0, rd: 0, an: 0, ns: 1, ar: 1, tag: '顶级推荐', detail: 'Authority: abc.com NS dns.abc.com' }
-      });
-
-      steps.push({
-        stepNum: 4,
-        title: '主区直接权威解析命中 (同区对照)',
-        desc: '主机 u 隶属于 x 子域，未被独立委派，始终包含在 abc.com 主区内！dns.abc.com 直接权威应答最终 IP（本地徽标跳至 3！计数终止于 3 次，无需步骤 5）。',
-        outboundTotal: 3,
-        probeNode: 'u',
-        probeLabel: '同区权威命中: u',
-        isFinal: true,
-        flights: [
-          { from: 'local', to: 'auth', seq: '⑥', label: 'Query', summary: 'Query: u.x.abc.com', cable: 'cable-local-auth' },
-          { from: 'auth', to: 'local', seq: '⑦', label: 'Answer', summary: 'Answer: IP 192.0.2.66 (AA=1)', cable: 'cable-local-auth' },
-          { from: 'local', to: 'client', seq: '⑧', label: 'Answer', summary: 'Answer to Client', cable: 'cable-client-local' }
-        ],
-        inspector: { qr: 1, op: 0, aa: 1, rd: 1, an: 1, ns: 1, ar: 0, tag: '主区权威直接命中', detail: 'Answer: u.x.abc.com A 192.0.2.66 (x 子域未独立委派，同区直接应答)' }
-      });
     }
-
-  // ====================== 场景 B: 递归查询 ======================
-  } else {
-    // 递归查询：本地仅向根发出 1 次请求，后续链路层层代为询问，本地计数始终保持为 1！
-    steps.push({
-      stepNum: 1,
-      title: '客户端发起递归查询',
-      desc: '客户端向本地 DNS 发送查询请求，本地对外计数为 0。',
-      outboundTotal: 0,
-      probeNode: 'root',
-      probeLabel: '就绪: 准备递归',
-      isFinal: false,
-      flights: [
-        { from: 'client', to: 'local', seq: '①', label: 'Query', summary: 'Query: ' + targetHost + ' (RD=1)', cable: 'cable-client-local' }
-      ],
-      inspector: { qr: 0, op: 0, aa: 0, rd: 1, an: 0, ns: 0, ar: 0, tag: '客户端请求', detail: 'Questions: ' + targetHost + ' (RD=1 期望递归)' }
-    });
-
-    steps.push({
-      stepNum: 2,
-      title: '本地 DNS 开启递归调用链',
-      desc: '本地 DNS 承担代理责任向根服务器请求（本地节点徽标跳升至 1！）；探针锁定根节点 .；根服务器进入递归处理。',
-      outboundTotal: 1,
-      probeNode: 'root',
-      probeLabel: '锁定: . (根)',
-      isFinal: false,
-      flights: [
-        { from: 'local', to: 'root', seq: '②', label: 'Query', summary: 'Recursive Query: ' + targetHost, cable: 'cable-local-root' }
-      ],
-      inspector: { qr: 0, op: 0, aa: 0, rd: 1, an: 0, ns: 0, ar: 0, tag: '本地代理发包', detail: '本地对外查询计数值更新为 1' }
-    });
-
-    steps.push({
-      stepNum: 3,
-      title: '击鼓传花：根代为向顶级 .com 查询',
-      desc: '根服务器代劳向顶级服务器 dns.com 发起递归查询；探针滑向 com。关键考点：本地 DNS 保持静候，对外查询计数保持为 1 不再增加！',
-      outboundTotal: 1,
-      probeNode: 'com',
-      probeLabel: '传递: com (顶级)',
-      isFinal: false,
-      flights: [
-        { from: 'root', to: 'tld', seq: '③', label: 'Query', summary: 'Root -> TLD: ' + targetHost, cable: 'cable-root-tld' }
-      ],
-      inspector: { qr: 0, op: 0, aa: 0, rd: 1, an: 0, ns: 0, ar: 0, tag: '链式传递', detail: '由根服务器代为向下级顶级服务器发起请求' }
-    });
-
-    steps.push({
-      stepNum: 4,
-      title: '深度递归：顶级代向权限服务器查询',
-      desc: '顶级服务器代向 abc.com 权限服务器发起查询；探针滑向 abc 节点。本地对外查询计数继续保持为 1。',
-      outboundTotal: 1,
-      probeNode: 'abc',
-      probeLabel: '传递: abc (权限)',
-      isFinal: false,
-      flights: [
-        { from: 'tld', to: 'auth', seq: '④', label: 'Query', summary: 'TLD -> Auth abc: ' + targetHost, cable: 'cable-tld-auth' }
-      ],
-      inspector: { qr: 0, op: 0, aa: 0, rd: 1, an: 0, ns: 0, ar: 0, tag: '链式传递', detail: '顶级代向二级域权限服务器 dns.abc.com 发起请求' }
-    });
-
-    if (zoneMode === 'two' && isTargetT) {
-      // 两区模式下跨区递归多一步
-      steps.push({
-        stepNum: 5,
-        title: '跨区递归：abc 代向独立区 y 查询',
-        desc: 'dns.abc.com 识别出 y 独立成区，代为向独立区服务器 dns.y.abc.com 发起最终递归请求；探针跨区进入独立气泡锁定 t 节点。本地计数依然保持为 1！',
-        outboundTotal: 1,
-        probeNode: 't',
-        probeLabel: '跨区击鼓传花: y -> t',
-        isFinal: false,
-        flights: [
-          { from: 'auth', to: 'authy', seq: '⑤', label: 'Query', summary: 'Auth abc -> Auth y: ' + targetHost, cable: 'cable-auth-authy' }
-        ],
-        inspector: { qr: 0, op: 0, aa: 0, rd: 1, an: 0, ns: 0, ar: 0, tag: '跨区递归代理', detail: 'dns.abc.com 代向独立区权威 dns.y.abc.com 发送请求' }
-      });
-
-      steps.push({
-        stepNum: 6,
-        title: '原路逐级反向应答回送客户端',
-        desc: '最终 IP 沿原路逐层倒序返回：dns.y -> dns.abc -> TLD -> 根 -> 本地 DNS -> 客户端。全过程本地域名服务器对外仅查询 1 次！',
-        outboundTotal: 1,
-        probeNode: 't',
-        probeLabel: '锁定解析: t (回传完成)',
-        isFinal: true,
-        flights: [
-          { from: 'authy', to: 'auth', seq: '⑥', label: 'Answer', summary: 'IP: 192.0.2.88', cable: 'cable-auth-authy' },
-          { from: 'auth', to: 'tld', seq: '⑦', label: 'Answer', summary: 'Pass to TLD', cable: 'cable-tld-auth' },
-          { from: 'tld', to: 'root', seq: '⑧', label: 'Answer', summary: 'Pass to Root', cable: 'cable-root-tld' },
-          { from: 'root', to: 'local', seq: '⑨', label: 'Answer', summary: 'Pass to Local', cable: 'cable-local-root' },
-          { from: 'local', to: 'client', seq: '⑩', label: 'Answer', summary: 'Deliver to Client', cable: 'cable-client-local' }
-        ],
-        inspector: { qr: 1, op: 0, aa: 1, rd: 1, an: 1, ns: 1, ar: 0, tag: '逐级原路返回', detail: 'Answer: t.y.abc.com A 192.0.2.88 逐层回送到客户端' }
-      });
-
-    } else {
-      // 单区模式或 u.x 目标：在 abc 处命中并原路返回
-      steps.push({
-        stepNum: 5,
-        title: '原路逐级反向应答回送客户端',
-        desc: 'dns.abc.com 命中权威记录，沿链路原路返回：abc -> TLD -> 根 -> 本地 DNS -> 客户端。本地对外查询始终为 1 次。',
-        outboundTotal: 1,
-        probeNode: isTargetT ? 't' : 'u',
-        probeLabel: '权威锁定 (原路返回)',
-        isFinal: true,
-        flights: [
-          { from: 'auth', to: 'tld', seq: '⑤', label: 'Answer', summary: 'Auth -> TLD', cable: 'cable-tld-auth' },
-          { from: 'tld', to: 'root', seq: '⑥', label: 'Answer', summary: 'TLD -> Root', cable: 'cable-root-tld' },
-          { from: 'root', to: 'local', seq: '⑦', label: 'Answer', summary: 'Root -> Local', cable: 'cable-local-root' },
-          { from: 'local', to: 'client', seq: '⑧', label: 'Answer', summary: 'Deliver to Client', cable: 'cable-client-local' }
-        ],
-        inspector: { qr: 1, op: 0, aa: 1, rd: 1, an: 1, ns: 1, ar: 0, tag: '逐级原路返回', detail: '最终 IP 沿链路逆序回传，本地对外计数维持 1 次' }
-      });
-    }
+    if (text !== undefined) el.textContent = text;
+    if (parent) parent.appendChild(el);
+    return el;
   }
 
-  return steps;
-}
-
-// 5. 画布内原位计数指示器驱动 (弹性缩放 scale bounce)
-function updateBadgeCounter(count, bounce = true) {
-  const el = document.getElementById('counter-val');
-  const badgeCard = document.getElementById('badge-counter-card');
-  const hudNum = document.getElementById('hud-outbound-num');
-
-  if (hudNum) hudNum.textContent = `${count} 次`;
-  if (!el || !badgeCard) return;
-
-  const currentDisplayed = parseInt(el.textContent, 10) || 0;
-  el.textContent = count;
-
-  if (bounce && count > currentDisplayed) {
-    gsap.killTweensOf(badgeCard);
-    gsap.fromTo(badgeCard,
-      { scale: 1.45, transformOrigin: 'center center' },
-      { scale: 1.0, duration: 0.55 / State.speed, ease: 'back.out(2.5)' }
-    );
-    gsap.fromTo(badgeCard,
-      { fill: '#FEF3C7', stroke: '#D97706', strokeWidth: 3 },
-      { fill: '#FFFFFF', stroke: '#D97706', strokeWidth: 1.8, duration: 0.6 / State.speed }
-    );
-  }
-}
-
-// 6. 区域划分视觉过渡 (GSAP 平滑驱动气泡与第 5 台服务器)
-function applyZoneModeVisuals(zoneMode, immediate = false) {
-  const bubbleAbc = document.getElementById('zone-bubble-abc');
-  const tagBgAbc = document.getElementById('zone-tag-bg-abc');
-  const tagTextAbc = document.getElementById('zone-tag-text-abc');
-  const zoneGroupY = document.getElementById('zone-group-y');
-  const serverYGroup = document.getElementById('server-y-group');
-  const delegationGroup = document.getElementById('delegation-link-group');
-  const cableAuthy = document.getElementById('cable-local-authy');
-  const legendY = document.getElementById('legend-zone-y');
-  const zoneStatusText = document.getElementById('zone-status-text');
-
-  const dur = immediate ? 0 : 0.6 / State.speed;
-
-  if (zoneMode === 'single') {
-    // 单区模式：气泡包裹全部 abc 树（宽 275）
-    gsap.to(bubbleAbc, {
-      attr: { x: 55, y: 150, width: 275, height: 248 },
-      duration: dur,
-      ease: 'power2.inOut'
-    });
-    if (tagTextAbc) tagTextAbc.textContent = '区: abc.com (单区统管)';
-    if (tagBgAbc) gsap.to(tagBgAbc, { attr: { width: 138 }, duration: dur });
-
-    // 隐藏独立区 y 气泡
-    gsap.to(zoneGroupY, {
-      opacity: 0,
-      scale: 0.85,
-      transformOrigin: '287px 321px',
-      duration: dur,
-      ease: 'power2.in'
-    });
-
-    // 右侧拓扑：第 5 台服务器与其委派连线淡出
-    if (serverYGroup) {
-      gsap.to(serverYGroup, {
-        opacity: 0,
-        y: 15,
-        scale: 0.9,
-        duration: dur,
-        ease: 'power2.in',
-        onComplete: () => {
-          serverYGroup.style.pointerEvents = 'none';
-        }
-      });
-    }
-    if (delegationGroup) {
-      gsap.to(delegationGroup, { opacity: 0, duration: dur });
-    }
-    if (cableAuthy) gsap.to(cableAuthy, { opacity: 0.08, duration: dur });
-    if (legendY) legendY.classList.add('opacity-40');
-    if (zoneStatusText) {
-      zoneStatusText.textContent = '当前划分：单区模式 (abc.com 统管全域)';
-      zoneStatusText.className = 'text-amber-800 font-sans font-medium';
-    }
-  } else {
-    // 两区模式：气泡 abc 收缩为只包裹 abc, x, u, v, w（宽 170）
-    gsap.to(bubbleAbc, {
-      attr: { x: 55, y: 150, width: 170, height: 248 },
-      duration: dur,
-      ease: 'power2.inOut'
-    });
-    if (tagTextAbc) tagTextAbc.textContent = '区 1: abc.com';
-    if (tagBgAbc) gsap.to(tagBgAbc, { attr: { width: 85 }, duration: dur });
-
-    // 分裂展现独立区 y 气泡
-    gsap.fromTo(zoneGroupY,
-      { opacity: 0, scale: 0.8 },
-      { opacity: 1, scale: 1, transformOrigin: '287px 321px', duration: dur, ease: 'back.out(1.5)' }
-    );
-
-    // 右侧拓扑：第 5 台服务器与其委派连线淡入
-    if (serverYGroup) {
-      serverYGroup.style.pointerEvents = 'auto';
-      gsap.fromTo(serverYGroup,
-        { opacity: 0, y: 15, scale: 0.9 },
-        { opacity: 1, y: 0, scale: 1.0, duration: dur, ease: 'back.out(1.6)' }
-      );
-    }
-    if (delegationGroup) {
-      gsap.to(delegationGroup, { opacity: 1, duration: dur });
-    }
-    if (cableAuthy) gsap.to(cableAuthy, { opacity: 0.7, duration: dur });
-    if (legendY) legendY.classList.remove('opacity-40');
-    if (zoneStatusText) {
-      zoneStatusText.textContent = '当前划分：两区模式 (y.abc.com 独立委派成区)';
-      zoneStatusText.className = 'text-emerald-800 font-sans font-medium';
-    }
-  }
-}
-
-// 7. 左侧树节点高亮管理
-function highlightTreeNode(nodeId, isFinal) {
-  // 恢复其余节点状态
-  document.querySelectorAll('#tree-nodes .tree-node').forEach(node => {
-    const circle = node.querySelector('circle');
-    if (circle) {
-      gsap.to(circle, { fill: '#FFFFFF', duration: 0.25 });
-    }
-  });
-
-  const targetNode = document.getElementById(`node-${nodeId}`);
-  if (!targetNode) return;
-
-  const circle = targetNode.querySelector('circle');
-  if (circle) {
-    if (isFinal) {
-      gsap.to(circle, { fill: '#D1FAE5', stroke: '#059669', strokeWidth: 3, duration: 0.35 });
-    } else {
-      gsap.to(circle, { fill: '#EFF6FF', stroke: '#2563EB', strokeWidth: 2.5, duration: 0.35 });
-    }
-  }
-}
-
-// 8. 寻址指示探针移动吸附
-function moveSearchPointer(nodeId, labelText, isResolved = false) {
-  const coords = TREE_COORDS[nodeId];
-  if (!coords) return;
-
-  const pointerEl = document.getElementById('search-pointer');
-  const labelEl = document.getElementById('probe-label-text');
-  const ringEl = document.getElementById('probe-pulse-ring');
-  const resolvedBadge = document.getElementById('target-resolved-badge');
-  const hudProbeNode = document.getElementById('hud-probe-node');
-
-  if (hudProbeNode) hudProbeNode.textContent = coords.label || nodeId;
-
-  gsap.killTweensOf(pointerEl);
-  gsap.to(pointerEl, {
-    x: coords.x,
-    y: coords.y,
-    duration: 0.65 / State.speed,
-    ease: 'power2.out',
-    onUpdate: () => {
-      if (labelEl) labelEl.textContent = labelText;
-    }
-  });
-
-  highlightTreeNode(nodeId, isResolved);
-
-  if (isResolved) {
-    if (ringEl) gsap.to(ringEl, { stroke: '#059669', duration: 0.3 });
-    if (resolvedBadge) {
-      gsap.killTweensOf(resolvedBadge);
-      gsap.fromTo(resolvedBadge,
-        { opacity: 0, scale: 0.6, x: coords.x, y: coords.y },
-        { opacity: 1, scale: 1, duration: 0.55 / State.speed, ease: 'back.out(2)' }
-      );
-    }
-  } else {
-    if (ringEl) gsap.to(ringEl, { stroke: '#2563EB', duration: 0.3 });
-    if (resolvedBadge) gsap.to(resolvedBadge, { opacity: 0, duration: 0.2 });
-  }
-}
-
-// 9. 辅助函数：根据通信信道方向计算法向垂直偏移，生成带圈序号与悬浮提示
-function createSeqBadge(flight, idx) {
-  const start = TOPO_COORDS[flight.from];
-  const end = TOPO_COORDS[flight.to];
-  if (!start || !end) return null;
-
-  const midX = (start.x + end.x) / 2;
-  const midY = (start.y + end.y) / 2;
-
-  const dx = end.x - start.x;
-  const dy = end.y - start.y;
-  const len = Math.hypot(dx, dy) || 1;
-  const normalX = -dy / len;
-  const normalY = dx / len;
-
-  // 沿法线方向微偏移，使往返序号互不遮挡
-  const offsetDist = (idx % 2 === 1) ? 16 : -16;
-  const posX = midX + normalX * offsetDist;
-  const posY = midY + normalY * offsetDist;
-
-  const badgeGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-  badgeGroup.setAttribute('class', 'seq-badge');
-  badgeGroup.setAttribute('transform', `translate(${posX}, ${posY})`);
-
-  const isQuery = (flight.label === 'Query');
-  const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-  circle.setAttribute('r', '10');
-  circle.setAttribute('fill', isQuery ? '#2563EB' : '#059669');
-  circle.setAttribute('stroke', '#FFFFFF');
-  circle.setAttribute('stroke-width', '1.5');
-  circle.setAttribute('filter', 'url(#server-card-shadow)');
-
-  const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-  text.setAttribute('text-anchor', 'middle');
-  text.setAttribute('dy', '3.5');
-  text.setAttribute('font-size', '10');
-  text.setAttribute('font-weight', '700');
-  text.setAttribute('fill', '#FFFFFF');
-  text.textContent = flight.seq;
-
-  badgeGroup.appendChild(circle);
-  badgeGroup.appendChild(text);
-
-  // 鼠标悬停显示摘要
-  const title = document.createElementNS('http://www.w3.org/2000/svg', 'title');
-  title.textContent = `${flight.seq} ${flight.summary}`;
-  badgeGroup.appendChild(title);
-
-  return badgeGroup;
-}
-
-// 10. 物理报文飞行轨迹与序号标记
-function animatePacketFlights(flights, onComplete) {
-  const packetEl = document.getElementById('flight-packet');
-  const packetLabel = document.getElementById('flight-packet-label');
-  const badgesContainer = document.getElementById('cable-seq-badges');
-
-  if (!flights || flights.length === 0) {
-    if (onComplete) onComplete();
-    return;
+  function setText(el, value) {
+    const next = value == null ? '' : String(value);
+    if (el && el.textContent !== next) el.textContent = next;
   }
 
-  // 顺序执行当前步骤的每一跳报文飞行
-  let timeline = gsap.timeline({
-    onComplete: () => {
-      gsap.to(packetEl, { opacity: 0, duration: 0.2 });
-      if (onComplete) onComplete();
-    }
-  });
+  function setAttr(el, key, value) {
+    const next = String(value);
+    if (el && el.getAttribute(key) !== next) el.setAttribute(key, next);
+  }
 
-  State.activeTimeline = timeline;
+  function setClass(el, value) {
+    if (el && el.getAttribute('class') !== value) el.setAttribute('class', value);
+  }
 
-  flights.forEach((flight, idx) => {
-    const start = TOPO_COORDS[flight.from];
-    const end = TOPO_COORDS[flight.to];
-    const cable = document.getElementById(flight.cable);
+  function toggleClass(el, name, on) {
+    if (el) el.classList.toggle(name, Boolean(on));
+  }
 
-    if (!start || !end) return;
+  function cssVar(name) {
+    return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  }
 
-    // 飞行准备
-    timeline.call(() => {
-      if (packetLabel) packetLabel.textContent = flight.label.toUpperCase();
-      if (cable) cable.classList.add('active-link');
-    });
-
-    // 报文实体飞行
-    timeline.fromTo(packetEl,
-      { x: start.x, y: start.y, opacity: 1, scale: 0.8 },
-      {
-        x: end.x,
-        y: end.y,
-        opacity: 1,
-        scale: 1,
-        duration: 0.65 / State.speed,
-        ease: 'power1.inOut'
-      }
-    );
-
-    // 落地瞬间在信道中间生成带圈序号与摘要
-    timeline.call(() => {
-      if (cable) cable.classList.remove('active-link');
-
-      // 目标服务器微脉冲 (对内部 rect 进行描边微动画，严禁污染外层 group transform)
-      let destRect = null;
-      if (flight.to === 'authy') {
-        destRect = document.getElementById('rect-authy-dns');
-      } else {
-        const destNode = document.getElementById(`node-${flight.to}`);
-        if (destNode) destRect = destNode.querySelector('rect');
-      }
-      if (destRect) {
-        gsap.fromTo(destRect,
-          { strokeWidth: 3.5 },
-          { strokeWidth: 1.8, duration: 0.35 / State.speed, ease: 'power2.out' }
-        );
-      }
-
-      // 添加飞行路径序号标记
-      const badgeGroup = createSeqBadge(flight, idx);
-      if (badgeGroup && badgesContainer) {
-        badgesContainer.appendChild(badgeGroup);
-        gsap.fromTo(badgeGroup,
-          { scale: 0.2, opacity: 0 },
-          { scale: 1, opacity: 1, duration: 0.3 / State.speed, ease: 'back.out(2)' }
-        );
-      }
-    });
-
-    // 往返间的微小停顿
-    if (idx < flights.length - 1) {
-      timeline.to({}, { duration: 0.25 / State.speed });
-    }
-  });
-}
-
-// 10. 步骤进度指示器胶囊渲染
-function renderProgressPills() {
-  const container = document.getElementById('step-progress-pills');
-  if (!container) return;
-  container.innerHTML = '';
-
-  for (let i = 1; i <= State.totalSteps; i++) {
-    const pill = document.createElement('button');
-    pill.className = `px-2 py-0.5 rounded text-[11px] font-mono transition-all ${
-      i === State.currentStep
-        ? 'bg-stone-900 text-white font-bold shadow-xs'
-        : i < State.currentStep
-        ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
-        : 'bg-stone-100 text-stone-500 border border-stone-200'
-    }`;
-    pill.textContent = `步 ${i}`;
-    pill.onclick = () => {
-      goToStep(i);
+  function readColors() {
+    const next = {
+      blue: cssVar('--blue'),
+      pine: cssVar('--pine'),
+      ochre: cssVar('--ochre'),
+      ink: cssVar('--ink'),
+      white: cssVar('--white')
     };
-    container.appendChild(pill);
-  }
-}
-
-// 11. 更新 HUD 解说与报文显微镜
-function updateHUD(stepData) {
-  const pillEl = document.getElementById('hud-step-pill');
-  const titleEl = document.getElementById('hud-step-title');
-  const descEl = document.getElementById('hud-step-desc');
-
-  if (pillEl) {
-    pillEl.textContent = `步骤 ${State.currentStep} / ${State.totalSteps}`;
-    if (State.currentStep === State.totalSteps) {
-      pillEl.className = 'px-2.5 py-1 rounded bg-emerald-700 text-white text-xs font-mono font-bold shrink-0 shadow-sm';
-    } else {
-      pillEl.className = 'px-2.5 py-1 rounded bg-stone-800 text-white text-xs font-mono font-bold shrink-0 shadow-sm';
-    }
-  }
-  if (titleEl) titleEl.textContent = stepData ? `【步骤 ${stepData.stepNum}】${stepData.title}` : '已复位至初始就绪态';
-  if (descEl) descEl.textContent = stepData ? stepData.desc : '点击「自动演进」或「下一步」逐拍观察域名树匹配与物理报文交互拓扑。';
-
-  // 显微镜字段更新
-  if (stepData && stepData.inspector) {
-    const insp = stepData.inspector;
-    const tagEl = document.getElementById('inspector-tag');
-    if (tagEl) tagEl.textContent = insp.tag;
-
-    const qrEl = document.getElementById('dns-flag-qr');
-    if (qrEl) qrEl.textContent = insp.qr === 0 ? '0 (Query 查询报文)' : '1 (Response 应答报文)';
-
-    const aaEl = document.getElementById('dns-flag-aa');
-    if (aaEl) aaEl.textContent = insp.aa === 1 ? '1 (权威应答 Authoritative)' : '0 (非权威/推荐应答)';
-
-    const rdEl = document.getElementById('dns-flag-rd');
-    if (rdEl) rdEl.textContent = insp.rd === 1 ? '1 (期望递归 Recursion Desired)' : '0 (迭代查询/无需递归)';
-
-    const qnameEl = document.getElementById('dns-qname');
-    if (qnameEl) qnameEl.textContent = State.targetHost;
-
-    const ancountEl = document.getElementById('dns-ancount');
-    if (ancountEl) ancountEl.textContent = insp.an;
-
-    const nscountEl = document.getElementById('dns-nscount');
-    if (nscountEl) nscountEl.textContent = insp.ns;
-
-    const arcountEl = document.getElementById('dns-arcount');
-    if (arcountEl) arcountEl.textContent = insp.ar;
-
-    const detailEl = document.getElementById('dns-rr-detail');
-    if (detailEl) detailEl.textContent = insp.detail;
-  }
-}
-
-// 12. 执行指定步骤动画
-function executeStep(stepIndex) {
-  if (stepIndex < 1 || stepIndex > State.totalSteps) return;
-
-  const stepData = State.steps[stepIndex - 1];
-  if (!stepData) return;
-
-  State.currentStep = stepIndex;
-  renderProgressPills();
-  updateHUD(stepData);
-
-  // 1. 本地对外计数徽标弹性更新 (若本步有发包递增)
-  updateBadgeCounter(stepData.outboundTotal, true);
-
-  // 2. 左侧树探针滑移吸附
-  moveSearchPointer(stepData.probeNode, stepData.probeLabel, stepData.isFinal);
-
-  // 3. 右侧拓扑报文顺滑飞行
-  animatePacketFlights(stepData.flights, () => {
-    // 若处于自动播放模式且尚未到达最后一步，自动调度下一步
-    if (State.isPlaying) {
-      if (State.currentStep < State.totalSteps) {
-        clearTimeout(State.playTimer);
-        State.playTimer = setTimeout(() => {
-          if (State.isPlaying) {
-            executeStep(State.currentStep + 1);
-          }
-        }, 1200 / State.speed);
-      } else {
-        stopPlay();
-      }
-    }
-  });
-}
-
-// 13. 前往特定步骤
-function goToStep(stepIndex) {
-  // 防呆：清理前序所有 GSAP 补间与计时器
-  if (window.gsap) gsap.killTweensOf('*');
-  clearTimeout(State.playTimer);
-  State.activeTimeline = null;
-
-  // 清除旧的飞行轨迹序号徽标
-  const badgesContainer = document.getElementById('cable-seq-badges');
-  if (badgesContainer) badgesContainer.innerHTML = '';
-
-  // 恢复之前各步骤的序号徽标
-  for (let i = 0; i < stepIndex - 1; i++) {
-    const prevStep = State.steps[i];
-    if (prevStep && prevStep.flights) {
-      prevStep.flights.forEach((flight, idx) => {
-        const badgeGroup = createSeqBadge(flight, idx);
-        if (badgeGroup && badgesContainer) {
-          badgesContainer.appendChild(badgeGroup);
-        }
-      });
-    }
-  }
-
-  executeStep(stepIndex);
-}
-
-// 14. 播放控制：开始 / 停止 / 单步 / 复位
-function startPlay() {
-  State.isPlaying = true;
-  const playIcon = document.getElementById('play-icon');
-  const playText = document.getElementById('play-text');
-  if (playIcon) playIcon.textContent = '⏸';
-  if (playText) playText.textContent = '暂停演进';
-
-  if (State.currentStep >= State.totalSteps) {
-    resetState();
-  }
-
-  executeStep(State.currentStep === 0 ? 1 : State.currentStep);
-}
-
-function stopPlay() {
-  State.isPlaying = false;
-  clearTimeout(State.playTimer);
-  const playIcon = document.getElementById('play-icon');
-  const playText = document.getElementById('play-text');
-  if (playIcon) playIcon.textContent = '▶';
-  if (playText) playText.textContent = '自动演进';
-}
-
-function togglePlay() {
-  if (State.isPlaying) {
-    stopPlay();
-  } else {
-    startPlay();
-  }
-}
-
-function stepNext() {
-  stopPlay();
-  if (State.currentStep < State.totalSteps) {
-    goToStep(State.currentStep + 1);
-  }
-}
-
-function stepPrev() {
-  stopPlay();
-  if (State.currentStep > 1) {
-    goToStep(State.currentStep - 1);
-  } else {
-    resetState();
-  }
-}
-
-function resetState() {
-  stopPlay();
-  if (window.gsap) gsap.killTweensOf('*');
-  clearTimeout(State.playTimer);
-  State.activeTimeline = null;
-  State.currentStep = 0;
-
-  // 隐藏飞行报文
-  const packetEl = document.getElementById('flight-packet');
-  if (packetEl) gsap.to(packetEl, { opacity: 0, duration: 0.2 });
-
-  // 清空信道序号徽标
-  const badgesContainer = document.getElementById('cable-seq-badges');
-  if (badgesContainer) badgesContainer.innerHTML = '';
-
-  // 复位计数器
-  updateBadgeCounter(0, false);
-
-  // 复位探针至根节点就绪态
-  moveSearchPointer('root', '就绪: 准备解析', false);
-
-  // 隐藏目标达成标志
-  const resolvedBadge = document.getElementById('target-resolved-badge');
-  if (resolvedBadge) gsap.to(resolvedBadge, { opacity: 0, duration: 0.2 });
-
-  // 恢复所有树节点颜色
-  document.querySelectorAll('#tree-nodes .tree-node circle').forEach(c => {
-    gsap.to(c, { fill: '#FFFFFF', duration: 0.2 });
-  });
-
-  renderProgressPills();
-  updateHUD(null);
-}
-
-// 15. 模式同步与重新生成
-function syncConfiguration(options = {}) {
-  resetState();
-
-  if (options.zoneMode) State.zoneMode = options.zoneMode;
-  if (options.queryMode) State.queryMode = options.queryMode;
-  if (options.targetHost) State.targetHost = options.targetHost;
-
-  // 生成时序序列
-  State.steps = generateSteps(State.zoneMode, State.queryMode, State.targetHost);
-  State.totalSteps = State.steps.length;
-
-  // 平滑过渡区划视图
-  applyZoneModeVisuals(State.zoneMode, false);
-
-  // 更新右上角查询模式标识
-  const modeBadge = document.getElementById('active-query-mode-badge');
-  if (modeBadge) {
-    modeBadge.textContent = State.queryMode === 'iterative' ? '迭代查询模式 (跑腿逐级)' : '递归查询模式 (链式传递)';
-    modeBadge.className = State.queryMode === 'iterative'
-      ? 'px-2 py-0.5 rounded bg-amber-50 text-amber-800 font-semibold border border-amber-200'
-      : 'px-2 py-0.5 rounded bg-blue-50 text-blue-800 font-semibold border border-blue-200';
-  }
-
-  // 递归连线透明度提示
-  const recurCables = document.getElementById('recursive-cables');
-  if (recurCables) {
-    gsap.to(recurCables, {
-      opacity: State.queryMode === 'recursive' ? 0.9 : 0.2,
-      duration: 0.4
+    Object.keys(next).forEach(key => {
+      if (next[key]) COLORS[key] = next[key];
     });
   }
 
-  renderProgressPills();
-}
+  function parseHex(value) {
+    const hex = String(value).replace('#', '');
+    return [parseInt(hex.slice(0, 2), 16), parseInt(hex.slice(2, 4), 16), parseInt(hex.slice(4, 6), 16)];
+  }
 
-// 16. 事件监听与界面交互绑定
-function initEvents() {
-  // 1. 区域划分按钮
-  const btnSingle = document.getElementById('btn-mode-single');
-  const btnTwo = document.getElementById('btn-mode-two');
+  function mixColor(a, b, k) {
+    const A = parseHex(a);
+    const B = parseHex(b);
+    const t = clamp(k, 0, 1);
+    const rgb = A.map((value, index) => Math.round(value + (B[index] - value) * t));
+    return `rgb(${rgb[0]}, ${rgb[1]}, ${rgb[2]})`;
+  }
 
-  btnSingle.onclick = () => {
-    btnSingle.classList.add('active-mode');
-    btnTwo.classList.remove('active-mode');
-    syncConfiguration({ zoneMode: 'single' });
-  };
-  btnTwo.onclick = () => {
-    btnTwo.classList.add('active-mode');
-    btnSingle.classList.remove('active-mode');
-    syncConfiguration({ zoneMode: 'two' });
-  };
+  function kindColor(kind) {
+    if (kind === 'referral') return COLORS.ochre;
+    if (kind === 'answer') return COLORS.pine;
+    return COLORS.blue;
+  }
 
-  // 2. 查询机制按钮
-  const btnIter = document.getElementById('btn-query-iter');
-  const btnRecur = document.getElementById('btn-query-recur');
+  function duration() {
+    return C.duration(sequence, state.reduced);
+  }
 
-  btnIter.onclick = () => {
-    btnIter.classList.add('active-mode');
-    btnRecur.classList.remove('active-mode');
-    syncConfiguration({ queryMode: 'iterative' });
-  };
-  btnRecur.onclick = () => {
-    btnRecur.classList.add('active-mode');
-    btnIter.classList.remove('active-mode');
-    syncConfiguration({ queryMode: 'recursive' });
-  };
+  function currentSample() {
+    return C.sample(sequence, state.time, state.reduced);
+  }
 
-  // 3. 目标主机按钮
-  const btnTargetT = document.getElementById('btn-target-t');
-  const btnTargetU = document.getElementById('btn-target-u');
+  function stepEnd(completedSteps) {
+    if (completedSteps >= sequence.steps.length) return duration();
+    return Math.max(0, C.boundary(sequence, state.reduced, completedSteps) - 0.002);
+  }
 
-  btnTargetT.onclick = () => {
-    btnTargetT.classList.add('active-mode');
-    btnTargetU.classList.remove('active-mode');
-    syncConfiguration({ targetHost: 't.y.abc.com' });
-  };
-  btnTargetU.onclick = () => {
-    btnTargetU.classList.add('active-mode');
-    btnTargetT.classList.remove('active-mode');
-    syncConfiguration({ targetHost: 'u.x.abc.com' });
-  };
+  /* ── 舞台构建 ─────────────────────────────────────── */
+  function buildStage() {
+    buildZoneLayer();
+    buildRoutes();
+    buildTree();
+    buildTargetAndProbe();
+    buildBridge();
+    buildServers();
+    buildDelegationAndBus();
+    buildPacketAndHud();
+  }
 
-  // 4. 播放控制按钮
-  document.getElementById('btn-play-toggle').onclick = togglePlay;
-  document.getElementById('btn-next').onclick = stepNext;
-  document.getElementById('btn-prev').onclick = stepPrev;
-  document.getElementById('btn-reset').onclick = resetState;
+  function buildZoneLayer() {
+    const layer = $('zone-layer');
+    const main = make('g', { class: 'zone-main', id: 'zone-main' }, layer);
+    const mainRect = make('rect', {
+      id: 'zone-main-rect',
+      x: 60, y: 205, width: 300, height: 335,
+      rx: 24, class: 'zone-field'
+    }, main);
+    const mainTitle = make('text', { x: 76, y: 228, class: 'zone-name' }, main, '区 · abc.com');
+    const mainSub = make('text', { x: 76, y: 245, class: 'zone-sub' }, main, 'y 未委派 · 同属一区');
 
-  // 5. 速率滑块
-  const speedSlider = document.getElementById('slider-speed');
-  const speedLabel = document.getElementById('speed-label');
-  speedSlider.oninput = (e) => {
-    State.speed = parseFloat(e.target.value);
-    speedLabel.textContent = `${State.speed.toFixed(1)}x`;
-  };
+    const yGroup = make('g', { class: 'zone-y', id: 'zone-y' }, layer);
+    const yRect = make('rect', {
+      id: 'zone-y-rect',
+      x: D.ZONE_GEOMETRY.y.x,
+      y: D.ZONE_GEOMETRY.y.y,
+      width: D.ZONE_GEOMETRY.y.w,
+      height: D.ZONE_GEOMETRY.y.h,
+      rx: 20,
+      class: 'zone-field'
+    }, yGroup);
+    const yTitle = make('text', { x: 266, y: 318, class: 'zone-name' }, yGroup, '区 2 · y.abc.com');
+    const ySub = make('text', { x: 266, y: 334, class: 'zone-sub' }, yGroup, '委派给 dns.y.abc.com');
 
-  // 6. 点击树节点触发探索反馈
-  document.querySelectorAll('#tree-nodes .tree-node').forEach(node => {
-    node.onclick = () => {
-      const rawId = node.id.replace('node-', '');
-      if (TREE_COORDS[rawId]) {
-        moveSearchPointer(rawId, `选中: ${rawId}`, rawId === 't' || rawId === 'u');
+    const seam = make('path', {
+      id: 'zone-seam',
+      class: 'zone-seam',
+      d: 'M 254 300 L 254 540'
+    }, layer);
+
+    const yTag = make('g', { class: 'y-tag', id: 'y-tag', transform: 'translate(338 383)' }, layer);
+    make('rect', { x: -22, y: -9, width: 44, height: 18, rx: 9 }, yTag);
+    const yTagText = make('text', { x: 0, y: 3.5 }, yTag, '同区');
+
+    refs.zoneMain = main;
+    refs.zoneMainRect = mainRect;
+    refs.zoneMainTitle = mainTitle;
+    refs.zoneMainSub = mainSub;
+    refs.zoneYGroup = yGroup;
+    refs.zoneYRect = yRect;
+    refs.zoneYTitle = yTitle;
+    refs.zoneYSub = ySub;
+    refs.zoneSeam = seam;
+    refs.yTag = yTag;
+    refs.yTagText = yTagText;
+  }
+
+  function buildRoutes() {
+    const baseLayer = $('route-base');
+    const doneLayer = $('route-done');
+    for (const key of Object.keys(D.ROUTES)) {
+      const d = D.routeD(key);
+      const base = make('path', {
+        d,
+        class: 'route-base',
+        'data-route': key,
+        'aria-hidden': 'true'
+      }, baseLayer);
+      const done = make('path', {
+        d,
+        class: 'route-done',
+        'data-route': key,
+        opacity: 0
+      }, doneLayer);
+      refs.routeBase[key] = base;
+      refs.routeDone[key] = done;
+    }
+  }
+
+  function buildTree() {
+    const base = $('tree-base');
+    const lit = $('tree-lit');
+    for (const edge of D.TREE_EDGES) {
+      const d = D.edgeD(edge);
+      refs.baseEdges[edge.id] = make('path', {
+        d,
+        class: 'tree-base-edge',
+        'data-edge': edge.id
+      }, base);
+      refs.litEdges[edge.id] = make('path', {
+        d,
+        class: 'tree-lit-edge',
+        'data-edge': edge.id,
+        pathLength: 1,
+        'stroke-dasharray': 1,
+        'stroke-dashoffset': 1,
+        opacity: 0
+      }, lit);
+    }
+
+    const layer = $('tree-nodes');
+    for (const [id, node] of Object.entries(D.TREE_NODES)) {
+      const g = make('g', {
+        class: `tree-node${node.muted ? ' is-muted' : ''}`,
+        'data-node': id,
+        transform: `translate(${node.x} ${node.y})`
+      }, layer);
+      make('circle', { r: node.r, class: 'node-bg' }, g);
+      const nameClass = `node-name${id === 'root' ? ' is-root' : ''}${node.size <= 9.5 ? ' is-small' : ''}`;
+      make('text', {
+        y: id === 'root' ? 6 : 4,
+        class: nameClass
+      }, g, node.name);
+      const role = make('text', {
+        y: node.r + (id === 't' || id === 'u' ? 17 : 15),
+        class: 'node-role'
+      }, g, node.role);
+      refs.nodes[id] = { g, role };
+    }
+  }
+
+  function buildTargetAndProbe() {
+    const target = make('circle', {
+      id: 'target-ring',
+      class: 'target-ring',
+      r: 30,
+      cx: 0,
+      cy: 0,
+      opacity: 0
+    }, $('target-ring-layer'));
+    refs.targetRing = target;
+
+    const probe = make('g', { id: 'probe' }, $('tree-probe'));
+    const halo = make('circle', { class: 'probe-halo', r: 30, cx: 0, cy: 0 }, probe);
+    const dot = make('circle', { class: 'probe-dot', r: 2.2, cx: 0, cy: -30 }, probe);
+    refs.probe = probe;
+    refs.probeHalo = halo;
+    refs.probeDot = dot;
+  }
+
+  function buildBridge() {
+    const g = make('g', { id: 'bridge', opacity: 0 }, $('bridge-layer'));
+    const bg = make('rect', { x: -59, y: -24, width: 118, height: 17, rx: 4, class: 'bridge-bg' }, g);
+    const text = make('text', { x: 0, y: -11.5, class: 'bridge-text' }, g, 'com ↔ TLD');
+    make('line', { x1: -48, y1: 0, x2: 48, y2: 0, class: 'bridge-line' }, g);
+    make('circle', { cx: -48, cy: 0, r: 1.6, class: 'bridge-dot' }, g);
+    make('circle', { cx: 48, cy: 0, r: 1.6, class: 'bridge-dot' }, g);
+    refs.bridge = { g, text, bg };
+  }
+
+  function makeIcon(parent, s, x, y) {
+    const g = make('g', { class: 'card-icon', transform: `translate(${x} ${y})` }, parent);
+    if (s.kind === 'host') {
+      make('rect', { x: -8, y: -7, width: 16, height: 11, rx: 2 }, g);
+      make('line', { x1: 0, y1: 4, x2: 0, y2: 8 }, g);
+      make('line', { x1: -5, y1: 8, x2: 5, y2: 8 }, g);
+    } else {
+      make('rect', { x: -7, y: -8, width: 14, height: 16, rx: 2.5 }, g);
+      make('line', { x1: -4, y1: -4, x2: 4, y2: -4 }, g);
+      make('line', { x1: -4, y1: 0, x2: 4, y2: 0 }, g);
+      make('line', { x1: -4, y1: 4, x2: 4, y2: 4 }, g);
+      make('circle', { cx: -4, cy: 6, r: 0.8, class: 'card-icon-fill' }, g);
+    }
+    return g;
+  }
+
+  function buildCard(id, s) {
+    const g = make('g', {
+      class: `server-card accent-${s.accent} server-${id}`,
+      'data-server': id,
+      transform: `translate(${s.x} ${s.y})`
+    }, $('server-layer'));
+
+    make('rect', {
+      x: -s.w / 2, y: -s.h / 2, width: s.w, height: s.h,
+      rx: 10, class: 'card-bg', filter: 'url(#card-shadow)'
+    }, g);
+    make('rect', {
+      x: -s.w / 2, y: -s.h / 2, width: 3, height: s.h,
+      rx: 1.5, class: 'card-accent'
+    }, g);
+
+    const focus = make('rect', {
+      x: -s.w / 2 - 4, y: -s.h / 2 - 4, width: s.w + 8, height: s.h + 8,
+      rx: 13, class: 'card-focus', opacity: 0
+    }, g);
+
+    const iconX = -s.w / 2 + (s.kind === 'resolver' ? 22 : 20);
+    const iconY = s.kind === 'resolver' ? -14 : (s.kind === 'host' ? 0 : -5);
+    makeIcon(g, s, iconX, iconY);
+
+    const textX = -s.w / 2 + 38;
+    const dot = make('circle', {
+      cx: s.w / 2 - 12,
+      cy: -s.h / 2 + 12,
+      r: 3.2,
+      class: 'card-dot'
+    }, g);
+
+    const card = { g, bg: null, focus, dot, aa: null, old: null, new: null };
+
+    if (s.kind === 'host') {
+      make('text', { x: textX, y: -2, class: 'card-name' }, g, s.name);
+      make('text', { x: textX, y: 14, class: 'card-domain mono' }, g, s.domain);
+    } else if (s.kind === 'resolver') {
+      make('text', { x: textX, y: -29, class: 'card-level' }, g, s.level);
+      make('text', { x: textX, y: -10, class: 'card-name' }, g, s.name);
+      make('text', { x: textX, y: 7, class: 'card-domain mono' }, g, s.domain);
+      make('line', {
+        x1: -s.w / 2 + 16, y1: 17, x2: s.w / 2 - 16, y2: 17,
+        class: 'local-rule'
+      }, g);
+      make('text', { x: -s.w / 2 + 16, y: 36, class: 'counter-label' }, g, '对外查询');
+      const counterViewport = make('svg', {
+        x: 0, y: 20, width: 48, height: 24,
+        viewBox: '0 0 48 24', overflow: 'hidden', 'aria-hidden': 'true'
+      }, g);
+      const oldText = make('text', {
+        x: 24, y: 18, class: 'counter-value', 'aria-hidden': 'true'
+      }, counterViewport, '0');
+      const newText = make('text', {
+        x: 24, y: 42, class: 'counter-value', 'aria-hidden': 'true'
+      }, counterViewport, '0');
+      make('text', { x: 50, y: 36, class: 'counter-unit' }, g, '次');
+      card.old = oldText;
+      card.new = newText;
+    } else {
+      make('text', { x: textX, y: -19, class: 'card-level' }, g, s.level);
+      make('text', { x: textX, y: 1, class: 'card-name' }, g, s.name);
+      make('text', { x: textX, y: 18, class: 'card-domain mono' }, g, s.domain);
+      if (id === 'auth' || id === 'authy') {
+        const aa = make('g', { class: 'card-aa', opacity: 0 }, g);
+        make('rect', { x: s.w / 2 - 44, y: s.h / 2 - 17, width: 32, height: 14, rx: 7, class: 'aa-bg' }, aa);
+        make('text', { x: s.w / 2 - 28, y: s.h / 2 - 7, class: 'aa-text' }, aa, 'AA');
+        card.aa = aa;
       }
-    };
-  });
-}
+    }
 
-// 17. 页面启动自检与初始化
-document.addEventListener('DOMContentLoaded', () => {
-  initEvents();
-  syncConfiguration({
-    zoneMode: 'single',
-    queryMode: 'iterative',
-    targetHost: 't.y.abc.com'
-  });
-});
+    refs.cards[id] = card;
+  }
+
+  function buildServers() {
+    for (const [id, server] of Object.entries(D.SERVERS)) buildCard(id, server);
+
+    const placeholder = make('g', {
+      class: 'y-placeholder',
+      id: 'y-placeholder',
+      transform: `translate(${D.SERVERS.authy.x} ${D.SERVERS.authy.y})`
+    }, $('y-placeholder-layer'));
+    make('rect', {
+      x: -D.SERVERS.authy.w / 2,
+      y: -D.SERVERS.authy.h / 2,
+      width: D.SERVERS.authy.w,
+      height: D.SERVERS.authy.h,
+      rx: 10,
+      class: 'ph-bg'
+    }, placeholder);
+    make('text', { x: -D.SERVERS.authy.w / 2 + 16, y: -4, class: 'ph-title' }, placeholder, 'y 子域');
+    make('text', { x: -D.SERVERS.authy.w / 2 + 16, y: 14, class: 'ph-sub' }, placeholder, '未委派 · 同属 abc 区');
+    refs.yPlaceholder = placeholder;
+  }
+
+  function buildDelegationAndBus() {
+    const delegation = make('g', { id: 'delegation', opacity: 0 }, $('delegation-layer'));
+    make('path', {
+      d: 'M 1060 307 L 1040 338',
+      class: 'delegation-line'
+    }, delegation);
+    make('text', { x: 1070, y: 325, class: 'delegation-label' }, delegation, 'NS 委派');
+    refs.delegation = delegation;
+
+    const bus = make('text', {
+      transform: 'translate(1150 300) rotate(90)',
+      class: 'bus-label',
+      'text-anchor': 'middle'
+    }, $('bus-label-layer'), '递归接力');
+    refs.busLabel = bus;
+  }
+
+  function buildPacketAndHud() {
+    const packet = make('g', {
+      id: 'packet',
+      class: 'packet kind-query',
+      opacity: 0
+    }, $('packet-layer'));
+    make('rect', { x: -27, y: -11, width: 54, height: 22, rx: 11, class: 'packet-bg' }, packet);
+    make('circle', { cx: -18, cy: 0, r: 2.4, class: 'packet-dot' }, packet);
+    const packetText = make('text', { x: 4, y: 3.5, class: 'packet-text' }, packet, '询问');
+    refs.packet = { g: packet, text: packetText };
+
+    const tag = make('g', { id: 'tag', opacity: 0 }, $('tag-layer'));
+    const tagBg = make('rect', { x: -54, y: -12, width: 108, height: 24, rx: 12, class: 'tag-bg' }, tag);
+    const tagText = make('text', { x: 0, y: 4, class: 'tag-text' }, tag, '');
+    refs.tag = { g: tag, text: tagText, bg: tagBg };
+
+    const result = make('g', { id: 'result', opacity: 0 }, $('result-layer'));
+    make('rect', { x: -52, y: -12, width: 104, height: 24, rx: 12, class: 'result-bg' }, result);
+    const resultText = make('text', { x: 0, y: 4, class: 'result-text' }, result, 'A 192.0.2.88');
+    refs.result = { g: result, text: resultText };
+
+    const pulse = make('circle', {
+      id: 'pulse',
+      r: 6,
+      cx: 0,
+      cy: 0,
+      class: 'pulse-ring',
+      opacity: 0
+    }, $('pulse-layer'));
+    refs.pulse = pulse;
+
+    const shortToken = make('g', { id: 'short-token', opacity: 0 }, $('packet-layer'));
+    const shortCircle = make('circle', { r: 8, cx: 0, cy: 0, class: 'short-token-bg' }, shortToken);
+    const shortText = make('text', { x: 0, y: 3.3, class: 'short-token-text' }, shortToken, '↑');
+    refs.shortToken = shortToken;
+    refs.shortTokenCircle = shortCircle;
+    refs.shortTokenText = shortText;
+  }
+
+  /* ── 配置与场景视觉 ───────────────────────────────── */
+  function routeVisible(key) {
+    const area = D.ROUTES[key] ? D.ROUTES[key].area : 'both';
+    if (area === 'both') return true;
+    if (area === 'iterative') return state.mode === 'iterative';
+    if (area === 'iterative-y') return state.mode === 'iterative' && state.zone === 'two';
+    if (area === 'recursive') return state.mode === 'recursive';
+    if (area === 'recursive-y') return state.mode === 'recursive' && state.zone === 'two';
+    return true;
+  }
+
+  function killTweens(list) {
+    for (const tween of list) {
+      if (tween) tween.kill();
+    }
+    list.length = 0;
+  }
+
+  function updateRouteVisibility(animate) {
+    killTweens(routeTweens);
+    for (const [key, path] of Object.entries(refs.routeBase)) {
+      const visible = routeVisible(key);
+      if (animate && window.gsap) {
+        routeTweens.push(gsap.to(path, {
+          opacity: visible ? 1 : 0,
+          duration: 0.3,
+          ease: 'power1.out'
+        }));
+      } else {
+        path.style.opacity = visible ? '1' : '0';
+      }
+    }
+  }
+
+  function setZoneVisual(zone, animate) {
+    const stage = $('stage');
+    stage.dataset.zone = zone;
+    const geometry = zone === 'single' ? D.ZONE_GEOMETRY.mainSingle : D.ZONE_GEOMETRY.mainTwo;
+    const labels = D.ZONE_GEOMETRY.labels;
+    const yVisible = zone === 'two';
+
+    setText(refs.zoneMainTitle, yVisible ? labels.twoTitle : labels.singleTitle);
+    setText(refs.zoneMainSub, yVisible ? labels.twoSub : labels.singleSub);
+    setText(refs.zoneYTitle, labels.yTitle);
+    setText(refs.zoneYSub, labels.ySub);
+    setText(refs.yTagText, yVisible ? '独立区' : '同区');
+    toggleClass(refs.yTag, 'is-two', yVisible);
+
+    killTweens(zoneTweens);
+    if (animate && window.gsap) {
+      const mainTween = {
+        attr: { x: geometry.x, y: geometry.y, width: geometry.w, height: geometry.h },
+        duration: 0.35,
+        ease: 'power2.inOut'
+      };
+      if (yVisible) {
+        zoneTweens.push(gsap.to(refs.zoneMainRect, mainTween));
+        zoneTweens.push(gsap.to(refs.yPlaceholder, { opacity: 0, duration: 0.12, delay: 0.18, ease: 'power1.out' }));
+        zoneTweens.push(gsap.to(refs.zoneYGroup, { opacity: 1, duration: 0.28, delay: 0.3, ease: 'power2.out' }));
+        zoneTweens.push(gsap.to(refs.cards.authy.g, { opacity: 1, duration: 0.28, delay: 0.3, ease: 'power2.out' }));
+        zoneTweens.push(gsap.to(refs.delegation, { opacity: 1, duration: 0.25, delay: 0.34, ease: 'power2.out' }));
+        zoneTweens.push(gsap.to(refs.zoneSeam, { opacity: 1, duration: 0.25, delay: 0.34, ease: 'power2.out' }));
+      } else {
+        zoneTweens.push(gsap.to(refs.zoneYGroup, { opacity: 0, duration: 0.2, ease: 'power1.out' }));
+        zoneTweens.push(gsap.to(refs.cards.authy.g, { opacity: 0, duration: 0.2, ease: 'power1.out' }));
+        zoneTweens.push(gsap.to(refs.delegation, { opacity: 0, duration: 0.2, ease: 'power1.out' }));
+        zoneTweens.push(gsap.to(refs.zoneSeam, { opacity: 0, duration: 0.2, ease: 'power1.out' }));
+        zoneTweens.push(gsap.to(refs.yPlaceholder, { opacity: 1, duration: 0.25, delay: 0.12, ease: 'power2.out' }));
+        zoneTweens.push(gsap.to(refs.zoneMainRect, { ...mainTween, delay: 0.18 }));
+      }
+    } else {
+      setAttr(refs.zoneMainRect, 'x', geometry.x);
+      setAttr(refs.zoneMainRect, 'y', geometry.y);
+      setAttr(refs.zoneMainRect, 'width', geometry.w);
+      setAttr(refs.zoneMainRect, 'height', geometry.h);
+      refs.zoneYGroup.style.opacity = yVisible ? '1' : '0';
+      refs.yPlaceholder.style.opacity = yVisible ? '0' : '1';
+      refs.cards.authy.g.style.opacity = yVisible ? '1' : '0';
+      refs.delegation.style.opacity = yVisible ? '1' : '0';
+      refs.zoneSeam.style.opacity = yVisible ? '1' : '0';
+    }
+  }
+
+  function setModeVisual(mode, animate) {
+    const stage = $('stage');
+    stage.dataset.mode = mode;
+    if (animate && window.gsap) {
+      gsap.to(refs.busLabel, { opacity: mode === 'recursive' ? 1 : 0, duration: 0.3, ease: 'power1.out', overwrite: 'auto' });
+    } else {
+      refs.busLabel.style.opacity = mode === 'recursive' ? '1' : '0';
+    }
+    updateRouteVisibility(animate);
+  }
+
+  function setTargetVisual(target, animate, fade = true) {
+    const stage = $('stage');
+    stage.dataset.target = target;
+    const nodeId = D.TARGETS[target].node;
+    const node = D.TREE_NODES[nodeId];
+    const tColor = state.zone === 'two' ? COLORS.pine : COLORS.ochre;
+    const color = target === 't' ? tColor : COLORS.ochre;
+
+    setAttr(refs.targetRing, 'transform', `translate(${node.x} ${node.y})`);
+    setAttr(refs.targetRing, 'r', node.r + 11);
+    setAttr(refs.targetRing, 'stroke', color);
+    if (targetTween) {
+      targetTween.kill();
+      targetTween = null;
+    }
+    if (fade && animate && window.gsap) {
+      refs.targetRing.style.opacity = '0';
+      targetTween = gsap.to(refs.targetRing, { opacity: 0.62, duration: 0.3, ease: 'power1.out' });
+    } else {
+      refs.targetRing.style.opacity = '0.62';
+    }
+
+    setText(refs.nodes.t.role, target === 't' ? '目标主机' : '主机');
+    setText(refs.nodes.u.role, target === 'u' ? '目标主机' : '主机');
+    toggleClass(refs.nodes.t.g, 'is-target', target === 't');
+    toggleClass(refs.nodes.u.g, 'is-target', target === 'u');
+    refs.nodes.t.g.style.setProperty('--target-color', tColor);
+    refs.nodes.u.g.style.setProperty('--target-color', COLORS.ochre);
+  }
+
+  function syncUI() {
+    document.querySelectorAll('[data-zone]').forEach(button => {
+      button.setAttribute('aria-pressed', String(button.dataset.zone === state.zone));
+    });
+    document.querySelectorAll('[data-mode]').forEach(button => {
+      button.setAttribute('aria-pressed', String(button.dataset.mode === state.mode));
+    });
+    document.querySelectorAll('[data-target]').forEach(button => {
+      button.setAttribute('aria-pressed', String(button.dataset.target === state.target));
+    });
+
+    $('query-name').textContent = sequence.targetInfo.host;
+    $('zone-badge').textContent = state.zone === 'two' ? '两区' : '单区';
+    $('step-total').textContent = String(sequence.steps.length);
+    $('progress').max = String(duration());
+    $('speed').value = String(state.speed);
+    $('reduce-motion').checked = state.reduced;
+    document.body.dataset.reduced = String(state.reduced);
+    document.body.dataset.playing = String(state.playing);
+    buildStepTrack();
+  }
+
+  function buildStepTrack() {
+    const track = $('step-track');
+    const buttons = sequence.steps.map((step, index) => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.dataset.index = String(index);
+      button.title = `${step.title}：${step.caption}`;
+      button.setAttribute('aria-label', `第 ${index + 1} 步：${step.title}`);
+      const idx = document.createElement('span');
+      idx.className = 'idx';
+      idx.textContent = pad(index + 1);
+      const label = document.createElement('span');
+      label.className = 'label';
+      label.textContent = step.short;
+      button.append(idx, label);
+      button.addEventListener('click', () => {
+        pause();
+        seek(stepEnd(index + 1));
+      });
+      return button;
+    });
+    track.replaceChildren(...buttons);
+  }
+
+  /* ── 视觉渲染 ─────────────────────────────────────── */
+  function updatePacket(frame) {
+    if (!refs.packet) return;
+    const point = frame.packet.point;
+    const shortHop = frame.packet.shortHop;
+    setAttr(refs.packet.g, 'opacity', shortHop ? 0 : frame.packet.alpha.toFixed(3));
+    if (!shortHop) {
+      setAttr(refs.packet.g, 'transform', `translate(${point[0].toFixed(2)} ${point[1].toFixed(2)})`);
+      const className = `packet kind-${frame.packet.kind}`;
+      setClass(refs.packet.g, className);
+      setText(refs.packet.text, frame.packet.label);
+    }
+    setAttr(refs.shortToken, 'transform', `translate(${point[0].toFixed(2)} ${point[1].toFixed(2)})`);
+    setAttr(refs.shortToken, 'opacity', shortHop ? frame.packet.alpha.toFixed(3) : 0);
+    if (shortHop) {
+      setAttr(refs.shortTokenCircle, 'fill', kindColor(frame.packet.kind));
+      setText(refs.shortTokenText, frame.packet.kind === 'answer' ? '✓' : '↑');
+    }
+  }
+
+  function updateTrail(frame) {
+    const trail = refs.activeTrail || $('active-trail');
+    refs.activeTrail = trail;
+    if (!trail) return;
+    const points = frame.trailPoints;
+    if (frame.packet.alpha <= 0.001 || points.length < 2) {
+      setAttr(trail, 'opacity', 0);
+      return;
+    }
+    let d = `M ${points[0][0].toFixed(1)} ${points[0][1].toFixed(1)}`;
+    for (let i = 1; i < points.length; i++) {
+      d += ` L ${points[i][0].toFixed(1)} ${points[i][1].toFixed(1)}`;
+    }
+    setAttr(trail, 'd', d);
+    setClass(trail, `kind-${frame.trailKind}`);
+    setAttr(trail, 'opacity', (0.55 * frame.packet.alpha).toFixed(3));
+  }
+
+  function updateDoneRoutes(frame) {
+    for (const [key, path] of Object.entries(refs.routeDone)) {
+      const kind = frame.completedRoutes[key];
+      if (kind && routeVisible(key)) {
+        setClass(path, `route-done kind-${kind}`);
+        setAttr(path, 'opacity', 0.32);
+      } else {
+        setAttr(path, 'opacity', 0);
+      }
+    }
+  }
+
+  function updateTree(frame, step) {
+    const color = mixColor(COLORS.blue, COLORS.pine, frame.resolvedMix);
+    for (const [id, path] of Object.entries(refs.litEdges)) {
+      const amount = frame.lit[id] || 0;
+      setAttr(path, 'stroke-dashoffset', (1 - amount).toFixed(4));
+      setAttr(path, 'stroke', color);
+      setAttr(path, 'opacity', amount > 0.001 ? 1 : 0);
+    }
+
+    const probeNode = D.TREE_NODES[frame.probe.node];
+    const probePoint = frame.probe.point;
+    setAttr(refs.probe, 'transform', `translate(${probePoint[0].toFixed(2)} ${probePoint[1].toFixed(2)})`);
+    setAttr(refs.probeHalo, 'r', probeNode.r + 7);
+    setAttr(refs.probeHalo, 'stroke', color);
+    setAttr(refs.probeDot, 'cy', -(probeNode.r + 7));
+    setAttr(refs.probeDot, 'fill', color);
+
+    for (const [id, ref] of Object.entries(refs.nodes)) {
+      const resolved = step.after.resolved && id === step.after.match && frame.resolvedMix > 0.5;
+      const active = id === frame.match && !resolved;
+      toggleClass(ref.g, 'is-active', active);
+      toggleClass(ref.g, 'is-resolved', resolved);
+    }
+
+    const match = frame.match;
+    const mainActive = ['abc', 'x', 'u', 'v', 'w'].includes(match)
+      || (state.zone === 'single' && ['y', 't'].includes(match));
+    const yActive = state.zone === 'two' && ['y', 't'].includes(match);
+    toggleClass(refs.zoneMain, 'is-active', mainActive);
+    toggleClass(refs.zoneYGroup, 'is-active', yActive);
+  }
+
+  function updateCards(frame) {
+    for (const [id, card] of Object.entries(refs.cards)) {
+      const active = frame.focus === id;
+      const done = frame.queried.includes(id);
+      const answered = frame.answeredBy === id;
+      toggleClass(card.g, 'is-active', active);
+      toggleClass(card.g, 'is-done', done && !active);
+      setAttr(card.focus, 'opacity', active ? 1 : 0);
+      if (card.aa) setAttr(card.aa, 'opacity', answered ? 1 : 0);
+    }
+
+    const counter = frame.counter;
+    const card = refs.cards.local;
+    if (card && card.old && card.new) {
+      const roll = counter.old === counter.new ? 0 : counter.roll;
+      const oldY = counter.old === counter.new ? -6 : 18 - 24 * roll;
+      const newY = counter.old === counter.new ? 18 : 42 - 24 * roll;
+      setText(card.old, counter.old);
+      setText(card.new, counter.new);
+      setAttr(card.old, 'y', oldY.toFixed(2));
+      setAttr(card.new, 'y', newY.toFixed(2));
+    }
+  }
+
+  function updateBridge(frame) {
+    const node = D.TREE_NODES[frame.bridge.match];
+    setAttr(refs.bridge.g, 'transform', `translate(600 ${node.y})`);
+    setAttr(refs.bridge.g, 'opacity', frame.bridge.alpha.toFixed(3));
+    setText(refs.bridge.text, frame.bridge.text);
+    const bridgeWidth = Math.max(64, Math.min(116, [...(frame.bridge.text || '')].length * 8.8 + 22));
+    setAttr(refs.bridge.bg, 'x', -bridgeWidth / 2);
+    setAttr(refs.bridge.bg, 'width', bridgeWidth);
+  }
+
+  function updateTag(frame) {
+    const tag = frame.tag;
+    if (!tag || !tag.text || tag.alpha <= 0.001) {
+      setAttr(refs.tag.g, 'opacity', 0);
+      return;
+    }
+    const card = D.SERVERS[tag.at];
+    const x = card ? card.x : D.SERVERS.local.x;
+    const below = tag.at === 'authy';
+    const y = card
+      ? card.y + (below ? 1 : -1) * (card.h / 2 + 12)
+      : D.SERVERS.local.y - D.SERVERS.local.h / 2 - 12;
+    setAttr(refs.tag.g, 'transform', `translate(${x} ${y})`);
+    setAttr(refs.tag.g, 'opacity', tag.alpha.toFixed(3));
+    setText(refs.tag.text, tag.text);
+    const tagWidth = Math.max(52, Math.min(116, [...tag.text].length * 9.2 + 22));
+    setAttr(refs.tag.bg, 'x', -tagWidth / 2);
+    setAttr(refs.tag.bg, 'width', tagWidth);
+  }
+
+  function updateResult(frame) {
+    if (frame.result.alpha <= 0.001) {
+      setAttr(refs.result.g, 'opacity', 0);
+      return;
+    }
+    setAttr(refs.result.g, 'opacity', frame.result.alpha.toFixed(3));
+    setAttr(refs.result.g, 'transform', 'translate(865 548)');
+    setText(refs.result.text, `A ${frame.result.text}`);
+  }
+
+  function updatePulse(frame) {
+    const pulse = frame.pulse;
+    if (pulse.alpha <= 0.001) {
+      setAttr(refs.pulse, 'opacity', 0);
+      return;
+    }
+    setAttr(refs.pulse, 'cx', pulse.point[0].toFixed(2));
+    setAttr(refs.pulse, 'cy', pulse.point[1].toFixed(2));
+    setAttr(refs.pulse, 'r', (6 + 14 * pulse.k).toFixed(2));
+    setAttr(refs.pulse, 'stroke', kindColor(pulse.kind));
+    setAttr(refs.pulse, 'opacity', pulse.alpha.toFixed(3));
+  }
+
+  function updateFlags(message) {
+    if (!message) return;
+    const key = `${message.label}|${message.qr}|${message.rd}|${message.aa}|${message.an}|${message.ns}|${message.ar}|${message.tone}`;
+    if (key === lastMessageKey) return;
+    lastMessageKey = key;
+    const tone = $('flag-tone');
+    tone.textContent = message.label;
+    tone.className = `flag tone tone-${message.tone}`;
+    setText($('flag-qr'), message.qr);
+    setText($('flag-rd'), message.rd);
+    setText($('flag-aa'), message.aa);
+    setText($('flag-an'), message.an);
+    setText($('flag-ns'), message.ns);
+    setText($('flag-ar'), message.ar);
+  }
+
+  function updateStepUI(step, info) {
+    setText($('step-no'), pad(info.index + 1));
+    setText($('phase'), info.complete ? '完成' : step.phase);
+    setText($('caption'), step.caption);
+    setText($('narr-index'), pad(info.index + 1));
+    const buttons = $('step-track').children;
+    for (let i = 0; i < buttons.length; i++) {
+      const button = buttons[i];
+      if (i === info.index) button.setAttribute('aria-current', 'step');
+      else button.removeAttribute('aria-current');
+      toggleClass(button, 'is-done', i < info.index || (info.complete && i < buttons.length - 1));
+    }
+    ensureStepVisible(info.index);
+  }
+
+  function ensureStepVisible(index) {
+    const track = $('step-track');
+    const button = track.children[index];
+    if (!button) return;
+    const trackRect = track.getBoundingClientRect();
+    const buttonRect = button.getBoundingClientRect();
+    if (buttonRect.left < trackRect.left) {
+      track.scrollLeft -= trackRect.left - buttonRect.left + 12;
+    } else if (buttonRect.right > trackRect.right) {
+      track.scrollLeft += buttonRect.right - trackRect.right + 12;
+    }
+  }
+
+  function updateTransport(time, total, info) {
+    const prev = $('prev');
+    const next = $('next');
+    const play = $('play');
+    const label = $('play-label');
+    const icon = $('play-icon');
+    prev.disabled = time <= 0.001;
+    next.disabled = time >= total - 0.001;
+    let nextLabel = '播放';
+    let nextIcon = '▶';
+    if (state.playing) {
+      nextLabel = '暂停';
+      nextIcon = '❚❚';
+    } else if (time >= total - 0.001) {
+      nextLabel = '重播';
+      nextIcon = '↺';
+    }
+    setText(label, nextLabel);
+    setText(icon, nextIcon);
+    play.setAttribute('aria-label', nextLabel);
+  }
+
+  function updateProgress(time, total) {
+    const progress = $('progress');
+    const ratio = total > 0 ? time / total : 0;
+    if (progress.max !== String(total)) progress.max = String(total);
+    progress.value = String(time);
+    progress.style.setProperty('--p', ratio.toFixed(5));
+    setText($('time-readout'), `${time.toFixed(1)} / ${total.toFixed(1)} s`);
+  }
+
+  function render(time) {
+    const total = duration();
+    const t = clamp(Number(time) || 0, 0, total);
+    state.time = t;
+    const info = C.sample(sequence, t, state.reduced);
+    const step = sequence.steps[info.index];
+    const frame = C.frame(step, info.progress);
+
+    if (info.index !== lastIndex || info.complete !== lastComplete) {
+      lastIndex = info.index;
+      lastComplete = info.complete;
+      updateStepUI(step, info);
+    }
+    if (frame.match !== lastMatch) {
+      lastMatch = frame.match;
+      setText($('match-line'), `匹配 · ${D.MATCH_LABELS[frame.match]}`);
+    }
+
+    updatePacket(frame);
+    updateTrail(frame);
+    updateDoneRoutes(frame);
+    updateTree(frame, step);
+    updateCards(frame);
+    updateBridge(frame);
+    updateTag(frame);
+    updateResult(frame);
+    updatePulse(frame);
+    updateFlags(frame.message);
+    updateProgress(t, total);
+    updateTransport(t, total, info);
+    writeHash(false);
+  }
+
+  /* ── 播放控制 ─────────────────────────────────────── */
+  function setPlaying(value) {
+    state.playing = Boolean(value);
+    document.body.dataset.playing = String(state.playing);
+    updateTransport(state.time, duration(), currentSample());
+  }
+
+  function buildTimeline() {
+    if (timeline) {
+      timeline.kill();
+      timeline = null;
+    }
+    if (!window.gsap) return;
+    const total = duration();
+    const start = clamp(state.time, 0, total);
+    timeline = gsap.timeline({
+      paused: true,
+      onUpdate() {
+        render(timeline.time());
+      },
+      onComplete() {
+        render(duration());
+        setPlaying(false);
+        writeHash(true);
+      }
+    });
+    timeline.to({}, { duration: total, ease: 'none' });
+    timeline.timeScale(state.speed);
+    timeline.time(start, true);
+  }
+
+  function pause(write = true) {
+    if (timeline) timeline.pause();
+    setPlaying(false);
+    if (write) writeHash(true);
+  }
+
+  function seek(time, options = {}) {
+    const autoPause = options.pause !== false;
+    if (autoPause && state.playing) pause(false);
+    const total = duration();
+    state.time = clamp(Number(time) || 0, 0, total);
+    if (timeline) timeline.time(state.time, true);
+    render(state.time);
+    setPlaying(false);
+    if (options.write !== false) writeHash(true);
+  }
+
+  function togglePlay() {
+    if (!timeline) return;
+    if (state.playing) {
+      pause();
+      return;
+    }
+    if (state.time >= duration() - 0.001) {
+      state.time = 0;
+      timeline.time(0, true);
+      render(0);
+    } else {
+      timeline.time(state.time, true);
+    }
+    timeline.play();
+    setPlaying(true);
+  }
+
+  function stepBy(direction) {
+    pause(false);
+    const info = currentSample();
+    const total = duration();
+    let target;
+    if (direction > 0) {
+      target = stepEnd(info.index + 1);
+      if (state.time >= target - 1e-4) target = stepEnd(info.index + 2);
+    } else {
+      target = info.index > 0 ? stepEnd(info.index) : 0;
+    }
+    seek(clamp(target, 0, total));
+  }
+
+  function setReduced(value, fromUser) {
+    const info = currentSample();
+    const index = info.index;
+    const wasPlaying = state.playing;
+    pause(false);
+    state.reduced = Boolean(value);
+    if (fromUser) motionOverride = true;
+    document.body.dataset.reduced = String(state.reduced);
+    $('reduce-motion').checked = state.reduced;
+    state.time = index >= sequence.steps.length - 1
+      ? duration()
+      : stepEnd(index + 1);
+    state.time = clamp(state.time, 0, duration());
+    buildTimeline();
+    render(state.time);
+    setPlaying(false);
+    writeHash(true);
+    if (wasPlaying && state.time < duration()) togglePlay();
+  }
+
+  function applyConfig(next) {
+    const zone = next.zone || state.zone;
+    const mode = next.mode || state.mode;
+    const target = next.target || state.target;
+    if (zone === state.zone && mode === state.mode && target === state.target) return;
+
+    pause(false);
+    const zoneChanged = zone !== state.zone;
+    const modeChanged = mode !== state.mode;
+    const targetChanged = target !== state.target;
+    state.zone = zone;
+    state.mode = mode;
+    state.target = target;
+    sequence = M.buildScenario(zone, mode, target);
+    state.time = 0;
+    lastIndex = -1;
+    lastComplete = false;
+    lastMatch = '';
+    lastMessageKey = '';
+
+    syncUI();
+    const animate = !state.reduced;
+    if (zoneChanged) setZoneVisual(zone, animate);
+    if (modeChanged) setModeVisual(mode, animate);
+    if (zoneChanged && !modeChanged) updateRouteVisibility(animate);
+    if (targetChanged) setTargetVisual(target, animate, true);
+    else if (zoneChanged) setTargetVisual(target, false, false);
+    buildTimeline();
+    render(0);
+    setPlaying(false);
+    writeHash(true);
+  }
+
+  function writeHash(force) {
+    if (!force && performance.now() - lastWrite < 350) return;
+    lastWrite = performance.now();
+    const params = new URLSearchParams({
+      zone: state.zone,
+      mode: state.mode,
+      target: state.target,
+      t: state.time.toFixed(3),
+      speed: String(state.speed),
+      motion: state.reduced ? 'reduced' : 'full'
+    });
+    try {
+      history.replaceState(null, '', `#${params}`);
+    } catch (error) {
+      /* file:// 可能限制 history；控件仍可用。 */
+    }
+  }
+
+  function readHash() {
+    const zone = hash.get('zone');
+    const mode = hash.get('mode');
+    const target = hash.get('target');
+    const speed = Number(hash.get('speed'));
+    const motion = hash.get('motion');
+    if (M.ZONES.includes(zone)) state.zone = zone;
+    if (M.MODES.includes(mode)) state.mode = mode;
+    if (M.TARGETS.includes(target)) state.target = target;
+    if ([0.5, 1, 1.5, 2].includes(speed)) state.speed = speed;
+    if (motion === 'reduced' || motion === 'full') {
+      state.reduced = motion === 'reduced';
+      motionOverride = true;
+    } else {
+      state.reduced = media.matches;
+    }
+    return Number(hash.get('t'));
+  }
+
+  /* ── 事件绑定 ─────────────────────────────────────── */
+  function bindEvents() {
+    document.querySelectorAll('[data-zone]').forEach(button => {
+      button.addEventListener('click', () => applyConfig({ zone: button.dataset.zone }));
+    });
+    document.querySelectorAll('[data-mode]').forEach(button => {
+      button.addEventListener('click', () => applyConfig({ mode: button.dataset.mode }));
+    });
+    document.querySelectorAll('[data-target]').forEach(button => {
+      button.addEventListener('click', () => applyConfig({ target: button.dataset.target }));
+    });
+
+    $('play').addEventListener('click', togglePlay);
+    $('prev').addEventListener('click', () => stepBy(-1));
+    $('next').addEventListener('click', () => stepBy(1));
+    $('reset').addEventListener('click', () => seek(0));
+
+    $('progress').addEventListener('input', event => {
+      seek(Number(event.target.value), { write: false });
+    });
+    $('progress').addEventListener('change', () => writeHash(true));
+
+    $('speed').addEventListener('change', event => {
+      state.speed = Number(event.target.value);
+      if (timeline) timeline.timeScale(state.speed);
+      writeHash(true);
+    });
+
+    $('reduce-motion').addEventListener('change', event => {
+      setReduced(event.target.checked, true);
+    });
+
+    media.addEventListener('change', event => {
+      if (!motionOverride) setReduced(event.matches, false);
+    });
+
+    document.addEventListener('keydown', event => {
+      const target = event.target instanceof Element ? event.target : null;
+      if (target && target.closest('input, select, textarea, button, a, [contenteditable], [tabindex]')) return;
+      if (event.ctrlKey || event.metaKey || event.altKey) return;
+      if (event.code === 'Space') {
+        event.preventDefault();
+        togglePlay();
+      } else if (event.code === 'ArrowLeft') {
+        event.preventDefault();
+        stepBy(-1);
+      } else if (event.code === 'ArrowRight') {
+        event.preventDefault();
+        stepBy(1);
+      } else if (event.code === 'Home') {
+        event.preventDefault();
+        seek(0);
+      }
+    });
+
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) pause();
+    });
+    window.addEventListener('pagehide', () => {
+      pause(false);
+      if (timeline) timeline.kill();
+      killTweens(zoneTweens);
+      killTweens(routeTweens);
+      if (targetTween) targetTween.kill();
+    });
+  }
+
+  function init() {
+    readColors();
+    const initialTime = readHash();
+    sequence = M.buildScenario(state.zone, state.mode, state.target);
+    state.time = clamp(Number.isFinite(initialTime) ? initialTime : 0, 0, duration());
+    document.body.dataset.reduced = String(state.reduced);
+    $('reduce-motion').checked = state.reduced;
+
+    buildStage();
+    syncUI();
+    setZoneVisual(state.zone, false);
+    setModeVisual(state.mode, false);
+    setTargetVisual(state.target, false);
+    buildTimeline();
+    render(state.time);
+    setPlaying(false);
+    bindEvents();
+
+    if (!window.gsap) {
+      $('play').disabled = true;
+      $('engine-notice').hidden = false;
+    }
+    writeHash(true);
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
+})();
