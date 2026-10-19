@@ -242,7 +242,41 @@ for (const id of pickerIds) {
 }
 console.log(refBroken === 0 ? '✅ 文档链接与动效编号全部可达' : `❌ 文档引用问题 ${refBroken} 处`);
 
-// 9. 输出汇总统计
+// 9. 模块 choreo.js 文件头的动效选用：写了就必须是动效库里的编号；没写的只给一条汇总警告（现有模块暂不强制，见 DESIGN_SYSTEM §11）
+console.log('\n🔎 choreo.js 动效选用体检...');
+const motionMissing = [];
+let motionCount = 0;
+for (const dir of fs.readdirSync(__dirname, { withFileTypes: true })) {
+  if (!dir.isDirectory() || dir.name.startsWith('.')) continue;
+  const choreoFile = path.join(__dirname, dir.name, 'choreo.js');
+  if (!fs.existsSync(choreoFile)) continue;
+  motionCount++;
+  const head = fs.readFileSync(choreoFile, 'utf8').split('\n').slice(0, 30);
+  const line = head.find((row) => /动效选用[:：]/.test(row));
+  if (!line) {
+    motionMissing.push(dir.name);
+    continue;
+  }
+  const idText = line.split(/[:：]/).slice(1).join('：').split(/[（(]/)[0];
+  const ids = [...idText.matchAll(/\b([A-Z]\d)\b/g)].map((m) => m[1]);
+  if (ids.length === 0) {
+    console.error(`❌ ${dir.name}/choreo.js 的「动效选用」后面没有编号`);
+    errors++;
+  }
+  for (const id of ids) {
+    if (!libraryIds.has(id)) {
+      console.error(`❌ ${dir.name}/choreo.js 的动效编号 ${id} 不在 docs/motion-library.md 中`);
+      errors++;
+    }
+  }
+}
+if (motionMissing.length > 0) {
+  console.warn(`⚠️  ${motionMissing.length} 个 choreo.js 还没有「动效选用」文件头（现有模块暂不强制）：${motionMissing.join('、')}`);
+  warnings++;
+}
+console.log(`📋 共 ${motionCount} 个 choreo.js，其中 ${motionCount - motionMissing.length} 个已写文件头`);
+
+// 10. 输出汇总统计
 console.log('\n📊 学科收录统计:');
 console.log(`  - 高等数学 (math):       ${counts.math} 个`);
 console.log(`  - 概率统计 (prob):       ${counts.prob} 个`);
