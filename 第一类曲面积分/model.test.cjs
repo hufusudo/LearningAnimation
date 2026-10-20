@@ -100,3 +100,37 @@ test('细分越密，ΣΔS 与 ΣρΔS 收敛到精确二重积分', () => {
   assert.ok(Math.abs(s64.mass - exactGrad.mass) / exactGrad.mass < 3e-3, '质量收敛');
   assert.ok(exactGrad.mass > exactUniform.area, '渐变密度总质量应大于 ρ≡1 的基准');
 });
+
+test('放大图复用所选网格边界；真实面积随细分改变，放大不改物理量', () => {
+  for (const n of [4, 8, 256]) for (const [i, j] of [[0, 0], [n - 1, n - 1]]) {
+    const p = m.localPatch(n, i, j), corners = m.cellCorners(n, i, j);
+    near(p.x - p.dx / 2, corners[0][0], 1e-12);
+    near(p.y - p.dy / 2, corners[0][1], 1e-12);
+    near(p.x + p.dx / 2, corners[2][0], 1e-12);
+    near(p.y + p.dy / 2, corners[2][1], 1e-12);
+    near(p.projectedArea, (4 / n) ** 2, 1e-12);
+    near(p.planeArea * p.cos, p.projectedArea, 1e-12, '投影等式仅用于切平面面积');
+    assert.ok(p.area >= p.projectedArea);
+  }
+});
+
+test('有限曲面片和切平面面积分别计算，局部缩小后相对误差趋于零', () => {
+  let previous = Infinity;
+  for (const n of [5, 9, 17, 33, 65]) {
+    const p = m.localPatch(n, Math.floor(n / 2), Math.floor(n / 2));
+    const error = Math.abs(p.planeArea - p.area) / p.area;
+    assert.ok(error < previous, `${n}: ${error} >= ${previous}`); previous = error;
+  }
+  assert.ok(previous < .0002);
+});
+
+test('质量仪表使用讲解中的中点面积因子求和', () => {
+  let mass = 0, area = 0;
+  const n = 8;
+  for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) {
+    const [x, y] = m.cellCenter(n, i, j), a = (4 / n) ** 2 * m.dSFactor(x, y);
+    area += a; mass += a * m.rho(x, y, 'gradient');
+  }
+  near(m.sums(n, 'gradient').mass, mass, 1e-12);
+  near(m.sums(n, 'gradient').area, area, 1e-12);
+});
