@@ -1,3 +1,4 @@
+// 动效选用：A1、A3、B1、B3、C3、D1、E1（见 docs/motion-library.md）
 /* All visual interpolation is a pure function of (step, progress). */
 (function (root) {
   'use strict';
