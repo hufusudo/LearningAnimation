@@ -1,795 +1,310 @@
-/* 偏导与可微的几何辨析 · 页面层
- * 数学与内容在 model.js（window.PDModel）；这里只负责画图、判定揭晓、导览与交互。
- * 唯一的数据来源是 state：画面每次都由 state 直接算出（时刻驱动）。导览与自动缩放只是
- * 改写 state 的不同方式，手动操作一动就中断它们，把控制权交还给学生。 */
+/* 页面控制器：数学在model.js，导览完整状态在choreo.js。
+ * GSAP只推进clock.t；所有导览画面由同一时刻重建。 */
 (function () {
   'use strict';
-
-  var M = window.PDModel;
-  var HAS_GSAP = typeof window.gsap !== 'undefined';
-  var SVG_NS = 'http://www.w3.org/2000/svg';
-  var MINUS = '−';
-
-  var CENTER = 260;     // 绘图中心（viewBox 单位）
-  var HALF = 226;       // 窗口半宽对应的像素（窗口为 ±ρ）
-  var NCURVE = 180;     // 每侧截线采样点数
-  var NBAND = 48;       // 误差带的节点数
-  var SPARK_N = 16;     // 切线斜率序列的点数
-  var SPARK_MAX = 1.2;  // 切线斜率纵轴范围 ±1.2
-  var CHIP_ORDER = ['A', 'B', 'D', 'C'];
-  var DOT_POS = { C: [180, 162], D: [180, 206], AB: [180, 45], A: [60, 130], B: [300, 130] };
-
-  var reduceQuery = window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)') : null;
-
-  var state = {
-    sample: 'F1',
-    theta: 20,
-    k: 0,
-    blind: false,
-    reduced: !!(reduceQuery && reduceQuery.matches),
-    fs: 1,
-    narration: ''
+  const M = window.PDModel, C = window.PDChoreo;
+  const hasGSAP = !!window.gsap;
+  const $ = id => document.getElementById(id);
+  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+  const text = (node, value) => { if (node.textContent !== String(value)) node.textContent = value; };
+  const attr = (id, name, value) => $(id).setAttribute(name, String(value));
+  const hide = (id, value) => $(id).toggleAttribute('hidden', value);
+  const fmt = (v, n = 3) => v === null || !Number.isFinite(v) ? '—' : (Math.abs(v) < 0.5 * Math.pow(10, -n) ? 0 : v).toFixed(n).replace('-', '−');
+  const readRatio = value => value === null ? '—' : value !== 0 && Math.abs(value) < 0.001 ? value.toPrecision(2) : fmt(value, value > 10 ? 1 : 3);
+  const signed = (v, n = 3) => v !== null && v > 0.5 * Math.pow(10, -n) ? '+' + fmt(v, n) : fmt(v, n);
+  const emptyKnown = () => ({ A: false, B: false, C: false, D: false });
+  const media = window.matchMedia('(prefers-reduced-motion: reduce)');
+  const state = { sample: 'F1', theta: 20, k: 0, known: emptyKnown(), blind: false, reduced: media.matches, fs: 1 };
+  const clock = { t: 0 };
+  let kind = 'entry', speed = 1, seq, guided = false, playing = false;
+  let tween = null, delayed = null, auto = null, frame = 0, hashTimer = 0;
+  let reducedOverride = false;
+  const PROOFS = {
+    F1: '沿 45°，f = 1/2 ≠ f(P)，故不连续；两坐标轴上 f 恒为 0。',
+    F2: '|f| = r → 0；坐标轴上 g(t) = |t|，两侧差商极限不同。',
+    F3: '|f| ≤ r/2 保证连续；全方向误差比恒为 1/2。偏导存在但不连续。',
+    F4: '误差比 ≤ r → 0；x 轴上两列非零点的偏导分别为 −1、+1，均不趋于原点的 0。',
+    F0: '三角函数的两个偏导在邻域内连续，故在 P 可微；图上数值仅为取样。'
   };
-
-  // 判定揭晓：每个样本单独记录；A 在把手到达坐标轴时揭晓，B、C、D 在 ρ 缩到阈值以内时揭晓
-  var reveal = {};
-  M.order.forEach(function (id) { reveal[id] = { A: false, B: false, C: false, D: false }; });
-
-  var tour = { choice: 'entry', built: null, tl: null, index: -1, speed: 1 };
-  var autoTL = null;
-
-  var $ = function (id) { return document.getElementById(id); };
-  var el = {
-    stage: $('stage'),
-    plot: $('plot'),
-    band: $('band'),
-    secR: $('secR'),
-    secL: $('secL'),
-    tangent: $('tangent'),
-    curveR: $('curveR'),
-    curveL: $('curveL'),
-    limit: $('limit'),
-    edge: $('edge'),
-    dot: $('dot'),
-    dotLabel: $('dot').querySelector('text'),
-    spark: $('spark'),
-    sparkTan: $('sparkTan'),
-    sparkDots: $('sparkDots'),
-    rhoRead: $('rhoRead'),
-    secP: $('secP'),
-    secN: $('secN'),
-    tanRead: $('tanRead'),
-    errRead: $('errRead'),
-    formula: $('formula'),
-    hint: $('hint'),
-    progress: $('progressFill'),
-    theta: $('theta'),
-    thetaVal: $('thetaVal'),
-    zoom: $('zoom'),
-    zoomVal: $('zoomVal'),
-    samples: $('samples'),
-    auto: $('auto'),
-    blind: $('blind'),
-    motion: $('motion'),
-    fontDown: $('fontDown'),
-    fontUp: $('fontUp'),
-    help: $('helpBtn'),
-    keys: $('keys'),
-    tourPlay: $('tourPlay'),
-    tourPrev: $('tourPrev'),
-    tourNext: $('tourNext'),
-    tourReplay: $('tourReplay'),
-    tourKind: $('tourKind'),
-    tourSpeed: $('tourSpeed'),
-    notice: $('notice'),
-    chips: {}
+  const RESULTS = {
+    F1: '偏导存在，不能推出连续。', F2: '连续，不能推出偏导存在。',
+    F3: '连续且偏导存在，仍然不够可微。', F4: '可微，不能推出偏导连续。', F0: '偏导连续 ⇒ 可微 ⇒ 连续且偏导存在。'
   };
-  CHIP_ORDER.forEach(function (c) {
-    el.chips[c] = document.querySelector('#verdicts li[data-c="' + c + '"]');
-  });
+  const DOT = { A: [60, 130], B: [300, 130], AB: [180, 45], D: [180, 206], C: [180, 162] };
+  const scene = window.PDScene.create($('sceneHost'));
+  const flags = { surface: true, cut: true, plane: true };
 
-  // 切线斜率序列的圆点：先建正向（蓝实心），再建反向（描边圆），反向盖在上面便于比对
-  var sparkR = [];
-  var sparkL = [];
-  (function buildSpark() {
-    for (var j = 0; j < SPARK_N; j++) {
-      var cr = document.createElementNS(SVG_NS, 'circle');
-      cr.setAttribute('r', '3');
-      cr.setAttribute('class', 'spark-r');
-      el.sparkDots.appendChild(cr);
-      sparkR.push(cr);
-    }
-    for (var i = 0; i < SPARK_N; i++) {
-      var cl = document.createElementNS(SVG_NS, 'circle');
-      cl.setAttribute('r', '3.4');
-      cl.setAttribute('class', 'spark-l');
-      el.sparkDots.appendChild(cl);
-      sparkL.push(cl);
-    }
-  })();
-
-  /* ---------- 小工具 ---------- */
-
-  function setText(node, text) {
-    if (node.textContent !== text) node.textContent = text;
+  function build() {
+    seq = C.build(M.TOURS[kind]);
+    $('steps').replaceChildren(...seq.steps.map((step, i) => {
+      const b = document.createElement('button');
+      b.type = 'button'; b.dataset.step = i;
+      b.textContent = (i + 1) + ' ' + step.target.title;
+      b.setAttribute('aria-label', '第' + (i + 1) + '步：' + step.target.title);
+      b.addEventListener('click', () => seek(step.end));
+      return b;
+    }));
+    $('progress').max = seq.duration;
   }
 
-  function setAttr(node, name, value) {
-    var v = String(value);
-    if (node.getAttribute(name) !== v) node.setAttribute(name, v);
+  function view() {
+    if (guided) return C.sample(seq, clock.t, state.reduced);
+    return { ...state, alpha: 1, textAlpha: 1, receiptAlpha: 0, tag: null, focus: null,
+      title: '自由探索', text: '', index: -1, progress: 1 };
   }
 
-  function setClass(node, cls) {
-    if (node.getAttribute('class') !== cls) node.setAttribute('class', cls);
-  }
-
-  // SVG 元素没有 hidden 的 DOM 接口，统一用属性开关
-  function setHidden(node, hidden) {
-    node.toggleAttribute('hidden', hidden);
-  }
-
-  function setValue(input, value) {
-    if (input.value !== value) input.value = value;
-  }
-
-  // 带符号的小数；接近 0 时不显示负号
-  function sgn(v, digits) {
-    if (v === null || !isFinite(v)) return '—';
-    var r = Number(v.toFixed(digits));
-    if (r === 0) return (0).toFixed(digits);
-    return (r < 0 ? MINUS : '+') + Math.abs(r).toFixed(digits);
-  }
-
-  function clamp(v, lo, hi) {
-    return Math.min(hi, Math.max(lo, v));
-  }
-
-  function f2(v) {
-    return v.toFixed(2);
-  }
-
-  /* ---------- 绘制：截线、切线、误差带与读数 ---------- */
-
-  // 误差带的节点只与样本和 ρ 有关，与方向无关；缓存起来，导览与缩放时不重复计算
-  var envCache = { key: '', nodes: null };
-
-  function envelope(id, rho) {
-    var key = id + '|' + rho;
-    if (envCache.key !== key) {
-      var nodes = [];
-      for (var j = 0; j < NBAND; j++) nodes.push(M.errorAbs(id, rho * (j + 1) / NBAND));
-      envCache = { key: key, nodes: nodes };
-    }
-    return envCache.nodes;
-  }
-
-  // 节点 j 对应距离 ρ·(j+1)/NBAND；两端之外取最近的节点
-  function envAt(nodes, d, rho) {
-    var x = d / rho * NBAND - 1;
-    if (x <= 0) return nodes[0];
-    if (x >= NBAND - 1) return nodes[NBAND - 1];
-    var i = Math.floor(x);
-    var w = x - i;
-    return nodes[i] * (1 - w) + nodes[i + 1] * w;
-  }
-
-  function drawPlot(s, rho) {
-    var th = state.theta;
-    var sx = function (t) { return CENTER + (t / rho) * HALF; };
-    var sy = function (v) { return CENTER - (v / rho) * HALF; };
-
-    var right = [];
-    var left = [];
-    for (var i = 0; i < NCURVE; i++) {
-      var t = rho * (i + 0.5) / NCURVE;
-      right.push(f2(sx(t)) + ' ' + f2(sy(M.lineValue(s.id, th, t))));
-      left.push(f2(sx(-t)) + ' ' + f2(sy(M.lineValue(s.id, th, -t))));
-    }
-    setAttr(el.curveR, 'd', 'M' + right.join(' L'));
-    setAttr(el.curveL, 'd', 'M' + left.join(' L'));
-
-    // 割线：从 P 连到 ±ρ 处的截线，斜率即读数里的正向与反向割线
-    var vR = M.lineValue(s.id, th, rho);
-    var vL = M.lineValue(s.id, th, -rho);
-    setAttr(el.secR, 'd', 'M' + CENTER + ' ' + CENTER + ' L' + f2(sx(rho)) + ' ' + f2(sy(vR)));
-    setAttr(el.secL, 'd', 'M' + CENTER + ' ' + CENTER + ' L' + f2(sx(-rho)) + ' ' + f2(sy(vL)));
-
-    // 切线与误差带：偏导存在时才有；误差带是所有方向上 |f − L| 的包络
-    var T = M.tangentSlope(s.id, th);
-    setHidden(el.band, T === null);
-    setHidden(el.tangent, T === null);
-    if (T !== null) {
-      var env = envelope(s.id, rho);
-      var up = [];
-      var dn = [];
-      for (var j = -NCURVE; j <= NCURVE; j++) {
-        var tt = rho * j / NCURVE;
-        var e = envAt(env, Math.abs(tt), rho);
-        up.push(f2(sx(tt)) + ' ' + f2(sy(T * tt + e)));
-        dn.push(f2(sx(tt)) + ' ' + f2(sy(T * tt - e)));
-      }
-      setAttr(el.band, 'points', up.concat(dn.reverse()).join(' '));
-      setAttr(el.tangent, 'x1', f2(sx(-rho)));
-      setAttr(el.tangent, 'y1', f2(sy(-T * rho)));
-      setAttr(el.tangent, 'x2', f2(sx(rho)));
-      setAttr(el.tangent, 'y2', f2(sy(T * rho)));
-    }
-
-    // P 处断开：沿这条直线的极限若与 f(P)=0 不同，画一个空心圆标出极限高度
-    var lim = M.limitAlong(s.id, th);
-    var limIn = Math.abs(lim) > 1e-6 && Math.abs(lim) <= rho;
-    setHidden(el.limit, !limIn);
-    if (limIn) setAttr(el.limit, 'cy', f2(sy(lim)));
-
-    // 超出窗口的高度用红色箭头标在画面顶部或底部
-    var outs = [vR, vL, lim].filter(function (v) { return Math.abs(v) > rho; });
-    setHidden(el.edge, !outs.length);
-    if (outs.length) {
-      var big = outs.reduce(function (a, b) { return Math.abs(b) > Math.abs(a) ? b : a; });
-      setText(el.edge, (big > 0 ? '↑ ' : '↓ ') + sgn(big, 3) + ' 超出画面');
-    }
-  }
-
-  function drawSpark(s, rho) {
-    var th = state.theta;
-    var y = function (v) { return 60 - (v / SPARK_MAX) * 52; };
-    var x = function (j) { return 16 + (j / (SPARK_N - 1)) * 248; };
-    for (var j = 0; j < SPARK_N; j++) {
-      // 距离按 2^(−j/2) 递减：每两格缩小一半，由远及近
-      var t = rho * Math.pow(2, -j / 2);
-      setAttr(sparkR[j], 'cx', f2(x(j)));
-      setAttr(sparkR[j], 'cy', f2(y(M.lineSlope(s.id, th, t))));
-      setAttr(sparkL[j], 'cx', f2(x(j)));
-      setAttr(sparkL[j], 'cy', f2(y(M.lineSlope(s.id, th, -t))));
-    }
-    var T = M.tangentSlope(s.id, th);
-    setHidden(el.sparkTan, T === null);
-    if (T !== null) {
-      setAttr(el.sparkTan, 'y1', f2(y(T)));
-      setAttr(el.sparkTan, 'y2', f2(y(T)));
-    }
-  }
-
-  function drawReadout(s, rho) {
-    var th = state.theta;
-    setText(el.rhoRead, rho.toFixed(4));
-    setText(el.secP, sgn(M.secant(s.id, th, rho), 3));
-    setText(el.secN, sgn(M.secant(s.id, th, -rho), 3));
-    var T = M.tangentSlope(s.id, th);
-    setText(el.tanRead, T === null ? '无' : sgn(T, 3));
-    var er = M.errorRatio(s.id, rho);
-    var erText;
-    if (state.blind) erText = '盲测中';
-    else if (er === null) erText = '无切平面';
-    else erText = er.toFixed(er < 10 ? 3 : 1);
-    setText(el.errRead, erText);
-  }
-
-  /* ---------- 判定、集合图、提示 ---------- */
-
-  function drawVerdicts(s) {
-    var r = reveal[s.id];
-    CHIP_ORDER.forEach(function (c) {
-      var li = el.chips[c];
-      var known = !state.blind && r[c];
-      var cls = !known ? 'is-unknown' : (s.truth[c] ? 'is-true' : 'is-false');
-      var glyph = !known ? '?' : (s.truth[c] ? '✓' : '✗');
-      var word = !known ? '未测' : (s.truth[c] ? '成立' : '不成立');
-      setClass(li, 'verdict ' + cls);
-      setText(li.querySelector('.glyph'), glyph);
-      setText(li.querySelector('.state'), word);
-    });
-  }
-
-  // 集合图上的点只在四个概念都揭晓后出现，位置由区域决定
-  function drawSets(s) {
-    var r = reveal[s.id];
-    var all = r.A && r.B && r.C && r.D && !state.blind;
-    var pos = DOT_POS[M.region(s.id)];
-    setHidden(el.dot, !all || !pos);
-    if (!all || !pos) return;
-    setAttr(el.dot, 'transform', 'translate(' + pos[0] + ' ' + pos[1] + ')');
-    setText(el.dotLabel, s.id);
-  }
-
-  function hintInfo(s) {
-    if (state.blind) return { text: M.BLIND_TEXT, kind: 'blind' };
-    if (state.narration) return { text: state.narration, kind: 'tour' };
-    var r = reveal[s.id];
-    if (!r.A) return { text: s.text.axis, kind: 'hint' };
-    if (!r.B) return { text: s.text.zoom, kind: 'hint' };
-    return { text: s.text.result, kind: 'result' };
-  }
-
-  function drawHint(s) {
-    var info = hintInfo(s);
-    setText(el.hint, info.text);
-    setClass(el.hint, 'hint is-' + info.kind);
-  }
-
-  function drawControls(s, rho) {
-    setValue(el.theta, String(Math.round(state.theta)));
-    setText(el.thetaVal, Math.round(state.theta) + '°');
-    setValue(el.zoom, state.k.toFixed(2));
-    setText(el.zoomVal, 'ρ = ' + rho.toFixed(4));
-    setText(el.formula, s.id + '　' + s.formula);
-    el.samples.querySelectorAll('button').forEach(function (b) {
-      b.setAttribute('aria-pressed', String(b.getAttribute('data-id') === state.sample));
-    });
-    el.blind.setAttribute('aria-pressed', String(state.blind));
-    el.motion.setAttribute('aria-pressed', String(state.reduced));
-  }
-
-  /* ---------- 渲染入口 ---------- */
-
-  // 画面只由 state 决定；揭晓是对 state 的一次性记录，不回头影响画面
-  function updateReveal(rho) {
-    if (state.blind) return;
-    var r = reveal[state.sample];
-    if (M.isAxis(state.theta)) r.A = true;
-    if (rho <= M.REVEAL_RHO) r.B = r.C = r.D = true;
-  }
-
-  // 标签页在后台时浏览器会暂停 requestAnimationFrame，改用定时器，保证 DOM 仍与 state 一致
-  var renderQueued = false;
-  function requestRender() {
-    if (renderQueued) return;
-    renderQueued = true;
-    var run = function () {
-      renderQueued = false;
-      render();
+  function drawReadings(v, rho) {
+    text($('secN'), signed(M.secant(v.sample, v.theta, -rho)));
+    text($('secP'), signed(M.secant(v.sample, v.theta, rho)));
+    const rQ = rho * 0.72;
+    const ratio = M.errorRatio(v.sample, rQ);
+    const L = M.tangentSlope(v.sample, v.theta);
+    const local = L === null ? null : Math.abs(M.lineValue(v.sample, v.theta, rQ) - L * rQ) / rQ;
+    text($('localErr'), readRatio(local));
+    text($('globalLabel'), v.sample === 'F0' ? '同距离 · 方向取样最大值' : '同距离 · 全方向最坏比值');
+    text($('errRead'), ratio === null ? '—' : (v.sample === 'F0' ? '≈ ' : '') + readRatio(ratio));
+    const note = {
+      F1: '同距离 r = 0.72ρ；最坏比值为 1/(2r)。', F2: '两偏导不全，无法由偏导构造候选平面 L。',
+      F3: '所有方向中，45° 最坏；比值恒为 1/2。', F4: '任意方向的误差比 ≤ r = 0.72ρ；P 处偏导为 0。',
+      F0: '全方向读数为 360 方向取样；L = 0.59x。'
     };
-    if (document.hidden) setTimeout(run, 16);
-    else requestAnimationFrame(run);
+    text($('errorNote'), note[v.sample]);
+    $('theta').value = v.theta; $('zoom').value = v.k;
+    text($('thetaVal'), Math.round(v.theta) + '°'); text($('zoomVal'), 'ρ = ' + fmt(rho, 4));
+    text($('rhoRead'), '邻域半径 ρ = ' + fmt(rho, 4));
+    text($('scaleRead'), '三轴同比放大 ×' + Math.pow(2, v.k).toFixed(v.k < 2 ? 1 : 0));
+    hide('slopeRead', v.sample !== 'F2' && v.focus !== 'slopes');
+    document.querySelectorAll('[data-angle]').forEach(b => b.setAttribute('aria-pressed', Math.abs(Number(b.dataset.angle) - v.theta) < 0.1));
+  }
+
+  function drawVerdicts(v) {
+    const s = M.byId[v.sample];
+    const known = v.known;
+    for (const c of ['A', 'B', 'D', 'C']) {
+      const li = document.querySelector(`[data-c="${c}"]`), yes = known[c] && !state.blind;
+      li.className = yes ? s.truth[c] ? 'is-true' : 'is-false' : '';
+      text(li.querySelector('.glyph'), yes ? s.truth[c] ? '✓' : '×' : '?');
+      text(li.querySelector('.state'), yes ? s.truth[c] ? '成立' : '不成立' : '待揭晓');
+    }
+    const current = guided ? seq.steps[v.index] : null;
+    const revealing = current && current.target.sample === v.sample;
+    for (const c of ['A', 'B', 'D', 'C']) {
+      const li = document.querySelector(`[data-c="${c}"]`);
+      let alpha = 1;
+      if (revealing && current.target.reveal.includes(c) && v.progress >= 0.72 && v.progress < 1) {
+        alpha = v.progress < 0.8 ? 1 - (v.progress - 0.72) / 0.08 : (v.progress - 0.8) / 0.2;
+      }
+      li.querySelector('.glyph').style.opacity = alpha;
+      li.querySelector('.state').style.opacity = alpha;
+    }
+    const all = Object.values(known).every(Boolean) && !state.blind;
+    text($('proof'), all ? PROOFS[v.sample] : state.blind ? '盲测：先看几何，再自行判断。' : '判定按函数的解析性质揭晓；有限次观察不能充当证明。');
+    hide('dot', !all);
+    if (all) {
+      const pos = DOT[M.region(v.sample)];
+      attr('dot', 'transform', `translate(${pos[0]} ${pos[1]})`);
+      text($('dot').querySelector('text'), v.sample);
+    }
+    text($('relationText'), all ? v.sample + '：' + RESULTS[v.sample] : '揭晓当前样本后，查看它所在的区域。');
+    text($('reveal'), all ? '收起判定' : '揭晓判定');
   }
 
   function render() {
-    var s = M.byId[state.sample];
-    var rho = M.rho(state.k);
-    updateReveal(rho);
-    drawPlot(s, rho);
-    drawSpark(s, rho);
-    drawReadout(s, rho);
-    drawVerdicts(s);
-    drawSets(s);
-    drawHint(s);
-    drawControls(s, rho);
-    scheduleHash();
+    const v = view(), rho = M.rho(v.k), sample = M.byId[v.sample];
+    if (!sample) return;
+    text($('formula'), v.sample + '  ' + sample.formula);
+    text($('originNote'), ['F1', 'F3', 'F4'].includes(v.sample) ? '非原点用上式；原点补定义 f(0,0) = 0' : '原点 f(0,0) = 0');
+    drawReadings(v, rho); drawVerdicts(v);
+    let narration = v.text, narrationAlpha = v.textAlpha;
+    if (guided && !state.reduced) {
+      const step = seq.steps[v.index], p = v.progress;
+      const leads = { plot: '蓝色平面切开曲面，蓝线就是交线。', direction: '转动蓝色平面，看它与曲面的交线。', error: '同比放大邻域，看曲面能否贴住金色平面。', slopes: '放大锥尖，观察两个方向的斜率。', spark: '比较曲面上附近两条切线与原点的平面。' };
+      if (p >= 0.2 && p < 0.8) {
+        narration = leads[step.target.focus];
+        narrationAlpha = p < 0.4 ? (p - 0.2) / 0.2 : p > 0.72 ? (0.8 - p) / 0.08 : 1;
+      } else if (p >= 0.8) { narration = step.target.text; narrationAlpha = (p - 0.8) / 0.2; }
+    }
+    $('hint').style.opacity = state.blind ? 1 : narrationAlpha;
+    const all = Object.values(v.known).every(Boolean);
+    text($('hint'), state.blind ? '先选方向，再缩小邻域；想好后按「揭晓判定」。' : guided ? narration || '蓝面切开绿色曲面，交线直接留在曲面上。' : all ? RESULTS[v.sample] : '拖动看曲面；转动蓝面，观察交线怎样靠近 P。');
+    const focus = v.focus || (v.sample === 'F4' && Object.values(v.known).every(Boolean) ? 'spark' : 'plot');
+    text($('guideKicker'), state.blind ? '先观察，后判断' : ({ plot: '蓝色交线就在曲面上', direction: '剖切平面穿过 P', error: '红线连接曲面与候选平面', slopes: '尖点两边的斜率', spark: v.sample === 'F4' ? '原点偏导 0，附近却是 −1 / +1' : '曲面与候选平面是否贴合' })[focus]);
+    text($('eventTag'), state.blind ? '' : v.tag || '');
+    $('eventTag').style.opacity = v.receiptAlpha;
+    scene.update({ ...v, focus }, flags);
+    text($('stageTitle'), guided ? v.title || '观察截线' : '自由探索');
+    text($('timeRead'), fmt(clock.t, 1) + 's');
+    text($('stepRead'), guided ? '步骤 ' + (v.index + 1) + ' / ' + seq.steps.length : '旋转曲面 · 选方向 · 放大邻域');
+    text($('durationRead'), Math.round(clock.t) + ' / ' + Math.round(seq.duration) + ' s');
+    $('progress').value = clock.t;
+    document.querySelectorAll('[data-step]').forEach(b => {
+      if (guided && Number(b.dataset.step) === v.index) b.setAttribute('aria-current', 'step'); else b.removeAttribute('aria-current');
+    });
+    document.querySelectorAll('#samples button').forEach(b => b.setAttribute('aria-pressed', b.dataset.id === v.sample));
+    attr('stage', 'data-running', playing || !!auto && !auto.paused());
+    document.body.dataset.reduced = state.reduced;
+    attr('motion', 'aria-pressed', state.reduced); attr('blind', 'aria-pressed', state.blind);
+    text($('blind'), state.blind ? '盲测中 · 揭晓' : '盲测');
+    text($('tourPlay'), playing ? '暂停' : clock.t >= seq.duration && guided ? '重新播放' : '播放导览');
+    attr('tourPlay', 'aria-pressed', playing);
+    $('tourPlay').disabled = !hasGSAP;
+    $('auto').disabled = !hasGSAP || state.reduced;
+    attr('auto', 'aria-pressed', !!auto && !auto.paused());
+    text($('auto'), auto ? auto.paused() ? '继续缩放' : '暂停缩放' : '自动缩放');
+    hide('notice', hasGSAP && !state.reduced);
+    text($('notice'), !hasGSAP ? '动画引擎未加载：播放已停用，单步、进度和参数仍可使用。' : '减少动效：导览按事件逐步显示；方向与缩放仍可手动调整。');
   }
 
-  /* ---------- 地址栏：replaceState 写回，不增加历史记录 ---------- */
-
-  var hashTimer = 0;
-  function scheduleHash() {
-    clearTimeout(hashTimer);
-    hashTimer = setTimeout(writeHash, 300);
+  function scheduleRender() {
+    if (frame) return;
+    frame = requestAnimationFrame(() => { frame = 0; render(); });
   }
-
   function writeHash() {
-    try {
-      var q = new URLSearchParams({
-        s: state.sample,
-        a: String(Math.round(state.theta)),
-        z: state.k.toFixed(2)
-      });
-      history.replaceState(null, '', '#' + q.toString());
-    } catch (e) {
-      // 某些本地环境不允许改写地址，演示照常可用
-    }
+    clearTimeout(hashTimer);
+    const v = view();
+    const q = new URLSearchParams({ s: v.sample, a: v.theta.toFixed(2), z: v.k.toFixed(2), mode: guided ? kind : 'free', t: clock.t.toFixed(3) });
+    try { history.replaceState(null, '', '#' + q); } catch (_) { /* file宿主禁止改地址时不影响演示 */ }
   }
-
-  function readHash() {
-    try {
-      var p = new URLSearchParams(location.hash.slice(1));
-      var s = p.get('s');
-      if (s && M.byId[s]) state.sample = s;
-      if (p.has('a')) {
-        var a = Number(p.get('a'));
-        if (isFinite(a)) state.theta = M.snapTheta(a);
-      }
-      if (p.has('z')) {
-        var z = Number(p.get('z'));
-        if (isFinite(z)) state.k = clamp(z, 0, M.K_MAX);
-      }
-    } catch (e) {
-      // 非法地址回退默认值
-    }
+  function saveLater() { clearTimeout(hashTimer); hashTimer = setTimeout(writeHash, 250); }
+  function stopDriver() {
+    if (tween) tween.kill(); if (delayed) delayed.kill();
+    tween = delayed = null; playing = false;
   }
-
-  /* ---------- 手动操作：每个入口都先中断导览与自动缩放 ---------- */
-
-  function setSample(id, user) {
-    if (!M.byId[id]) return;
-    if (user) stopTour();
-    state.sample = id;
-    requestRender();
+  function stopAuto() { if (auto) auto.kill(); auto = null; }
+  function pause() {
+    if (tween) tween.pause(); if (delayed) delayed.pause();
+    playing = false; if (auto) auto.pause(); render(); writeHash();
   }
-
-  function cycleSample(d) {
-    var i = M.order.indexOf(state.sample);
-    var n = M.order.length;
-    setSample(M.order[(i + d + n) % n], true);
+  function leaveTour() {
+    const v = view();
+    state.sample = v.sample; state.theta = v.theta; state.k = v.k; state.known = { ...v.known };
+    guided = false; stopDriver(); stopAuto();
   }
-
-  function setTheta(value, user) {
-    if (user) stopTour();
-    state.theta = M.snapTheta(value);
-    requestRender();
+  function seek(t) {
+    stopDriver(); stopAuto(); guided = true;
+    clock.t = clamp(t, 0, seq.duration); render(); writeHash();
   }
-
-  function setZoom(value, user) {
-    if (user) {
-      stopAuto();
-      stopTour();
-    }
-    state.k = clamp(value, 0, M.K_MAX);
-    requestRender();
+  function step(delta) {
+    const v = view();
+    const index = guided ? clamp(v.index + delta, 0, seq.steps.length - 1) : delta > 0 ? 0 : seq.steps.length - 1;
+    seek(seq.steps[index].end);
   }
-
-  function adjustFont(delta) {
-    state.fs = Math.round(clamp(state.fs + delta, 0.8, 1.6) * 10) / 10;
-    document.documentElement.style.setProperty('--fs', String(state.fs));
+  function reducedTick() {
+    if (!playing) return;
+    const i = view().index;
+    if (i >= seq.steps.length - 1) { clock.t = seq.duration; pause(); return; }
+    delayed = window.gsap.delayedCall(0.9, () => {
+      delayed = null; clock.t = seq.steps[i + 1].end; render(); saveLater(); reducedTick();
+    });
+    delayed.timeScale(speed);
   }
-
-  function toggleHelp() {
-    el.keys.hidden = !el.keys.hidden;
-    el.help.setAttribute('aria-pressed', String(!el.keys.hidden));
-  }
-
-  function toggleFullscreen() {
-    if (document.fullscreenElement) {
-      document.exitFullscreen().catch(function () {});
-      return;
-    }
-    if (el.stage.requestFullscreen) el.stage.requestFullscreen().catch(function () {});
-  }
-
-  function resetView() {
-    stopTour();
+  function play() {
+    if (!hasGSAP) return;
+    if (playing) { pause(); return; }
     stopAuto();
-    state.theta = 20;
-    state.k = 0;
-    reveal[state.sample] = { A: false, B: false, C: false, D: false };
-    requestRender();
-  }
-
-  function toggleBlind() {
-    state.blind = !state.blind;
-    if (state.blind) {
-      stopTour();
-    } else {
-      // 揭晓：关掉盲测时，当前样本的四个判定一起显示
-      var r = reveal[state.sample];
-      r.A = r.B = r.C = r.D = true;
+    // 暂停保留时间驱动器，恢复时继续当前动作或事件停留。
+    if (guided && clock.t < seq.duration && (state.reduced ? delayed : tween)) {
+      playing = true; (state.reduced ? delayed : tween).resume(); render(); return;
     }
-    setText(el.blind, state.blind ? '盲测中（R 揭晓）' : '盲测（R）');
-    requestRender();
-  }
-
-  function toggleMotion() {
-    state.reduced = !state.reduced;
-    stopTour();
-    if (state.reduced) stopAuto();
-    applyCapabilities();
-    requestRender();
-  }
-
-  /* ---------- 自动缩放（空格）：往返于 ρ 的整个范围 ---------- */
-
-  function setAutoButton() {
-    var on = !!autoTL;
-    setText(el.auto, on ? '停止缩放（空格）' : '自动缩放（空格）');
-    el.auto.setAttribute('aria-pressed', String(on));
-  }
-
-  function startAuto() {
-    if (!HAS_GSAP || state.reduced) return;
-    stopTour();
-    stopAuto();
-    autoTL = window.gsap.to(state, {
-      k: M.K_MAX,
-      duration: Math.max(1, (M.K_MAX - state.k) * 1.2),
-      ease: 'sine.inOut',
-      repeat: -1,
-      yoyo: true,
-      onUpdate: requestRender
-    });
-    setAutoButton();
-  }
-
-  function stopAuto() {
-    if (!autoTL) return;
-    autoTL.kill();
-    autoTL = null;
-    setAutoButton();
-  }
-
-  function toggleAuto() {
-    if (autoTL) stopAuto();
-    else startAuto();
-  }
-
-  /* ---------- 导览：GSAP 时间线只推进时刻，画面由时刻对应的 state 决定 ---------- */
-
-  // 旁白停留：字数 × 0.2 s + 1.2 s，至少 2.4 s（设计方案 §7）
-  function holdFor(text) {
-    return Math.max(2.4, [...text].length * 0.2 + 1.2);
-  }
-
-  function buildTour(kind) {
-    var spec = M.TOURS[kind];
-    var tl = window.gsap.timeline({ paused: true, onUpdate: onTourTick, onComplete: setTourButtons });
-    var prev = spec.start;
-    spec.steps.forEach(function (st, i) {
-      tl.addLabel('s' + i);
-      // 每段的起点是上一段的终点，因此任意时刻跳转都得到确定的状态
-      tl.fromTo(
-        state,
-        { theta: prev.theta, k: prev.k },
-        {
-          theta: st.theta,
-          k: st.k,
-          duration: state.reduced ? 0 : st.dur,
-          ease: 'sine.inOut',
-          immediateRender: false,
-          onUpdate: requestRender
-        }
-      );
-      tl.to({}, { duration: holdFor(st.text) });
-      prev = st;
-    });
-    tl.addLabel('end');
-    return tl;
-  }
-
-  function ensureTimeline(kind) {
-    if (tour.tl && tour.built === kind) return tour.tl;
-    if (tour.tl) tour.tl.kill();
-    tour.tl = buildTour(kind);
-    tour.built = kind;
-    tour.tl.timeScale(tour.speed);
-    return tour.tl;
-  }
-
-  function onTourTick() {
-    var tl = tour.tl;
-    if (!tl) return;
-    var steps = M.TOURS[tour.built].steps;
-    var t = tl.time();
-    var idx = 0;
-    for (var i = 0; i < steps.length; i++) {
-      if (t >= tl.labels['s' + i] - 1e-6) idx = i;
+    if (!guided || clock.t >= seq.duration) { guided = true; clock.t = 0; }
+    state.blind = false; playing = true;
+    if (state.reduced) { clock.t = seq.steps[view().index].end; render(); reducedTick(); }
+    else {
+      tween = window.gsap.to(clock, { t: seq.duration, duration: seq.duration - clock.t, ease: 'none',
+        onUpdate: () => { render(); saveLater(); }, onComplete: () => { playing = false; tween = null; render(); writeHash(); } });
+      tween.timeScale(speed); render();
     }
-    var st = steps[idx];
-    tour.index = idx;
-    if (state.sample !== st.sample) state.sample = st.sample;
-    if (state.narration !== st.text) state.narration = st.text;
-    el.progress.style.transform = 'scaleX(' + tl.progress().toFixed(4) + ')';
-    setTourButtons();
-    requestRender();
   }
-
-  function setTourButtons() {
-    var tl = tour.tl;
-    var running = !!tl && !tl.paused() && tl.progress() < 1;
-    var finished = !!tl && tl.progress() >= 1;
-    setText(el.tourPlay, running ? '暂停' : finished ? '重播' : '播放导览');
-    el.tourPlay.setAttribute('aria-pressed', String(running));
-    el.tourKind.querySelectorAll('button').forEach(function (b) {
-      b.setAttribute('aria-pressed', String(b.getAttribute('data-kind') === tour.choice));
+  function setSample(id) {
+    leaveTour(); state.sample = id; state.known = emptyKnown(); clock.t = 0;
+    render(); writeHash();
+  }
+  function reset() {
+    leaveTour(); state.theta = 20; state.k = 0; state.known = emptyKnown(); clock.t = 0;
+    render(); writeHash();
+  }
+  function blind() {
+    leaveTour(); state.blind = !state.blind;
+    if (!state.blind) state.known = { A: true, B: true, C: true, D: true };
+    render(); writeHash();
+  }
+  function motion() {
+    const wasPlaying = playing;
+    stopDriver(); stopAuto(); state.reduced = !state.reduced; reducedOverride = true;
+    if (guided && state.reduced) clock.t = seq.steps[view().index].end;
+    render(); writeHash(); if (wasPlaying && !(guided && clock.t >= seq.duration)) play();
+  }
+  function autoZoom() {
+    if (!hasGSAP || state.reduced) return;
+    if (auto) { if (auto.paused()) auto.resume(); else auto.pause(); render(); writeHash(); return; }
+    leaveTour();
+    if (state.k >= M.K_MAX - 0.01) state.k = 0;
+    auto = window.gsap.to(state, { k: M.K_MAX, duration: (M.K_MAX - state.k) * 1.2, ease: 'none', repeat: -1, yoyo: true,
+      onUpdate: () => { render(); saveLater(); } }); render();
+  }
+  function font(delta) { state.fs = clamp(Math.round((state.fs + delta) * 10) / 10, 0.8, 1.6); document.documentElement.style.setProperty('--fs', state.fs); }
+  function fullScreen() {
+    if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+    else if ($('stage').requestFullscreen) $('stage').requestFullscreen().catch(() => {});
+  }
+  function bind() {
+    $('samples').addEventListener('click', e => { const b = e.target.closest('[data-id]'); if (b) setSample(b.dataset.id); });
+    $('theta').addEventListener('input', () => { const a = Number($('theta').value); leaveTour(); state.theta = M.snapTheta(a); scheduleRender(); saveLater(); });
+    $('zoom').addEventListener('input', () => { const k = Number($('zoom').value); leaveTour(); state.k = k; scheduleRender(); saveLater(); });
+    for (const id of ['theta', 'zoom']) $(id).addEventListener('change', writeHash);
+    document.querySelectorAll('[data-angle]').forEach(b => b.addEventListener('click', () => { leaveTour(); state.theta = Number(b.dataset.angle); render(); writeHash(); }));
+    $('progress').addEventListener('input', () => seek(Number($('progress').value)));
+    $('tourPlay').addEventListener('click', play); $('tourPrev').addEventListener('click', () => step(-1)); $('tourNext').addEventListener('click', () => step(1));
+    $('tourReplay').addEventListener('click', () => seek(0));
+    $('tourKind').addEventListener('change', () => { stopDriver(); kind = $('tourKind').value; build(); seek(0); });
+    $('tourSpeed').addEventListener('change', () => {
+      speed = Number($('tourSpeed').value); if (tween) tween.timeScale(speed);
+      if (delayed) delayed.timeScale(speed); render();
     });
-    el.tourSpeed.querySelectorAll('button').forEach(function (b) {
-      b.setAttribute('aria-pressed', String(Number(b.getAttribute('data-speed')) === tour.speed));
+    $('reveal').addEventListener('click', () => {
+      leaveTour(); state.blind = false;
+      const all = Object.values(state.known).every(Boolean);
+      state.known = { A: !all, B: !all, C: !all, D: !all }; render(); writeHash();
+    });
+    $('auto').addEventListener('click', autoZoom); $('reset').addEventListener('click', reset); $('blind').addEventListener('click', blind); $('motion').addEventListener('click', motion);
+    $('fontDown').addEventListener('click', () => font(-0.1)); $('fontUp').addEventListener('click', () => font(0.1));
+    $('helpBtn').addEventListener('click', () => { $('keys').hidden = !$('keys').hidden; attr('helpBtn', 'aria-expanded', !$('keys').hidden); });
+    $('fullscreen').addEventListener('click', fullScreen);
+    document.querySelectorAll('[data-camera]').forEach(b => b.addEventListener('click', () => {
+      scene.setCamera(b.dataset.camera);
+      document.querySelectorAll('[data-camera]').forEach(other => other.setAttribute('aria-pressed', other === b));
+    }));
+    [['showSurface', 'surface'], ['showCut', 'cut'], ['showPlane', 'plane']].forEach(([id, key]) => $(id).addEventListener('change', () => { flags[key] = $(id).checked; render(); }));
+    window.addEventListener('pagehide', event => { stopDriver(); stopAuto(); clearTimeout(hashTimer); cancelAnimationFrame(frame); if (!event.persisted) scene.dispose(); });
+    window.addEventListener('pageshow', event => { if (event.persisted) { scene.resize(); render(); } });
+    document.addEventListener('visibilitychange', () => { if (document.hidden) pause(); });
+    media.addEventListener('change', () => { if (!reducedOverride && state.reduced !== media.matches) { reducedOverride = false; motion(); reducedOverride = false; } });
+    document.addEventListener('keydown', e => {
+      if (e.code === 'Escape') { pause(); return; }
+      if (e.ctrlKey || e.metaKey || e.altKey || e.target.closest('input,button,select,textarea,a,summary,[contenteditable=true]')) return;
+      if (e.code === 'Space') { e.preventDefault(); play(); }
+      else if (e.code === 'Home') { e.preventDefault(); seek(0); }
+      else if (/^Digit[1-5]$/.test(e.code)) setSample(M.order[Number(e.code.slice(-1)) - 1]);
+      else if (e.code === 'ArrowRight' || e.code === 'ArrowLeft') {
+        e.preventDefault(); const d = e.code === 'ArrowRight' ? 1 : -1;
+        if (e.shiftKey) { leaveTour(); state.theta = M.snapTheta(state.theta + 5 * d); render(); writeHash(); } else step(d);
+      } else if (e.code === 'ArrowUp' || e.code === 'ArrowDown') {
+        e.preventDefault(); leaveTour(); state.k = clamp(state.k + (e.code === 'ArrowUp' ? -0.25 : 0.25), 0, M.K_MAX); render(); writeHash();
+      } else if (e.code === 'KeyR') blind(); else if (e.code === 'KeyZ') reset(); else if (e.code === 'KeyF') fullScreen();
+      else if (e.key === '+' || e.key === '=') font(0.1); else if (e.key === '-') font(-0.1);
     });
   }
-
-  function stopTour() {
-    if (tour.tl) tour.tl.kill();
-    tour.tl = null;
-    tour.built = null;
-    tour.index = -1;
-    el.progress.style.transform = 'scaleX(0)';
-    state.narration = '';
-    setTourButtons();
-    requestRender();
-  }
-
-  function startTour(kind) {
-    if (!HAS_GSAP) return;
-    stopAuto();
-    tour.choice = kind;
-    var spec = M.TOURS[kind];
-    state.theta = spec.start.theta;
-    state.k = spec.start.k;
-    state.sample = spec.steps[0].sample;
-    var tl = ensureTimeline(kind);
-    tl.pause(0, false);
-    onTourTick();
-    tl.play();
-    setTourButtons();
-  }
-
-  function togglePlay() {
-    if (!HAS_GSAP) return;
-    if (!tour.tl || tour.built !== tour.choice) {
-      startTour(tour.choice);
-      return;
-    }
-    if (tour.tl.progress() >= 1) {
-      startTour(tour.choice);
-      return;
-    }
-    if (tour.tl.paused()) {
-      stopAuto();
-      tour.tl.play();
-    } else {
-      tour.tl.pause();
-    }
-    setTourButtons();
-  }
-
-  // 上一步、下一步：跳到对应关键帧的起点（无动画引擎时直接设定终态）
-  function stepTour(delta) {
-    var kind = tour.choice;
-    var steps = M.TOURS[kind].steps;
-    var cur = tour.index >= 0 ? tour.index : (delta > 0 ? -1 : steps.length);
-    var idx = clamp(cur + delta, 0, steps.length - 1);
-    stopAuto();
-    if (!HAS_GSAP) {
-      var st = steps[idx];
-      state.sample = st.sample;
-      state.theta = st.theta;
-      state.k = st.k;
-      state.narration = st.text;
-      tour.index = idx;
-      requestRender();
-      return;
-    }
-    var tl = ensureTimeline(kind);
-    tl.pause();
-    // 该步的起点 = 上一步的终点；时间没有变化时 GSAP 不回调，所以跳转后直接按时刻应用一次
-    var from = idx === 0 ? M.TOURS[kind].start : M.TOURS[kind].steps[idx - 1];
-    state.theta = from.theta;
-    state.k = from.k;
-    tl.seek('s' + idx, false);
-    onTourTick();
-    setTourButtons();
-  }
-
-  /* ---------- 动效与能力降级 ---------- */
-
-  function applyCapabilities() {
-    if (!HAS_GSAP) {
-      el.notice.hidden = false;
-      setText(el.notice, '动画引擎未加载：导览与自动缩放不可用；滑块、单步与键盘仍可用。');
-      el.tourPlay.disabled = true;
-      el.auto.disabled = true;
-      return;
-    }
-    el.tourPlay.disabled = false;
-    if (state.reduced) {
-      el.notice.hidden = false;
-      setText(el.notice, '减少动效已开启：导览直接跳到每一步；自动缩放停用，请用 ↑ ↓ 逐级缩放。');
-      el.auto.disabled = true;
-    } else {
-      el.notice.hidden = true;
-      el.auto.disabled = false;
-    }
-  }
-
-  /* ---------- 事件 ---------- */
-
-  function onKey(e) {
-    var target = e.target instanceof Element ? e.target : null;
-    if (e.key === 'Escape') {
-      stopTour();
-      stopAuto();
-      if (!el.keys.hidden) toggleHelp();
-      return;
-    }
-    // 焦点在表单控件上时不抢键（滑块自己处理方向键）
-    if (target && target.closest('input, select, textarea, button, a, [contenteditable="true"]')) return;
-    if (e.ctrlKey || e.metaKey || e.altKey) return;
-
-    var code = e.code;
-    if (/^Digit[1-5]$/.test(code)) {
-      e.preventDefault();
-      setSample(M.order[Number(code.slice(-1)) - 1], true);
-      return;
-    }
-    if (code === 'ArrowLeft' || code === 'ArrowRight') {
-      e.preventDefault();
-      var d = code === 'ArrowLeft' ? -1 : 1;
-      if (e.shiftKey) setTheta(state.theta + 5 * d, true);
-      else cycleSample(d);
-      return;
-    }
-    if (code === 'ArrowUp' || code === 'ArrowDown') {
-      e.preventDefault();
-      setZoom(state.k + (code === 'ArrowUp' ? -0.25 : 0.25), true);
-      return;
-    }
-    if (code === 'Space') {
-      e.preventDefault();
-      toggleAuto();
-      return;
-    }
-    if (code === 'KeyG' || code === 'KeyT') {
-      var kind = code === 'KeyG' ? 'entry' : 'advanced';
-      if (!HAS_GSAP) return;
-      if (tour.tl && tour.built === kind) togglePlay();
-      else startTour(kind);
-      return;
-    }
-    if (code === 'KeyR') return toggleBlind();
-    if (code === 'KeyZ') return resetView();
-    if (code === 'KeyF') return toggleFullscreen();
-    if (e.key === '+' || e.key === '=') return adjustFont(0.1);
-    if (e.key === '-' || e.key === '−' || e.key === '_') return adjustFont(-0.1);
-    if (e.key === '?') return toggleHelp();
-  }
-
-  function bindEvents() {
-    el.samples.addEventListener('click', function (e) {
-      var b = e.target.closest('button[data-id]');
-      if (b) setSample(b.getAttribute('data-id'), true);
-    });
-    el.theta.addEventListener('input', function () {
-      setTheta(Number(el.theta.value), true);
-    });
-    el.zoom.addEventListener('input', function () {
-      setZoom(Number(el.zoom.value), true);
-    });
-    el.auto.addEventListener('click', toggleAuto);
-    el.blind.addEventListener('click', toggleBlind);
-    el.motion.addEventListener('click', toggleMotion);
-    el.fontDown.addEventListener('click', function () { adjustFont(-0.1); });
-    el.fontUp.addEventListener('click', function () { adjustFont(0.1); });
-    el.help.addEventListener('click', toggleHelp);
-
-    el.tourPlay.addEventListener('click', togglePlay);
-    el.tourPrev.addEventListener('click', function () { stepTour(-1); });
-    el.tourNext.addEventListener('click', function () { stepTour(1); });
-    el.tourReplay.addEventListener('click', function () { startTour(tour.choice); });
-    el.tourKind.addEventListener('click', function (e) {
-      var b = e.target.closest('button[data-kind]');
-      if (!b) return;
-      var kind = b.getAttribute('data-kind');
-      if (kind !== tour.choice) {
-        stopTour();
-        tour.index = -1;
-      }
-      tour.choice = kind;
-      setTourButtons();
-    });
-    el.tourSpeed.addEventListener('click', function (e) {
-      var b = e.target.closest('button[data-speed]');
-      if (!b) return;
-      tour.speed = Number(b.getAttribute('data-speed'));
-      if (tour.tl) tour.tl.timeScale(tour.speed);
-      setTourButtons();
-    });
-
-    document.addEventListener('keydown', onKey);
-    document.addEventListener('visibilitychange', function () {
-      if (!document.hidden) return;
-      if (tour.tl && !tour.tl.paused()) tour.tl.pause();
-      if (autoTL) autoTL.pause();
-      setTourButtons();
-    });
-  }
-
-  /* ---------- 启动 ---------- */
-
   function init() {
-    readHash();
-    bindEvents();
-    applyCapabilities();
-    setTourButtons();
-    setAutoButton();
-    adjustFont(0);
-    render();
+    const q = new URLSearchParams(location.hash.slice(1));
+    if (q.get('mode') === 'advanced') kind = 'advanced';
+    build();
+    if (M.byId[q.get('s')]) state.sample = q.get('s');
+    const a = Number(q.get('a')), k = Number(q.get('z')), t = Number(q.get('t'));
+    if (q.has('a') && q.get('a').trim() !== '' && Number.isFinite(a)) state.theta = M.snapTheta(a);
+    if (q.has('z') && q.get('z').trim() !== '' && Number.isFinite(k)) state.k = clamp(k, 0, M.K_MAX);
+    guided = ['entry', 'advanced'].includes(q.get('mode'));
+    if (guided && Number.isFinite(t)) clock.t = clamp(t, 0, seq.duration);
+    $('tourKind').value = kind; bind(); render(); writeHash();
   }
-
   init();
 })();

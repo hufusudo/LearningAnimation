@@ -169,11 +169,10 @@ test('数值安全：原点与极小距离处不出现 NaN', () => {
   }
 });
 
-test('缩放与磁吸：ρ 逐级减半；揭晓阈值位于 k=6 与 k=7 之间；磁吸只在 0°、90°、180° 附近', () => {
+test('缩放与磁吸：ρ 逐级减半；磁吸只在 0°、90°、180° 附近', () => {
   near(M.rho(0), 1.2, 1e-12);
   near(M.rho(1), 0.6, 1e-12);
   assert.ok(M.rho(M.K_MAX) > 0.002 && M.rho(M.K_MAX) < 0.0025);
-  assert.ok(M.rho(6) > M.REVEAL_RHO && M.rho(7) < M.REVEAL_RHO);
   assert.equal(M.snapTheta(1.5), 0);
   assert.equal(M.snapTheta(88.5), 90);
   assert.equal(M.snapTheta(30), 30);
@@ -202,4 +201,30 @@ test('文案：提示与结果 ≤ 26 字；导览旁白 ≤ 40 字；导览样�
   assert.deepEqual(plain(M.samples.filter((s) => s.group === 'entry').map((s) => s.id)), ['F1', 'F2']);
   assert.deepEqual([...new Set(M.TOURS.entry.steps.map((s) => s.sample))].sort(), ['F1', 'F2']);
   assert.deepEqual([...new Set(M.TOURS.advanced.steps.map((s) => s.sample))].sort(), ['F0', 'F3', 'F4']);
+});
+
+test('F3偏导在P存在但不连续：沿正y轴的fx恒为1，原点fx为0', () => {
+  near(M.partialAt('F3', 'x'), 0, 1e-12);
+  for (const y of [0.1, 0.01, 1e-5]) near(M.byId.F3.grad(0, y).x, 1, 1e-12);
+  // |xy|≤(x²+y²)/2给出连续性，不能由“坐标轴平坦”推断连续。
+  near(M.errorRatio('F3', 1e-5), 0.5, 1e-12);
+});
+
+test('F4附近偏导的两列反例与原点偏导严格区分', () => {
+  near(M.partialAt('F4', 'x'), 0, 1e-12);
+  for (const n of [1, 2, 20, 1024, 32768]) {
+    near(M.lineSlope('F4', 0, 1 / (2 * Math.PI * n)), -1, 1e-8);
+    near(M.lineSlope('F4', 0, 1 / (2 * Math.PI * n + Math.PI)), 1, 1e-8);
+  }
+});
+
+test('反例误差采用解析值；连续样本的沿线极限精确为0', () => {
+  for (const r of [1.2, 0.1, 0.00234375]) {
+    near(M.errorAbs('F1', r), 0.5, 1e-12);
+    near(M.errorAbs('F3', r), r / 2, 1e-12);
+    near(M.errorAbs('F4', r), r * r * Math.abs(Math.sin(1 / r)), 1e-12);
+  }
+  for (const id of ['F0', 'F2', 'F3', 'F4']) {
+    for (const angle of [0, 20, 45, 90]) assert.equal(M.limitAlong(id, angle), 0);
+  }
 });
