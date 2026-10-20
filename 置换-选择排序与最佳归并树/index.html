@@ -33,6 +33,7 @@
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Newsreader:ital,opsz,wght@0,6..72,500;0,6..72,600;1,6..72,400&display=swap">
 
   <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="rs-style.css">
 </head>
 <body class="min-h-screen bg-[#FAF9F5] text-stone-900 antialiased selection:bg-amber-100 selection:text-amber-900 flex flex-col justify-between overflow-x-hidden">
 
@@ -49,7 +50,7 @@
           <h1 class="text-base font-bold tracking-tight text-stone-900 flex items-center gap-2">
             置换-选择排序与最佳归并树
             <span class="text-xs font-mono font-normal px-2 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200">
-              408 核心考点 · 外部排序
+              外部排序
             </span>
           </h1>
         </div>
@@ -70,220 +71,61 @@
   <!-- ========================================================================= -->
   <!-- 主体工作区 MAIN                                                          -->
   <!-- ========================================================================= -->
-  <main class="flex-1 max-w-7xl w-full mx-auto px-4 md:px-6 py-5 flex flex-col gap-6">
+  <main class="flex-1 max-w-[1180px] w-full mx-auto px-4 md:px-6 py-5 flex flex-col gap-6">
 
     <!-- ========================================================================= -->
     <!-- SECTION 1: 置换-选择排序 (REPLACEMENT SELECTION SORT)                     -->
     <!-- ========================================================================= -->
-    <section id="rs-section" class="card-panel p-5 flex flex-col gap-4">
-
-      <!-- Section Header & Controls -->
-      <div class="flex flex-wrap items-center justify-between gap-3 border-b border-[#E5E4DC] pb-3.5">
-        <div class="flex items-center gap-2">
-          <span class="w-2.5 h-2.5 rounded-full bg-emerald-600"></span>
-          <h2 class="text-base font-bold text-stone-900 tracking-tight">
-            置换-选择排序
-            <span class="font-mono text-xs text-stone-400 font-normal ml-1">Replacement Selection</span>
-          </h2>
-        </div>
-
-        <!-- Controls -->
-        <div class="flex flex-wrap items-center gap-2">
-          <button id="rs-btn-reset" class="ctl-btn">重置</button>
-          <button id="rs-btn-prev" class="ctl-btn">上一步</button>
-          <button id="rs-btn-play" class="btn-primary">
-            <span id="rs-play-icon">▶</span>
-            <span id="rs-play-label">自动播放</span>
-          </button>
-          <button id="rs-btn-next" class="ctl-btn font-semibold text-stone-900 border-stone-400">单步执行</button>
-
-          <div class="ctrl-group">
-            <span class="text-stone-400">速度:</span>
-            <input id="rs-speed" type="range" min="0.3" max="2.5" step="0.1" value="1.0" class="w-16 accent-stone-800 h-1 cursor-pointer">
-            <span id="rs-speed-val" class="w-7 text-stone-700 font-bold">1.0x</span>
-          </div>
-
-          <div class="ctrl-group">
-            <span class="text-stone-400">WA容量:</span>
-            <select id="rs-wa-cap" class="bg-transparent text-stone-900 font-bold outline-none cursor-pointer">
-              <option value="4">4</option>
-              <option value="5">5</option>
-              <option value="6" selected>6 (教材)</option>
-              <option value="7">7</option>
-              <option value="8">8</option>
-            </select>
-          </div>
-
-          <div class="h-4 w-px bg-stone-300 mx-0.5"></div>
-
-          <button class="rs-preset-btn btn-preset" data-preset="textbook">教材24数</button>
-          <button class="rs-preset-btn btn-preset" data-preset="nearly_sorted">近乎有序</button>
-          <button class="rs-preset-btn btn-preset" data-preset="reverse">逆序</button>
-        </div>
+    <section id="rs-section" class="rs-section" aria-labelledby="rs-heading">
+      <div class="rs-heading">
+        <div><p class="rs-eyebrow">外部排序 / 初始归并段生成</p><h2 id="rs-heading">置换-选择排序 <span>Replacement selection</span></h2><p class="rs-subtitle">选出最小值，接续本段；小于上次输出的记录，留到下一段。</p></div>
+        <a class="rs-next-link" href="#tree-section">接着看最佳归并树 ↓</a>
       </div>
-
-      <!-- Main Dual Column Layout: Left Visualizer + Right Code Execution -->
-      <div class="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
-
-        <!-- Left: Visualizer Canvas (7 Cols) -->
-        <div class="lg:col-span-7 flex flex-col gap-4">
-
-          <!-- 1. Input Stream -->
-          <div class="bg-[#FAF9F5] border border-[#E5E4DC] rounded-xl p-3 flex flex-col gap-2">
-            <div class="flex items-center justify-between text-xs font-mono text-stone-500">
-              <span class="font-medium text-stone-700">待排输入流 (Input Stream)</span>
-              <span>剩余待读: <strong id="rs-input-count" class="text-stone-900 font-bold">24</strong></span>
-            </div>
-            <div id="rs-input-stream" class="flex items-center gap-1.5 overflow-x-auto min-h-[46px] p-1 scrollbar-thin">
-              <!-- Stream Nodes -->
-            </div>
-          </div>
-
-          <!-- 2. Decision Inspector & WA Heap -->
-          <div class="grid grid-cols-1 md:grid-cols-12 gap-3">
-
-            <!-- Inspector -->
-            <div id="rs-inspector-card" class="md:col-span-4 bg-[#FAF9F5] border border-[#E5E4DC] rounded-xl p-3 flex flex-col justify-between transition-all duration-300">
-              <div class="text-[11px] font-mono text-stone-500 flex items-center justify-between">
-                <span class="font-semibold text-stone-700">置换判定台</span>
-                <span id="rs-decision-tag" class="text-[10px] px-1.5 py-0.5 rounded bg-stone-200 text-stone-700 font-bold">比对中</span>
-              </div>
-
-              <div class="flex items-center justify-around my-2.5 font-mono">
-                <div class="flex flex-col items-center">
-                  <span class="text-[10px] text-stone-400">新元素 x</span>
-                  <div id="rs-x-val" class="w-10 h-10 rounded-lg bg-white border border-stone-300 flex items-center justify-center font-bold text-sm text-stone-900 shadow-2xs">--</div>
-                </div>
-                <div id="rs-op-symbol" class="text-base font-extrabold text-stone-400">?</div>
-                <div class="flex flex-col items-center">
-                  <span class="text-[10px] text-stone-400">LAST_KEY</span>
-                  <div id="rs-last-key-val" class="w-10 h-10 rounded-lg bg-white border border-amber-300 flex items-center justify-center font-bold text-sm text-amber-800 shadow-2xs">--</div>
-                </div>
-              </div>
-
-              <div id="rs-decision-desc" class="text-[11px] font-mono text-stone-500 text-center leading-tight">
-                等待读入与置换
-              </div>
-            </div>
-
-            <!-- WA Min-Heap Tree -->
-            <div class="md:col-span-8 bg-[#FAF9F5] border border-[#E5E4DC] rounded-xl p-3 flex flex-col justify-between relative min-h-[260px]">
-              <div class="flex items-center justify-between text-[11px] font-mono text-stone-500 border-b border-[#E5E4DC] pb-2">
-                <span class="font-semibold text-stone-700">工作区 WA 小顶堆 (活跃: <span id="rs-act-count" class="text-emerald-700 font-bold">6</span>, 冻结: <span id="rs-frz-count" class="text-rose-600 font-bold">0</span>)</span>
-                <div class="flex items-center gap-3">
-                  <span class="inline-flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>活跃堆</span>
-                  <span class="inline-flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full border border-dashed border-rose-500 bg-rose-200"></span>冻结区</span>
-                </div>
-              </div>
-
-              <!-- Tree Canvas -->
-              <div id="rs-heap-canvas" class="relative w-full h-[210px] flex items-center justify-center">
-                <svg id="rs-heap-svg" class="absolute inset-0 w-full h-full pointer-events-none"></svg>
-                <div id="rs-heap-nodes" class="relative z-10 w-full h-full"></div>
-              </div>
-            </div>
-
-          </div>
-
-          <!-- 3. Linear WA Slots -->
-          <div class="bg-[#FAF9F5] border border-[#E5E4DC] rounded-xl p-3 flex flex-col gap-2">
-            <div class="text-[11px] font-mono text-stone-500 flex items-center justify-between">
-              <span class="font-semibold text-stone-700">线性物理内存槽位 (WA[0 .. w-1])</span>
-              <span class="text-[10px] text-stone-400">左侧为主存活跃堆，右侧为顺延收缩的冻结区</span>
-            </div>
-            <div id="rs-wa-slots" class="grid grid-cols-6 gap-2">
-              <!-- Linear Slots -->
-            </div>
-          </div>
-
-          <!-- 4. Initial Runs Tracks -->
-          <div class="bg-[#FAF9F5] border border-[#E5E4DC] rounded-xl p-3 flex flex-col gap-2">
-            <div class="flex items-center justify-between text-xs font-mono text-stone-500">
-              <span class="font-semibold text-stone-700">生成的初始归并段 (Initial Runs)</span>
-              <button id="rs-btn-import-tree" class="px-2.5 py-1 bg-amber-50 hover:bg-amber-100 text-amber-800 rounded-lg border border-amber-300 text-[11px] font-medium transition-colors shadow-2xs flex items-center gap-1">
-                <span>导入下方最佳归并树</span> <span>&darr;</span>
-              </button>
-            </div>
-            <div id="rs-runs-tracks" class="flex flex-col gap-2 max-h-[140px] overflow-y-auto scrollbar-thin">
-              <!-- Run Tracks -->
-            </div>
-          </div>
-
-        </div>
-
-        <!-- Right: Live Code Execution & Variable Watcher (5 Cols) -->
-        <div class="lg:col-span-5 flex flex-col gap-3">
-
-          <!-- Current Step Note -->
-          <div id="rs-step-summary-card" class="bg-white border-l-4 border-l-amber-500 border border-[#E5E4DC] rounded-xl p-3.5 flex flex-col gap-1.5 shadow-sm">
-            <div class="flex items-center justify-between text-xs font-mono">
-              <span id="rs-step-title" class="font-bold text-amber-800">步骤执行</span>
-              <span id="rs-step-badge" class="px-2 py-0.5 rounded bg-stone-100 text-stone-500 font-bold text-[10px]">Step 0</span>
-            </div>
-            <p id="rs-step-detail" class="text-xs text-stone-700 leading-relaxed font-sans">
-              准备就绪，点击自动播放或单步执行。
-            </p>
-          </div>
-
-          <!-- Live Code Panel -->
-          <div class="code-container p-3 flex flex-col gap-2 shadow-2xs">
-            <div class="flex items-center justify-between text-xs font-mono text-stone-600 border-b border-[#E5E4DC] pb-2">
-              <span class="font-bold">置换-选择排序算法 (C++ / 伪代码)</span>
-              <span class="text-[10px] text-amber-700 font-bold flex items-center gap-1">
-                <span class="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span>
-                实时运行行
-              </span>
-            </div>
-
-            <!-- Code Lines with Live Highlighting -->
-            <pre class="font-mono text-xs overflow-x-auto leading-relaxed select-none" id="rs-code-block"><code class="flex flex-col">
-<span class="code-line" id="rs-line-1"><span class="line-num">01</span>while (heapSize > 0 || hasFrozen) {</span>
-<span class="code-line" id="rs-line-2"><span class="line-num">02</span>  if (heapSize == 0) { // 活跃堆空，当前段结束</span>
-<span class="code-line" id="rs-line-3"><span class="line-num">03</span>    endCurrentRun(); startNextRun();</span>
-<span class="code-line" id="rs-line-4"><span class="line-num">04</span>    unfreezeAll(); buildMinHeap(WA, w);</span>
-<span class="code-line" id="rs-line-5"><span class="line-num">05</span>  }</span>
-<span class="code-line" id="rs-line-6"><span class="line-num">06</span>  minVal = extractMin(WA); // 选出堆顶极小值</span>
-<span class="code-line" id="rs-line-7"><span class="line-num">07</span>  outputToRun(currentRun, minVal);</span>
-<span class="code-line" id="rs-line-8"><span class="line-num">08</span>  lastKey = minVal;</span>
-<span class="code-line" id="rs-line-9"><span class="line-num">09</span>  if (!inputStream.empty()) {</span>
-<span class="code-line" id="rs-line-10"><span class="line-num">10</span>    x = inputStream.readNext();</span>
-<span class="code-line" id="rs-line-11"><span class="line-num">11</span>    if (x >= lastKey) { // 归入当前段</span>
-<span class="code-line" id="rs-line-12"><span class="line-num">12</span>      WA[0] = x;</span>
-<span class="code-line" id="rs-line-13"><span class="line-num">13</span>      siftDown(WA, heapSize, 0);</span>
-<span class="code-line" id="rs-line-14"><span class="line-num">14</span>    } else { // 归入下一段 (冻结置底)</span>
-<span class="code-line" id="rs-line-15"><span class="line-num">15</span>      WA[0] = WA[heapSize - 1];</span>
-<span class="code-line" id="rs-line-16"><span class="line-num">16</span>      WA[heapSize - 1] = {x, FROZEN};</span>
-<span class="code-line" id="rs-line-17"><span class="line-num">17</span>      heapSize--;</span>
-<span class="code-line" id="rs-line-18"><span class="line-num">18</span>      siftDown(WA, heapSize, 0);</span>
-<span class="code-line" id="rs-line-19"><span class="line-num">19</span>    }</span>
-<span class="code-line" id="rs-line-20"><span class="line-num">20</span>  }</span>
-<span class="code-line" id="rs-line-21"><span class="line-num">21</span>}</span></code></pre>
-          </div>
-
-          <!-- Variable State Monitor -->
-          <div class="bg-white border border-[#E5E4DC] rounded-xl p-3 grid grid-cols-4 gap-2 font-mono text-xs shadow-2xs">
-            <div class="flex flex-col">
-              <span class="text-[10px] text-stone-400 font-sans">当前段</span>
-              <span id="rs-var-run" class="text-amber-800 font-bold">R1</span>
-            </div>
-            <div class="flex flex-col">
-              <span class="text-[10px] text-stone-400 font-sans">前驱极值</span>
-              <span id="rs-var-lastkey" class="text-stone-800 font-bold">-∞</span>
-            </div>
-            <div class="flex flex-col">
-              <span class="text-[10px] text-stone-400 font-sans">活跃堆大小</span>
-              <span id="rs-var-heapsize" class="text-emerald-700 font-bold">6</span>
-            </div>
-            <div class="flex flex-col">
-              <span class="text-[10px] text-stone-400 font-sans">新读入元素</span>
-              <span id="rs-var-x" class="text-stone-800 font-bold">--</span>
-            </div>
-          </div>
-
-        </div>
-
+      <div class="rs-settings">
+        <fieldset class="rs-presets"><legend class="sr-only">输入数据</legend><button type="button" data-rs-preset="textbook" aria-pressed="true">教材序列 · 24 数</button><button type="button" data-rs-preset="nearly_sorted" aria-pressed="false">近乎有序</button><button type="button" data-rs-preset="reverse" aria-pressed="false">逆序</button></fieldset>
+        <label class="rs-capacity">工作区容量 <select id="rs-capacity"><option>4</option><option>5</option><option selected>6</option><option>7</option><option>8</option></select></label>
       </div>
-
+      <div class="rs-stage" id="rs-stage" data-playing="false">
+        <div class="rs-stage-top"><span class="rs-stage-status"><i aria-hidden="true"></i><span id="rs-phase">就绪</span></span><span class="rs-time">t = <b id="rs-time">0.00</b></span><span id="rs-event-label">等待开始</span></div>
+        <p class="rs-scroll-hint">舞台可左右滑动查看完整流程</p>
+        <div class="rs-stage-scroll" tabindex="0" role="region" aria-label="置换选择流程舞台，可横向滚动">
+          <svg id="rs-svg" viewBox="0 0 1100 540" role="img" aria-labelledby="rs-svg-title rs-svg-desc">
+            <title id="rs-svg-title">置换-选择排序的数据流</title><desc id="rs-svg-desc">输入记录先进入工作区，活跃小顶堆的最小值输出到当前归并段。新值与上次输出比较，小于它则冻结到下一段。</desc>
+            <defs><pattern id="rs-grid" width="18" height="18" patternUnits="userSpaceOnUse"><path d="M 18 0 L 0 0 0 18" fill="none" stroke="#343c38" stroke-opacity=".035"/></pattern><marker id="rs-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0L10 5L0 10" fill="none" stroke="#b8beb5" stroke-width="1.5"/></marker></defs>
+            <rect width="1100" height="540" fill="url(#rs-grid)"/>
+            <g class="rs-structure">
+              <text x="35" y="36" class="rs-svg-heading">01</text><text x="69" y="36" class="rs-svg-heading">输入流</text><text id="rs-input-count" x="1065" y="36" text-anchor="end" class="rs-svg-note"></text>
+              <path d="M35 116H1065" class="rs-rule"/>
+              <rect x="35" y="164" width="246" height="288" rx="12" class="rs-inspector-bg"/>
+              <text x="55" y="190" class="rs-svg-heading">与上次输出比较</text><text x="55" y="212" class="rs-svg-note">决定归入哪一段</text>
+              <text x="100" y="251" text-anchor="middle" class="rs-svg-note">新记录 x</text><text x="220" y="251" text-anchor="middle" class="rs-svg-note">LAST_KEY</text>
+              <rect x="195" y="268" width="50" height="44" rx="8" fill="#fff" stroke="#d9c697"/><text id="rs-last-key" x="220" y="296" text-anchor="middle" class="rs-svg-value"></text>
+              <text id="rs-op" x="160" y="297" text-anchor="middle" class="rs-svg-operator"></text>
+              <text id="rs-decision" x="158" y="355" text-anchor="middle" class="rs-svg-heading"></text><text x="158" y="385" text-anchor="middle" class="rs-svg-note">x ≥ LAST_KEY → 本段</text><text x="158" y="407" text-anchor="middle" class="rs-svg-note">x &lt; LAST_KEY → 下段</text>
+              <text x="330" y="155" class="rs-svg-heading">02</text><text x="365" y="155" class="rs-svg-heading">工作区 WA</text><text id="rs-occupancy" x="770" y="155" text-anchor="end" class="rs-svg-note"></text>
+              <rect x="330" y="174" width="440" height="256" rx="14" class="rs-active-bg"/>
+              <text x="350" y="199" class="rs-svg-note">活跃小顶堆 · 仅本段参与选择</text><text id="rs-active-count" x="750" y="199" text-anchor="end" class="rs-svg-note"></text>
+              <rect x="330" y="448" width="440" height="72" rx="10" class="rs-frozen-bg"/>
+              <text x="350" y="471" class="rs-svg-note">冻结架 · 等待下一段</text><text id="rs-frozen-count" x="750" y="471" text-anchor="end" class="rs-svg-note"></text>
+              <path d="M292 290H320M783 254H816" fill="none" stroke="#b8beb5" stroke-width="1.5" marker-end="url(#rs-arrow)"/>
+              <text x="825" y="155" class="rs-svg-heading">03</text><text x="860" y="155" class="rs-svg-heading">输出归并段</text>
+              <rect x="825" y="174" width="240" height="346" rx="14" class="rs-output-bg"/>
+              <text id="rs-run-title" x="845" y="204" class="rs-svg-heading"></text><text id="rs-run-count" x="1045" y="204" text-anchor="end" class="rs-svg-note"></text>
+              <text x="845" y="493" class="rs-svg-note">按非降顺序追加 →</text>
+            </g>
+            <g id="rs-edges"></g><g id="rs-placeholders"></g><g id="rs-flight-path"></g><g id="rs-tokens"></g><g id="rs-focus"></g>
+            <g id="rs-event-tag"><rect x="424" y="118" width="252" height="27" rx="5" fill="#fff" stroke="#e5e4dc"/><text x="550" y="136" text-anchor="middle" class="rs-svg-tag"></text></g>
+          </svg>
+        </div>
+        <div class="rs-narration"><span class="rs-narration-mark" aria-hidden="true">→</span><p id="rs-narration" aria-live="polite">工作区尚未装入记录，准备顺序读入。</p><span id="rs-total-output" class="rs-total-output">已输出 0 / 24</span></div>
+        <div class="rs-archive"><div class="rs-archive-heading"><h3>归并段记录</h3><button id="rs-import" type="button" disabled title="全部生成后可导入实际段长">生成完成后导入最佳归并树 ↓</button></div><div id="rs-run-tracks" class="rs-run-tracks"></div></div>
+      </div>
+      <div class="rs-controls">
+        <div class="rs-control-row"><div class="rs-transport"><button id="rs-reset" type="button">重播</button><button id="rs-prev" type="button">上一步</button><button id="rs-play" type="button" class="rs-play"><span id="rs-play-icon" aria-hidden="true">▶</span><span id="rs-play-label">播放</span></button><button id="rs-next" type="button">下一步</button></div><div class="rs-options"><label>速度 <input id="rs-speed" type="range" min="0.5" max="2.5" step="0.25" value="1"><output id="rs-speed-value">1.00×</output></label><label class="rs-motion"><input id="rs-reduce-motion" type="checkbox">减少动效</label></div></div>
+        <div class="rs-progress-row"><label for="rs-progress">演示进度</label><input id="rs-progress" type="range" min="0" max="1" step="0.01" value="0"><output id="rs-step-count">0 / 0</output></div>
+        <div class="rs-control-foot"><span id="rs-engine-notice" role="status"></span><span>空格 播放 / 暂停 · ← → 单步 · Home 重播</span></div>
+      </div>
+      <p class="rs-footnote">示意：按关键字升序生成初始归并段，忽略磁盘缓冲与实际 I/O 时延。</p>
     </section>
 
 
@@ -475,10 +317,13 @@
   <!-- 极简页脚 FOOTER                                                           -->
   <!-- ========================================================================= -->
   <footer class="border-t border-[#E5E4DC] py-3.5 px-6 text-center text-xs font-mono text-stone-400">
-    置换-选择排序与最佳归并树 · 计算机专业基础 408 数据结构 · 败者树与哈夫曼树可视化系统
+    置换-选择排序与最佳归并树 · 数据结构 / 外部排序
   </footer>
 
   <!-- Custom JS -->
+  <script src="model.js"></script>
+  <script src="choreo.js"></script>
   <script src="app.js"></script>
+  <script src="tree.js"></script>
 </body>
 </html>
