@@ -66,3 +66,76 @@ test('bent vortex route keeps both positive and negative local work', () => {
   assert.ok(bins.some(value => value > 0));
   assert.ok(bins.some(value => value < 0));
 });
+
+test('partition accumulators equal the sum of their segment contributions', () => {
+  for (const path of ['polyline', 'parabola', 'semicircle']) {
+    for (const field of ['vortex', 'radial', 'constant']) {
+      const partition = M.buildPartition(path, field, 12);
+      near(partition.segments.reduce((sum, segment) => sum + segment.wx, 0), partition.total.wx, 1e-12);
+      near(partition.segments.reduce((sum, segment) => sum + segment.wy, 0), partition.total.wy, 1e-12);
+      near(partition.segments.reduce((sum, segment) => sum + segment.work, 0), partition.total.work, 1e-12);
+      near(partition.total.wx + partition.total.wy, partition.total.work, 1e-12);
+      assert.equal(partition.count, partition.segments.length);
+    }
+  }
+});
+
+test('reverse partition pairs identical chord midpoints and negates every segment contribution', () => {
+  for (const path of ['polyline', 'parabola', 'semicircle']) {
+    const forward = M.buildPartition(path, 'vortex', 12);
+    const reverse = M.buildPartition(path, 'vortex', 12, true);
+    near(reverse.total.wx, -forward.total.wx, 1e-12);
+    near(reverse.total.wy, -forward.total.wy, 1e-12);
+    near(reverse.total.work, -forward.total.work, 1e-12);
+    for (let i = 0; i < 12; i++) {
+      const a = forward.segments[i], b = reverse.segments[11 - i];
+      near(a.midpoint.x, b.midpoint.x, 1e-12);
+      near(a.midpoint.y, b.midpoint.y, 1e-12);
+      near(a.dx, -b.dx, 1e-12);
+      near(a.dy, -b.dy, 1e-12);
+      near(a.wx, -b.wx, 1e-12);
+      near(a.wy, -b.wy, 1e-12);
+      near(a.work, -b.work, 1e-12);
+    }
+  }
+});
+
+test('uniform parameter partition retains all polyline corners', () => {
+  const partition = M.buildPartition('polyline', 'constant', 12);
+  for (const t of [1 / 3, 2 / 3]) {
+    const point = M.pointAt('polyline', t);
+    const boundary = partition.segments.find(segment =>
+      Math.hypot(segment.end.x - point.x, segment.end.y - point.y) < 1e-12
+    );
+    assert.ok(boundary, `missing polyline vertex at t=${t}`);
+  }
+});
+
+test('radial field has zero midpoint-chord work on every semicircle partition segment', () => {
+  for (const count of [6, 12, 24]) {
+    const partition = M.buildPartition('semicircle', 'radial', count);
+    assert.ok(partition.segments.every(segment => segment.work === 0));
+    assert.equal(partition.total.work, 0);
+  }
+});
+
+test('semicircle vortex partition converges to the analytic integral', () => {
+  const exact = -Math.PI * 1.65 ** 2;
+  const errors = [6, 12, 24].map(count => Math.abs(M.buildPartition('semicircle', 'vortex', count).total.work - exact));
+  assert.ok(errors[1] < errors[0]);
+  assert.ok(errors[2] < errors[1]);
+});
+
+test('parabola vortex partition converges toward the independently integrated value 76/15', () => {
+  const exact = 76 / 15;
+  const errors = [6, 12, 24].map(count => Math.abs(M.buildPartition('parabola', 'vortex', count).total.work - exact));
+  assert.ok(errors[1] < errors[0]);
+  assert.ok(errors[2] < errors[1]);
+  near(M.buildPartition('parabola', 'vortex', 24).total.work, exact, 0.02);
+});
+
+test('partition rejects counts that would fail to preserve polyline corners', () => {
+  for (const count of [0, -3, 5, 12.5]) {
+    assert.throws(() => M.buildPartition('polyline', 'vortex', count), /positive multiple of 3/);
+  }
+});
