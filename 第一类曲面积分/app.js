@@ -1,58 +1,44 @@
-/* 第一类曲面积分：宏观铁皮视口 + 微元显微台 + 投影底板联动。
-   所有视觉状态都来自一个可补间的参数快照 P，因此任意前后跳步都不会留下后置状态。 */
+/* 第一类曲面积分：同一切片跨区转移，有限面积 → 切平面 → 面积微元。 */
 (function () {
   'use strict';
-
-  const M = window.SurfaceModel;
+  const M = window.SurfaceModel, C = window.SurfaceChoreo;
   const $ = id => document.getElementById(id);
   const clamp = (v, a = 0, b = 1) => Math.max(a, Math.min(b, v));
   const lerp = (a, b, t) => a + (b - a) * t;
-  const reduced = window.matchMedia('(prefers-reduced-motion: reduce)');
-  const srgb = hex => new THREE.Color(hex).convertSRGBToLinear();
   const fmt = (v, d = 4) => Number(v).toFixed(d);
-
+  const media = matchMedia('(prefers-reduced-motion: reduce)');
+  const hasThree = !!(window.THREE && THREE.OrbitControls);
+  const srgb = hex => new THREE.Color(hex).convertSRGBToLinear();
   const N_STOPS = [4, 6, 8, 12, 16, 24, 32, 48, 64, 96, 128, 192, 256];
-  const RAMP = ['#FAF3E6', '#E1A244', '#8C4A14'].map(srgb);
+  const RAMP = hasThree ? ['#FAF3E6', '#E1A244', '#8C4A14'].map(srgb) : [];
   const UNIFORM_T = 0.45;
-  const MICRO_HH = 0.34;                 // 显微台微元半宽（cm）
-  const PICK0 = { x: -0.6, y: 0.5 };
-
-  const state = {
-    n: 16, rhoMode: 'gradient', capsule: 1, step: 0,
-    playing: false, speed: 1, stepClock: 0,
-    pick: { x: PICK0.x, y: PICK0.y }, pickId: 0, pickCell: { i: 0, j: 0 },
-    sums: { area: 0, mass: 0 }, exact: { area: 0, mass: 0 }
-  };
-
-  // 可补间参数快照（每一步都写全量，回退不会残留）
-  const OFF = {
-    colorMix: 0, separate: 0, pickLift: 0, board: 0, fall: 0, counter: 0,
-    rise: 0, rays: 0, normals: 0, arc: 0, grad: 0, dot: 0, press: 0, shadowHi: 0
-  };
-  const P = Object.assign({}, OFF);
-
-  const main = {}, micro = {};
-  let labelsMain = [], labelsMicro = [], pickMarker = {}, pickDrop = null, balanceTween = null;
-  const STEPS = [];
-
-  /* ================== 数学 → 视觉 ================== */
+  const state = { n: 8, rhoMode: 'gradient', pick: { x: -0.6, y: 0.5 },
+    pickCell: { i: 0, j: 0 }, pickId: 0, playing: false, speed: 1,
+    reduced: media.matches, sums: {}, exact: {} };
+  const clock = { t: 0 }, main = {}, micro = {};
+  let P = C.frames[0], labelsMain = [], labelsMicro = [], graphic = false;
+  let tween = null, reducedClock = 0, lastText = -1, lastMath = '';
+  const CAM = { pos: [4.7, -6.5, 4.5], target: [0, 0, 0.7] };
+  const tmpColor = () => new THREE.Color();
   function rampColor(t, out) {
-    t = clamp(t, 0, 1);
     const [a, b, c] = RAMP;
-    if (t < 0.55) return out.copy(a).lerp(b, t / 0.55);
-    return out.copy(b).lerp(c, (t - 0.55) / 0.45);
+    return t < .55 ? out.copy(a).lerp(b, clamp(t / .55)) : out.copy(b).lerp(c, clamp((t - .55) / .45));
   }
   function rhoT(x, y) {
-    if (state.rhoMode === 'uniform') return UNIFORM_T;
-    return (M.rho(x, y, 'gradient') - M.RHO_MIN) / (M.RHO_MAX - M.RHO_MIN);
+    return state.rhoMode === 'uniform' ? UNIFORM_T : (M.rho(x, y, 'gradient') - M.RHO_MIN) / (M.RHO_MAX - M.RHO_MIN);
   }
-  const tmpColor = () => new THREE.Color();
-
-  /* ================== 主舞台：曲面网格 ================== */
+  function text(el, value) { if (el.textContent !== value) el.textContent = value; }
+  function alpha(el, v) { el.style.opacity = v; el.style.visibility = v > .001 ? 'visible' : 'hidden'; }
+  function math(el, tex, fallback) {
+    if (el.dataset.formula === tex) return;
+    el.dataset.formula = tex;
+    if (window.katex) katex.render(tex, el, { displayMode: true, throwOnError: false, strict: false });
+    else text(el, fallback);
+  }
   const SURFACE_VERT = [
     'attribute vec3 aCenter; attribute vec3 aNrm; attribute vec3 aCol;',
     'attribute float aRand; attribute float aId; attribute vec2 aLocal;',
-    'uniform float uSep, uPick, uLift, uFall, uTime;',
+    'uniform float uSep, uPick, uLift, uFall;',
     'varying vec3 vCol; varying vec2 vLocal; varying float vShade, vPick, vLift;',
     'void main() {',
     '  vec3 local = position - aCenter;',
@@ -63,7 +49,7 @@
     '  float e = t * t * (3.0 - 2.0 * t);',
     '  vec3 target = vec3(aCenter.x + local.x, aCenter.y + local.y, 0.03);',
     '  vec3 p = mix(surf, target, e);',
-    '  p.z += 0.05 * sin(uTime * 2.2 + aRand * 31.0) * e * (1.0 - e) * 4.0;',
+
     '  vec3 n = normalize(mix(aNrm, vec3(0.0, 0.0, 1.0), e));',
     '  vec3 L = normalize(vec3(-0.42, -0.5, 0.76));',
     '  vShade = 0.58 + 0.48 * max(dot(n, L), 0.0);',
@@ -73,9 +59,10 @@
   ].join('\n');
 
   const SURFACE_FRAG = [
-    'uniform float uSep, uColorMix;',
+    'uniform float uSep, uColorMix, uExtract;',
     'varying vec3 vCol; varying vec2 vLocal; varying float vShade, vPick, vLift;',
     'void main() {',
+    '  if (vPick > 0.5 && uExtract > 0.5) discard;',
     '  vec3 base = mix(vec3(1.0), vCol, uColorMix);',
     '  vec3 col = base * vShade;',
     '  float e = min(min(vLocal.x, 1.0 - vLocal.x), min(vLocal.y, 1.0 - vLocal.y));',
@@ -147,17 +134,6 @@
     main.mesh = mesh;
     main.n = n;
     updatePickId();
-  }
-
-  function refreshSurfaceColors() {
-    const attr = main.mesh.geometry.getAttribute('aCol');
-    const center = main.mesh.geometry.getAttribute('aCenter');
-    const tmp = tmpColor();
-    for (let id = 0; id < main.n * main.n; id++) {
-      rampColor(rhoT(center.getX(id * 6), center.getY(id * 6)), tmp);
-      for (let k = 0; k < 6; k++) attr.setXYZ(id * 6 + k, tmp.r, tmp.g, tmp.b);
-    }
-    attr.needsUpdate = true;
   }
 
   /* ================== 投影底板 ================== */
@@ -243,943 +219,479 @@
     if (old) old.dispose();
   }
 
-  /* ================== 选中微元的地面标记 ================== */
-  function updatePickMarker() {
-    const n = main.n, dx = 4 / n, dy = 4 / n;
-    const i = state.pickCell.i, j = state.pickCell.j;
-    const x0 = -2 + i * dx, y0 = -2 + j * dy;
-    const cx = x0 + dx / 2, cy = y0 + dy / 2, cz = M.z(cx, cy);
-    state.pick = { x: cx, y: cy };
-
-    const ring = [[x0, y0], [x0 + dx, y0], [x0 + dx, y0 + dy], [x0, y0 + dy]]
-      .map(([x, y]) => [x, y, M.z(x, y) + 0.014]);
-    pickMarker.outline.geometry.dispose();
-    pickMarker.outline.geometry = new THREE.BufferGeometry()
-      .setAttribute('position', new THREE.Float32BufferAttribute(ring.flat(), 3));
-
-    pickDrop.geometry.dispose();
-    pickDrop.geometry = new THREE.BufferGeometry().setAttribute('position',
-      new THREE.Float32BufferAttribute([cx, cy, cz + 0.014, cx, cy, 0.034], 3));
-    pickDrop.computeLineDistances();
-  }
 
   function updatePickId() {
-    const n = main.n, dx = 4 / n, dy = 4 / n;
-    state.pickCell.i = clamp(Math.floor((state.pick.x + 2) / dx), 0, n - 1);
-    state.pickCell.j = clamp(Math.floor((state.pick.y + 2) / dy), 0, n - 1);
+    const n = state.n;
+    state.pickCell.i = clamp(Math.floor((state.pick.x + 2) * n / 4), 0, n - 1);
+    state.pickCell.j = clamp(Math.floor((state.pick.y + 2) * n / 4), 0, n - 1);
     state.pickId = state.pickCell.j * n + state.pickCell.i;
-    updatePickMarker();
+    const [x, y] = M.cellCenter(n, state.pickCell.i, state.pickCell.j);
+    state.pick = { x, y };
+    state.patch = M.localPatch(n, state.pickCell.i, state.pickCell.j);
   }
 
-  function buildPickMarker() {
-    pickMarker.outline = new THREE.LineLoop(new THREE.BufferGeometry(),
-      new THREE.LineBasicMaterial({ color: srgb('#8A4B12'), transparent: true, opacity: 0 }));
-    pickMarker.outline.frustumCulled = false;
-    main.scene.add(pickMarker.outline);
-
-    const g = new THREE.BufferGeometry();
-    g.setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0, 0, 0, 0], 3));
-    pickDrop = new THREE.Line(g, new THREE.LineDashedMaterial({
-      color: srgb('#8A4B12'), dashSize: 0.1, gapSize: 0.08, transparent: true, opacity: 0
-    }));
-    pickDrop.frustumCulled = false;
-    main.scene.add(pickDrop);
-  }
-
-  /* ================== 显微台 ================== */
-  function makeArrow(color, shaftR, headR, headLen) {
-    const g = new THREE.Group();
-    const mat = new THREE.MeshBasicMaterial({ color: srgb(color), transparent: true });
-    const shaft = new THREE.Mesh(new THREE.CylinderGeometry(shaftR, shaftR, 1, 10), mat);
-    const head = new THREE.Mesh(new THREE.ConeGeometry(headR, headLen, 14), mat);
-    g.add(shaft, head);
-    g.userData = { shaft, head, headLen, mat };
-    g.setLength = L => {
-      const s = Math.max(0.05, L - headLen);
-      shaft.scale.y = s; shaft.position.y = s / 2;
-      head.position.y = s + headLen / 2;
-    };
-    g.setLength(1);
-    g.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, 1));
-    return g;
-  }
-
-  function buildPatchGeometry() {
-    const seg = 10, hh = MICRO_HH, px = state.pick.x, py = state.pick.y, z0 = M.z(px, py);
-    const pos = [], idx = [], col = [], edge = [], ring = [], border = [], borderFlat = [];
-    const tmp = tmpColor();
-
-    for (let j = 0; j <= seg; j++) {
-      for (let i = 0; i <= seg; i++) {
-        const x = px + (i / seg * 2 - 1) * hh, y = py + (j / seg * 2 - 1) * hh;
-        pos.push(x - px, y - py, M.z(x, y) - z0);
-        rampColor(rhoT(x, y), tmp);
-        col.push(tmp.r, tmp.g, tmp.b);
-      }
-    }
-    for (let j = 0; j < seg; j++) {
-      for (let i = 0; i < seg; i++) {
-        const a = j * (seg + 1) + i, b = a + 1, d = a + seg + 1, e = d + 1;
-        idx.push(a, b, e, a, e, d);
-      }
-    }
-    for (let i = 0; i <= seg; i++) for (let j = 0; j < seg; j++) {   // 竖向网格
-      const a = j * (seg + 1) + i, b = a + seg + 1;
-      edge.push(pos[a * 3], pos[a * 3 + 1], pos[a * 3 + 2], pos[b * 3], pos[b * 3 + 1], pos[b * 3 + 2]);
-    }
-    for (let j = 0; j <= seg; j++) for (let i = 0; i < seg; i++) {   // 横向网格
-      const a = j * (seg + 1) + i, b = a + 1;
-      edge.push(pos[a * 3], pos[a * 3 + 1], pos[a * 3 + 2], pos[b * 3], pos[b * 3 + 1], pos[b * 3 + 2]);
-    }
-    for (let i = 0; i <= seg; i++) ring.push([i, 0]);
-    for (let i = 1; i <= seg; i++) ring.push([seg, i]);
-    for (let i = seg - 1; i >= 0; i--) ring.push([i, seg]);
-    for (let i = seg - 1; i >= 1; i--) ring.push([0, i]);
-    ring.forEach(([i, j]) => {
-      const k = (j * (seg + 1) + i) * 3;
-      border.push(pos[k], pos[k + 1], pos[k + 2]);
-      borderFlat.push(pos[k], pos[k + 1], 0);
-    });
-
-    const g = new THREE.BufferGeometry();
-    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-    g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
-    g.setIndex(idx);
-    g.computeVertexNormals();
-
-    const flat = new THREE.BufferGeometry();
-    flat.setAttribute('position', new THREE.Float32BufferAttribute(pos.map((v, k) => (k % 3 === 2 ? 0 : v)), 3));
-    flat.setIndex(idx.slice());
-    flat.computeVertexNormals();
-    const borderGeo = new THREE.BufferGeometry().setAttribute('position', new THREE.Float32BufferAttribute(border, 3));
-    const borderFlatGeo = new THREE.BufferGeometry().setAttribute('position', new THREE.Float32BufferAttribute(borderFlat, 3));
-    const edgeGeo = new THREE.BufferGeometry().setAttribute('position', new THREE.Float32BufferAttribute(edge, 3));
-
-    if (micro.patchMesh) {
-      micro.patchGroup.remove(micro.patchMesh, micro.patchGrid, micro.patchBorder);
-      micro.patchMesh.geometry.dispose();
-      micro.patchGrid.geometry.dispose();
-      micro.patchBorder.geometry.dispose();
-      micro.shadow.geometry.dispose();
-      micro.shadowEdge.geometry.dispose();
-    }
-    micro.patchBaseColors = col.slice();
-    micro.patchMesh = new THREE.Mesh(g, new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide }));
-    micro.patchGrid = new THREE.LineSegments(edgeGeo, new THREE.LineBasicMaterial({ color: srgb('#57534E'), transparent: true, opacity: 0.5 }));
-    micro.patchBorder = new THREE.LineLoop(borderGeo.clone(), new THREE.LineBasicMaterial({ color: srgb('#1C1917') }));
-    micro.patchGroup.add(micro.patchMesh, micro.patchGrid, micro.patchBorder);
-
-    if (micro.shadow) {
-      micro.shadow.geometry = flat;
-      micro.shadowEdge.geometry = borderFlatGeo;
-    } else {
-      micro.shadowGeo = flat;
-      micro.shadowEdgeGeo = borderFlatGeo;
-    }
-    updatePatchColors();
-  }
-
-  function updatePatchColors() {
-    if (!micro.patchMesh) return;
-    const attr = micro.patchMesh.geometry.getAttribute('color');
-    const base = micro.patchBaseColors;
-    for (let i = 0; i < attr.count; i++) {
-      attr.setXYZ(i,
-        lerp(1, base[i * 3], P.colorMix),
-        lerp(1, base[i * 3 + 1], P.colorMix),
-        lerp(1, base[i * 3 + 2], P.colorMix));
-    }
-    attr.needsUpdate = true;
-  }
-
-  function microCamGoal() {
-    const Hc = micro.Hc || M.z(state.pick.x, state.pick.y);
-    const n = M.unitNormal(state.pick.x, state.pick.y);
-    const nn = new THREE.Vector3(n[0], n[1], n[2]);
-    let u = new THREE.Vector3(n[1], -n[0], 0);        // n × k：夹角圆弧所在平面的法向
-    if (u.lengthSq() < 1e-6) u.set(1, 0, 0);
-    u.normalize();
-    // -0.82·n + 0.60·u：既看得清斜面，又让 γ 张开
-    const view = nn.clone().multiplyScalar(-0.82).addScaledVector(u, 0.6).normalize();
-    const pos = new THREE.Vector3(0, 0, Hc).addScaledVector(view, -4.6);
-    return {
-      pos: [pos.x, pos.y, pos.z],
-      target: [0, 0, clamp(Hc * 0.42, 0.14, 0.7)]
-    };
-  }
-
-  function buildMicro() {
-    const scene = micro.scene;
-    const Hc = M.z(state.pick.x, state.pick.y);
-    micro.Hc = Hc;
-    micro.patchGroup = new THREE.Group();
-    micro.patchGroup.position.z = Hc;
-    scene.add(micro.patchGroup);
-
-    const board = new THREE.Mesh(new THREE.PlaneGeometry(4, 4),
-      new THREE.MeshBasicMaterial({ map: boardTexture('base'), transparent: true, opacity: 0.8 }));
-    board.position.z = -0.006;
-    scene.add(board);
-    micro.board = board;
-
-    buildPatchGeometry();
-
-    micro.shadow = new THREE.Mesh(micro.shadowGeo,
-      new THREE.MeshBasicMaterial({ color: srgb('#93A3B8'), transparent: true, opacity: 0.6 }));
-    micro.shadow.position.z = 0.014;
-    scene.add(micro.shadow);
-    micro.shadowEdge = new THREE.LineLoop(micro.shadowEdgeGeo,
-      new THREE.LineBasicMaterial({ color: srgb('#57534E') }));
-    micro.shadowEdge.position.z = 0.017;
-    scene.add(micro.shadowEdge);
-
-    const rg = new THREE.BufferGeometry();
-    rg.setAttribute('position', new THREE.Float32BufferAttribute(new Float32Array(4 * 2 * 3), 3));
-    micro.rays = new THREE.LineSegments(rg, new THREE.LineDashedMaterial({
-      color: srgb('#D97706'), dashSize: 0.07, gapSize: 0.055, transparent: true, opacity: 0
-    }));
-    micro.rays.frustumCulled = false;
-    scene.add(micro.rays);
-
-    micro.nArrow = makeArrow('#2563EB', 0.024, 0.07, 0.22);
-    micro.kArrow = makeArrow('#059669', 0.024, 0.07, 0.22);
-    micro.kGhost = makeArrow('#8ED6BC', 0.016, 0.05, 0.17);
-    micro.nArrow.position.set(0, 0, Hc);
-    micro.kArrow.position.set(0, 0, 0.03);
-    micro.kGhost.position.set(0, 0, Hc);
-    scene.add(micro.nArrow, micro.kArrow, micro.kGhost);
-
-    const arcGeo = new THREE.BufferGeometry();
-    arcGeo.setAttribute('position', new THREE.Float32BufferAttribute(new Float32Array(64 * 3), 3));
-    micro.arc = new THREE.Line(arcGeo, new THREE.LineBasicMaterial({ color: srgb('#8A4B12'), transparent: true, opacity: 0 }));
-    micro.arc.frustumCulled = false;
-    scene.add(micro.arc);
-
-    micro.gx = makeArrow('#334155', 0.02, 0.062, 0.18);
-    micro.gy = makeArrow('#334155', 0.02, 0.062, 0.18);
-    micro.gx.position.set(0, 0, Hc);
-    micro.gy.position.set(0, 0, Hc);
-    scene.add(micro.gx, micro.gy);
-  }
-
-  function rebuildMicro() {
-    const Hc = M.z(state.pick.x, state.pick.y);
-    micro.Hc = Hc;
-    micro.patchGroup.position.z = Hc;
-    micro.nArrow.position.z = Hc;
-    micro.kGhost.position.z = Hc;
-    micro.gx.position.z = Hc;
-    micro.gy.position.z = Hc;
-    buildPatchGeometry();
-    syncMicroNumbers();
-    const cam = microCamGoal();
-    micro.camera.position.set(cam.pos[0], cam.pos[1], cam.pos[2]);
-    micro.controls.target.set(cam.target[0], cam.target[1], cam.target[2]);
-    micro.controls.update();
-  }
-
-  /* ================== 标签 ================== */
-  function makeLabel(host, text, cls) {
+  function makeLabel(host, value, cls) {
     const el = document.createElement('span');
-    el.className = 'axis-label' + (cls ? ' ' + cls : '');
-    el.textContent = text;
-    host.appendChild(el);
+    el.className = 'axis-label ' + (cls || ''); text(el, value); host.append(el);
     return { el, pos: new THREE.Vector3(), visible: true };
   }
-
-  function buildLabels() {
-    const host = $('labels');
-    const sx = 1.35, sy = 0.9;
-    labelsMain = [
-      makeLabel(host, 'Σ 铁皮曲面', 'chip'),
-      makeLabel(host, 'Dxy 投影区域', 'chip'),
-      makeLabel(host, 'ΔSᵢ', 'chip strong'),
-      makeLabel(host, 'x'), makeLabel(host, 'y'),
-      makeLabel(host, 'z'), makeLabel(host, 'O')
-    ];
-    labelsMain[0].pos.set(sx, sy, M.z(sx, sy) + 0.34);
-    labelsMain[1].pos.set(0, -2.55, 0.06);
-    labelsMain[3].pos.set(2.78, 0, 0.06);
-    labelsMain[4].pos.set(0, 2.78, 0.06);
-    labelsMain[5].pos.set(0, 0, 2.34);
-    labelsMain[6].pos.set(-0.17, -0.17, 0.07);
-
-    const host2 = $('micro-labels');
-    labelsMicro = [
-      makeLabel(host2, 'n', 'chip cool'),
-      makeLabel(host2, 'k', 'chip good'),
-      makeLabel(host2, 'γ', 'chip strong'),
-      makeLabel(host2, 'dS', 'chip'),
-      makeLabel(host2, 'dx dy', 'chip cool'),
-      makeLabel(host2, '∂z/∂x', 'chip'),
-      makeLabel(host2, '∂z/∂y', 'chip'),
-      makeLabel(host2, 'k′ = (0,0,1)', 'chip good')
-    ];
-    labelsMicro.forEach(l => { l.visible = false; });
+  function lineGeometry(points) {
+    return new THREE.BufferGeometry().setAttribute('position', new THREE.Float32BufferAttribute(points.flat(), 3));
+  }
+  function makeLine(points, color, loop) {
+    const material = new THREE.LineBasicMaterial({ color: srgb(color), transparent: true });
+    return new (loop ? THREE.LineLoop : THREE.Line)(lineGeometry(points), material);
+  }
+  function setupMain() {
+    main.scene = new THREE.Scene(); main.scene.background = new THREE.Color('#ECEEE9');
+    main.camera = new THREE.PerspectiveCamera(38, 1, .05, 140); main.camera.up.set(0, 0, 1);
+    main.renderer = new THREE.WebGLRenderer({ antialias: true });
+    main.renderer.setPixelRatio(Math.min(devicePixelRatio, 2)); main.renderer.outputEncoding = THREE.sRGBEncoding;
+    $('scene').prepend(main.renderer.domElement);
+    main.controls = new THREE.OrbitControls(main.camera, main.renderer.domElement);
+    Object.assign(main.controls, { enableDamping: true, dampingFactor: .08, enablePan: false, minDistance: 2.4, maxDistance: 16, minPolarAngle: .08, maxPolarAngle: Math.PI - .1 });
+    main.material = new THREE.ShaderMaterial({
+      uniforms: { uSep: { value: 0 }, uColorMix: { value: 0 }, uPick: { value: 0 }, uLift: { value: 0 }, uFall: { value: 0 }, uExtract: { value: 0 } },
+      vertexShader: SURFACE_VERT, fragmentShader: SURFACE_FRAG, side: THREE.DoubleSide, extensions: { derivatives: true }
+    });
+    buildBoard(); buildSurface(state.n);
+    main.marker = makeLine(M.cellCorners(state.n, state.pickCell.i, state.pickCell.j), '#8A4B12', true);
+    main.scene.add(main.marker);
+    const names = ['Σ 曲面', 'Dxy 投影区域', '取这一块', 'x', 'y', 'z'];
+    labelsMain = names.map((v, i) => makeLabel($('labels'), v, i < 3 ? 'chip' + (i === 2 ? ' strong' : '') : ''));
+    labelsMain[0].pos.set(1.35, .9, M.z(1.35, .9) + .34);
+    labelsMain[1].pos.set(0, -2.5, .06);
+    labelsMain[3].pos.set(2.78, 0, .06); labelsMain[4].pos.set(0, 2.78, .06); labelsMain[5].pos.set(0, 0, 2.34);
   }
 
-  function buildStepTrack() {
-    const host = $('step-track');
-    for (let i = 0; i < STEPS.length; i++) {
-      const d = document.createElement('i');
-      d.className = 'step-dot';
-      host.appendChild(d);
+  function setupMicro() {
+    micro.scene = new THREE.Scene(); micro.scene.background = new THREE.Color('#F3F1EA');
+    micro.camera = new THREE.PerspectiveCamera(38, 1, .05, 80); micro.camera.up.set(0, 0, 1);
+    micro.renderer = new THREE.WebGLRenderer({ antialias: true });
+    micro.renderer.setPixelRatio(Math.min(devicePixelRatio, 2)); micro.renderer.outputEncoding = THREE.sRGBEncoding;
+    $('micro-scene').prepend(micro.renderer.domElement);
+    micro.controls = new THREE.OrbitControls(micro.camera, micro.renderer.domElement);
+    Object.assign(micro.controls, { enableDamping: true, dampingFactor: .08, enablePan: false, minDistance: 4, maxDistance: 14, minPolarAngle: .12, maxPolarAngle: Math.PI - .12, autoRotate: false });
+    micro.scene.add(new THREE.AmbientLight('#ffffff', .85));
+    const light = new THREE.DirectionalLight('#ffffff', .65); light.position.set(-2, -4, 6); micro.scene.add(light);
+    micro.root = new THREE.Group(); micro.scene.add(micro.root);
+    micro.board = new THREE.GridHelper(3.5, 10, '#b8c1b6', '#d8ddd3'); micro.board.rotation.x = Math.PI / 2;
+    micro.root.add(micro.board);
+    micro.rays = new THREE.LineSegments(lineGeometry(Array.from({ length: 8 }, () => [0, 0, 0])),
+      new THREE.LineDashedMaterial({ color: srgb('#AC6620'), dashSize: .10, gapSize: .07, transparent: true }));
+    micro.root.add(micro.rays);
+    micro.nArrow = new THREE.ArrowHelper(new THREE.Vector3(0, 0, 1), new THREE.Vector3(0, 0, 1.5), .9, srgb('#365D87'), .18, .10);
+    micro.kArrow = new THREE.ArrowHelper(new THREE.Vector3(0, 0, 1), new THREE.Vector3(0, 0, 1.5), .9, srgb('#2D7D62'), .18, .10);
+    micro.root.add(micro.nArrow, micro.kArrow);
+    micro.arc = makeLine([[0, 0, 0], [0, 0, 0]], '#343C38'); micro.root.add(micro.arc);
+    labelsMicro = ['曲面片 ΔSᵢ', '底面 Δxᵢ Δyᵢ', 'n', 'k', 'γ'].map((v, i) => makeLabel($('micro-labels'), v, 'chip ' + (i === 0 ? 'strong' : i === 1 || i === 2 ? 'cool' : 'good')));
+    rebuildMicro();
+  }
+
+  function disposeObject(obj) {
+    if (!obj) return;
+    micro.root.remove(obj); obj.geometry.dispose();
+    if (obj.material) obj.material.dispose();
+  }
+  function rebuildMicro() {
+    const p = state.patch, hh = p.dx / 2, zoom = 1.1 / hh, seg = 16;
+    const curved = [], planar = [], indices = [], ring = [], corners = [];
+    for (let j = 0; j <= seg; j++) for (let i = 0; i <= seg; i++) {
+      const x = (i / seg * 2 - 1) * hh, y = (j / seg * 2 - 1) * hh;
+      curved.push(x * zoom, y * zoom, (M.z(p.x + x, p.y + y) - M.z(p.x, p.y)) * zoom + 1.5);
+      planar.push(x * zoom, y * zoom, (p.zx * x + p.zy * y) * zoom + 1.5);
+      if (i < seg && j < seg) { const a = j * (seg + 1) + i; indices.push(a, a + 1, a + seg + 2, a, a + seg + 2, a + seg + 1); }
     }
-  }
-
-  /* ================== 步骤定义 ================== */
-  function def(capsule, title, note, hold, over, cam) {
-    return { capsule, title, note, hold, cam, set: Object.assign({}, OFF, over) };
-  }
-  function fillSteps() {
-    STEPS.push(
-      def(1, '一张还没上色的铁皮',
-        '这就是空间中的曲面 Σ：z = z(x, y)，水平铺在 xOy 投影底板上方。此刻它通体纯白，还看不出哪里厚、哪里薄。',
-        6, {}, 'overview'),
-      def(1, '注入密度：各处厚薄不均',
-        '曲面逐渐渲染成密度热力色——颜色越深，铁皮越厚越重。把鼠标滑过曲面可读出任意位置的 ρ；既然各处厚薄不同，“面积 × 一个密度”就不成立了。',
-        11, { colorMix: 1, board: 0.95 }, 'overview'),
-      def(2, '沿网格切碎曲面',
-        '拖动细分滑块 N，曲面沿网格被平滑裁成 N² 块小碎片 ΔSᵢ。切得足够小，每块都近似一张平的、密度均匀的小铁片——以直代曲、以常代变。',
-        9, { colorMix: 1, separate: 1, board: 0.6 }, 'overview'),
-      def(2, '挑一块碎片称一称',
-        '把一块微元浮起高亮：在这样小的尺度下密度近似恒定，于是 ΔMᵢ ≈ ρᵢ · ΔSᵢ。点击曲面任意位置，可以换一块再称一次。',
-        9, { colorMix: 1, separate: 1, pickLift: 1, board: 0.6 }, 'overview'),
-      def(2, '镜头推入微元显微台',
-        '右侧特写工作台接管画面：放大后的曲面微元 dS 悬在空中，正下方是它在底板上的影子 dx dy，竖直虚线把两者一一对应。',
-        7, { colorMix: 1, separate: 1, board: 0.6, rise: 1, rays: 0.7 }, 'close'),
-      def(2, '两法向量的夹角 γ',
-        '从微元中心引出斜面法向量 n，从影子中心引出竖直法向量 k = (0,0,1)；两向量平移到同一起点，展开夹角圆弧 γ——面与面的夹角，就是法向量的夹角。',
-        12, { colorMix: 1, separate: 1, board: 0.6, rise: 1, rays: 0.7, normals: 1, arc: 1 }, 'close'),
-      def(2, '点积算出 cos γ',
-        '隐函数曲面 z = z(x,y) 的梯度给出 n = (−z_x, −z_y, 1)。点积除以模长之积，就得到 cos γ 的解析式：它只由两个偏导数决定。',
-        13, { colorMix: 1, separate: 1, board: 0.6, rise: 1, rays: 0.7, normals: 1, arc: 1, grad: 1, dot: 1 }, 'close'),
-      def(3, '压向底面：投影压缩',
-        '沿竖直光线把斜面微元压平到影子上：dx dy = dS · cos γ。影子永远比斜面小，倾斜得越厉害，压得越狠。',
-        9, { colorMix: 1, separate: 1, board: 0.6, rise: 1, rays: 1, normals: 1, arc: 1, dot: 1, press: 1, shadowHi: 1 }, 'close'),
-      def(3, '反向还原：根号从哪来',
-        '反过来把影子除以 cos γ 推回斜面：dS = dx dy / cos γ = √(1 + z_x² + z_y²) dx dy。这个根号，就是曲面比影子“大出来”的部分。',
-        12, { colorMix: 1, separate: 1, board: 0.6, rise: 1, rays: 1, normals: 1, arc: 0.5, dot: 1, press: 0, shadowHi: 0.6 }, 'close'),
-      def(3, '把每块碎片写到底面上',
-        '曲面上每块碎片的质量改写成底面网格上的量：ΔMᵢ = ρ · √(1 + z_x² + z_y²) · ΔxᵢΔyᵢ。求和对象从曲面碎片，变成了底面小方格。',
-        10, { colorMix: 1, separate: 1, board: 0.95, rise: 1, rays: 0.7, normals: 1, arc: 1, dot: 1 }, 'overview'),
-      def(3, '碎片汇入 D_xy',
-        '所有碎片连续下落、拍平，逐块飞入底部投影区域 D_xy；总质量计数器同步从 0 实时滚跳累加到 M。',
-        10, { colorMix: 1, separate: 1, board: 0.95, fall: 1, counter: 1 }, 'overview'),
-      def(3, '闭环：二重积分就是曲面总质量',
-        'N 越密，底面上的和越稳定地逼近二重积分。“曲面碎片逐块称重”与“底面二重积分求和”，是同一件事的两种说法。',
-        13, { colorMix: 1, separate: 1, board: 0.95, fall: 1, counter: 1 }, 'overview')
-    );
-  }
-
-  /* ================== 相机 ================== */
-  const CAM_OVERVIEW = { pos: [4.7, -6.5, 4.5], target: [0, 0, 0.7] };
-  function closeGoal() {
-    const p = state.pick, z0 = M.z(p.x, p.y);
-    const dir = new THREE.Vector3(0.55, -1.0, 0.72).normalize().multiplyScalar(3.2);
-    return {
-      pos: [p.x + dir.x, p.y + dir.y, z0 + dir.z],
-      target: [p.x, p.y, z0 + 0.2]
-    };
-  }
-  function applyCamera(mode, instant) {
-    const goal = mode === 'close' ? closeGoal() : CAM_OVERVIEW;
-    const d = (instant || reduced.matches) ? 0 : 1.15 / state.speed;
-    gsap.killTweensOf(main.camera.position);
-    gsap.killTweensOf(main.controls.target);
-    const set = () => main.controls.update();
-    gsap.to(main.camera.position, { x: goal.pos[0], y: goal.pos[1], z: goal.pos[2], duration: d, ease: 'power2.inOut', onUpdate: set });
-    gsap.to(main.controls.target, { x: goal.target[0], y: goal.target[1], z: goal.target[2], duration: d, ease: 'power2.inOut', onUpdate: set });
-  }
-
-  /* ================== 步骤切换 ================== */
-  function goToStep(i, opts) {
-    state.step = clamp(i, 0, STEPS.length - 1);
-    const s = STEPS[state.step];
-    state.stepClock = 0;
-    state.capsule = s.capsule;
-
-    const d = (opts && opts.instant ? 0 : 0.85) / state.speed;
-    gsap.killTweensOf(P);
-    gsap.to(P, Object.assign({}, s.set, {
-      duration: reduced.matches ? 0 : d,
-      ease: 'power2.inOut',
-      onUpdate: updatePatchColors
-    }));
-
-    if (s.cam !== state.camMode || (opts && opts.forceCam)) {
-      state.camMode = s.cam;
-      applyCamera(s.cam, opts && opts.instant);
+    for (let i = 0; i <= seg; i++) ring.push(i);
+    for (let j = 1; j <= seg; j++) ring.push(j * (seg + 1) + seg);
+    for (let i = seg - 1; i >= 0; i--) ring.push(seg * (seg + 1) + i);
+    for (let j = seg - 1; j > 0; j--) ring.push(j * (seg + 1));
+    [0, seg, seg * (seg + 1) + seg, seg * (seg + 1)].forEach(k => corners.push(curved.slice(k * 3, k * 3 + 3)));
+    ['patchMesh', 'border', 'shadow', 'shadowEdge'].forEach(k => disposeObject(micro[k]));
+    const g = lineGeometry([]); g.setAttribute('position', new THREE.Float32BufferAttribute(curved, 3)); g.setIndex(indices); g.computeVertexNormals();
+    micro.patchColor = rampColor(rhoT(p.x, p.y), new THREE.Color());
+    micro.patchMesh = new THREE.Mesh(g, new THREE.MeshLambertMaterial({ color: micro.patchColor, side: THREE.DoubleSide }));
+    micro.border = makeLine(ring.map(k => curved.slice(k * 3, k * 3 + 3)), '#8A4B12', true);
+    micro.shadow = new THREE.Mesh(new THREE.PlaneGeometry(2.2, 2.2), new THREE.MeshBasicMaterial({ color: srgb('#365D87'), transparent: true, opacity: .25, side: THREE.DoubleSide }));
+    micro.shadow.position.z = .012;
+    micro.shadowEdge = makeLine([[-1.1, -1.1, .018], [1.1, -1.1, .018], [1.1, 1.1, .018], [-1.1, 1.1, .018]], '#365D87', true);
+    micro.root.add(micro.patchMesh, micro.border, micro.shadow, micro.shadowEdge);
+    Object.assign(micro, { curved, planar, ring, corners, zoom, lastTangent: -1 });
+    micro.normal = new THREE.Vector3(...M.unitNormal(p.x, p.y));
+    micro.horizontal = new THREE.Vector3(micro.normal.x, micro.normal.y, 0);
+    if (micro.horizontal.lengthSq() < .000001) micro.horizontal.set(1, 0, 0);
+    micro.horizontal.normalize();
+    const arc = Array.from({ length: 41 }, (_, i) => { const a = p.gamma * i / 40; return [micro.horizontal.x * .48 * Math.sin(a), micro.horizontal.y * .48 * Math.sin(a), 1.5 + .48 * Math.cos(a)]; });
+    micro.arc.geometry.dispose(); micro.arc.geometry = lineGeometry(arc);
+    if (main.marker) {
+      main.marker.geometry.dispose(); main.marker.geometry = lineGeometry(M.cellCorners(state.n, state.pickCell.i, state.pickCell.j).map(v => [v[0], v[1], v[2] + .018]));
     }
-    refreshUI();
-    if (state.step === 3) playBalance();
+    lastText = -1; lastMath = '';
   }
-
-  function refreshUI() {
-    const s = STEPS[state.step];
-    $('log-step').textContent = `步骤 ${state.step + 1} / ${STEPS.length}`;
-    $('log-title').textContent = s.title;
-    $('log-note').textContent = s.note;
-
-    document.querySelectorAll('.stage-pill').forEach(b => {
-      const on = Number(b.dataset.capsule) === state.capsule;
-      b.classList.toggle('is-active', on);
-      b.setAttribute('aria-pressed', String(on));
-    });
-    Array.from($('step-track').children).forEach((d, i) => {
-      d.classList.toggle('is-active', i === state.step);
-      d.classList.toggle('is-done', i < state.step);
-    });
-    document.querySelectorAll('.chain-part').forEach(p => {
-      p.classList.toggle('is-active', Number(p.dataset.part) === state.capsule);
-    });
-    const badge = $('micro-badge');
-    badge.textContent = state.capsule === 1 ? '镜头待命' : '显微镜 · 约 8× 放大';
-    badge.classList.toggle('is-live', state.capsule !== 1);
-
-    // 原位解说框 / 浮层：按步骤显隐
-    document.querySelectorAll('[data-show]').forEach(el => {
-      const on = el.dataset.show.split(',').map(Number).includes(state.step);
-      if (on && el.hidden) {
-        el.hidden = false;
-        gsap.fromTo(el, { opacity: 0, y: 12 },
-          { opacity: 1, y: 0, duration: reduced.matches ? 0 : 0.45 / state.speed, ease: 'power2.out' });
-      } else if (!on && !el.hidden) {
-        gsap.killTweensOf(el);
-        el.hidden = true;
-      }
-    });
-    document.querySelectorAll('.callout .line').forEach(l =>
-      l.classList.toggle('is-focus', Number(l.dataset.focus) === state.step));
-    // 压平阶段动作发生在底板附近，解说框让位到顶部
-    document.querySelectorAll('.callout').forEach(c =>
-      c.classList.toggle('is-top', c.dataset.show === '7,8' && state.step === 7));
-
-    $('prev').disabled = state.step === 0;
-    $('next').disabled = state.step === STEPS.length - 1;
-    updatePlayButton();
+  function resetViews() {
+    if (!graphic) return;
+    main.camera.position.set(...CAM.pos); main.controls.target.set(...CAM.target);
+    // 沿坡向的侧上方看斜片，保持法向夹角可见；不作自动旋转。
+    const n = M.unitNormal(state.pick.x, state.pick.y), across = new THREE.Vector3(n[1], -n[0], 0);
+    if (across.lengthSq() < .0001) across.set(1, 0, 0); across.normalize();
+    const view = new THREE.Vector3(n[0], n[1], n[2]).multiplyScalar(.82).addScaledVector(across, .60).normalize();
+    micro.camera.position.copy(new THREE.Vector3(0, 0, .9).addScaledVector(view, 7.2));
+    micro.controls.target.set(0, 0, .9); main.controls.update(); micro.controls.update();
   }
-
-  function updatePlayButton() {
-    const atEnd = state.step === STEPS.length - 1;
-    $('play').textContent = state.playing ? 'Ⅱ 暂停' : (atEnd && state.stepClock === 0 ? '↺ 重播' : '▶ 播放');
-    $('play').setAttribute('aria-label', state.playing ? '暂停演示' : '播放演示');
-  }
-
-  function playBalance() {
-    if (balanceTween) balanceTween.kill();
-    const beam = document.querySelector('.balance-svg .beam-g');
-    const chip = document.querySelector('.balance-svg .chip');
-    if (!beam) return;
-    const o = { a: -17 };
-    balanceTween = gsap.to(o, {
-      a: 0, duration: reduced.matches ? 0 : 1.6 / state.speed, ease: 'elastic.out(1,0.55)',
-      onUpdate: () => beam.setAttribute('transform', `rotate(${o.a} 75 32)`)
-    });
-    gsap.fromTo(chip, { opacity: 0, y: -6 },
-      { opacity: 1, y: 0, duration: reduced.matches ? 0 : 0.5 / state.speed, ease: 'power2.out' });
-  }
-
-  /* ================== 数字联动 ================== */
-  function tweenNumber(el, target, digits) {
-    const o = { v: parseFloat(el.textContent) || 0 };
-    gsap.killTweensOf(o);
-    gsap.to(o, {
-      v: target, duration: reduced.matches ? 0 : 0.7, ease: 'power2.out',
-      onUpdate: () => { el.textContent = fmt(o.v, digits); }
+  function resize() {
+    if (!graphic) return;
+    [[main, $('scene')], [micro, $('micro-scene')]].forEach(([v, host]) => {
+      if (!host.clientWidth || !host.clientHeight) return;
+      v.camera.aspect = host.clientWidth / host.clientHeight; v.camera.updateProjectionMatrix(); v.renderer.setSize(host.clientWidth, host.clientHeight);
     });
   }
 
   function recompute() {
-    state.sums = M.sums(state.n, state.rhoMode);
-    state.exact = M.exact(state.rhoMode);
-    tweenNumber($('meter-mass'), state.sums.mass, 4);
-    tweenNumber($('meter-area'), state.sums.area, 4);
-    $('mass-exact').textContent = fmt(state.exact.mass, 4);
-    $('area-exact').textContent = fmt(state.exact.area, 4);
-    $('mass-track').style.width = `${clamp(state.sums.mass / state.exact.mass) * 100}%`;
-    $('area-track').style.width = `${clamp(state.sums.area / state.exact.area) * 100}%`;
-    $('counter-unit').innerHTML = `g / ${fmt(state.exact.mass, 4)} g`;
-    $('n-label').textContent = `N = ${state.n} · ${(state.n * state.n).toLocaleString('en-US')} 块`;
-    updateLegend();
-    updatePickStats();
-    syncMicroNumbers();
+    updatePickId(); state.sums = M.sums(state.n, state.rhoMode); state.exact = M.exact(state.rhoMode);
+    text($('meter-area'), fmt(state.sums.area)); text($('meter-mass'), fmt(state.sums.mass));
+    text($('area-exact'), fmt(state.exact.area)); text($('mass-exact'), fmt(state.exact.mass));
+    text($('n-label'), `N = ${state.n} · ${(state.n ** 2).toLocaleString()} 块`);
+    text($('legend-range'), state.rhoMode === 'uniform' ? 'ρ = 1 g/cm²' : '0.8 — 3.6 g/cm²');
+    $('color-scale').style.background = state.rhoMode === 'uniform' ? '#E1A244' : '';
+    document.querySelectorAll('[data-rho]').forEach(b => { const on = b.dataset.rho === state.rhoMode; b.classList.toggle('is-active', on); b.setAttribute('aria-pressed', on); });
+    if (graphic) { buildSurface(state.n); refreshTint(); rebuildMicro(); }
+    lastText = -1; lastMath = ''; render();
   }
 
-  function updateLegend() {
-    const scale = $('color-scale');
-    if (state.rhoMode === 'uniform') {
-      scale.style.background = '#E1A244';
-      $('tick-min').textContent = '';
-      $('tick-mid').textContent = 'ρ ≡ 1';
-      $('tick-max').textContent = '';
-    } else {
-      scale.style.background = 'linear-gradient(90deg,#FAF3E6,#E1A244,#8C4A14)';
-      $('tick-min').textContent = '0.8';
-      $('tick-mid').textContent = '2.2';
-      $('tick-max').textContent = '3.6';
+  const lesson = [
+    ['等一块曲面片过来', 'M=\\iint_{\\Sigma}\\rho\\,\\mathrm{d}S', 'M = ∬Σ ρ dS', 'ρ 是面密度：每单位曲面面积的质量。'],
+    ['密度随位置变化', '\\rho=\\rho(x,y,z)', 'ρ = ρ(x, y, z)', '颜色表示面密度，不把高度当作面积。'],
+    ['现在是有限大小的小片', '\\Delta M_i\\approx\\rho_i\\,\\Delta S_i', 'ΔMᵢ ≈ ρᵢ ΔSᵢ', '小片还有弯曲，不能直接把它当成底面矩形。'],
+    ['跟住高亮的这一块', '\\Delta S_i\\quad\\text{有限曲面片的面积}', 'ΔSᵢ：有限曲面片的面积', '边框标明它在原曲面上的位置。'],
+    ['同一块，只把显示放大', '\\Delta S_i\\quad\\text{仍是刚才那一块}', 'ΔSᵢ 仍是刚才那一块', '边界和实际范围不变；显示尺寸不代表真实面积。'],
+    ['曲面够小时，近似成斜平面', '\\Delta S_i\\approx\\Delta S_{\\mathrm{tan},i}', 'ΔSᵢ ≈ ΔS切平面,i', '图形渐变到中心点的切平面；调大 N，比较两种面积。'],
+    ['底面面积容易算', '\\Delta A_i=\\Delta x_i\\,\\Delta y_i', 'ΔAᵢ = Δxᵢ Δyᵢ', '虚线沿 z 方向投下，斜片保持原来的倾斜。'],
+    ['同样的宽，长度缩短了', '\\Delta A_i=\\Delta S_{\\mathrm{tan},i}\\cos\\gamma', 'ΔAᵢ = ΔS切平面,i × cos γ', 'γ 是斜平面与水平面的夹角；水平时等大，倾斜时投影更小。'],
+    ['面积因子：把影子还原为斜片', '\\Delta S_i\\approx\\underbrace{\\sqrt{1+z_x^2+z_y^2}}_{1/\\cos\\gamma}\\,\\Delta A_i', 'ΔSᵢ ≈ √(1 + zₓ² + zᵧ²) ΔAᵢ', 'n 与竖直方向 k 的夹角也是 γ；根号是面积比，不是多出的面积。'],
+    ['密度 × 面积，才是这块的质量', '\\Delta M_i\\approx\\rho_i\\sqrt{1+z_x^2+z_y^2}\\,\\Delta x_i\\Delta y_i', 'ΔMᵢ ≈ ρᵢ √(1 + zₓ² + zᵧ²) Δxᵢ Δyᵢ', '先用面积因子还原曲面面积，再乘这一块的面密度。'],
+    ['每块都这样算，再相加', 'M\\approx\\sum_i\\rho_i\\sqrt{1+z_{x,i}^2+z_{y,i}^2}\\,\\Delta x_i\\Delta y_i', 'M ≈ Σᵢ ρᵢ √(1 + zₓ,ᵢ² + zᵧ,ᵢ²) Δxᵢ Δyᵢ', '左侧下落表示把质量贡献记到底面网格。'],
+    ['取极限，才写成面积微元 dS', '\\begin{gathered}\\mathrm{d}S=\\sqrt{1+z_x^2+z_y^2}\\,\\mathrm{d}x\\mathrm{d}y\\\\[5pt] M=\\iint_{D_{xy}}\\rho(x,y,z(x,y))\\sqrt{1+z_x^2+z_y^2}\\,\\mathrm{d}x\\mathrm{d}y\\end{gathered}', 'dS = √(1 + zₓ² + zᵧ²) dx dy；M = ∬D ρ(x,y,z(x,y)) √(1+zₓ²+zᵧ²) dx dy', '每个位置的密度与面积因子一起积分；均匀 ρ=1 时就是表面积。']
+  ];
+
+  function renderText(s) {
+    const step = C.steps[s.textStep], p = state.patch, row = lesson[s.textStep];
+    if (lastText !== s.textStep) {
+      text($('log-title'), step.title); text($('log-note'), step.note);
+      text($('micro-title'), row[0]); math($('micro-equation'), row[1], row[2]); text($('micro-reason'), row[3]);
+      text($('micro-kicker'), s.textStep < 5 ? '跟住同一块有限曲面片' : s.textStep < 11 ? '先在有限小片上做局部近似' : '分割趋细后的局部关系');
+      $('normal-detail').hidden = s.textStep < 8;
+      $('scroll-hint').hidden = s.textStep < 7;
+      math($('normal-formula'), '\\vec n=(-z_x,-z_y,1),\\quad \\cos\\gamma=\\frac{\\vec n\\cdot\\vec k}{|\\vec n||\\vec k|}=\\frac{1}{\\sqrt{1+z_x^2+z_y^2}}', 'n = (−zₓ, −zᵧ, 1)，k = (0,0,1)，cos γ = 1 / √(1+zₓ²+zᵧ²)');
+      lastText = s.textStep;
     }
-  }
-
-  function updatePickStats() {
-    const { i, j } = state.pickCell;
-    const a = M.cellArea(state.n, i, j);
-    const [cx, cy] = M.cellCenter(state.n, i, j);
-    const r = M.rho(cx, cy, state.rhoMode);
-    $('balance-nums').textContent =
-      `ΔSᵢ = ${fmt(a, 4)} cm² · ρᵢ = ${fmt(r, 3)} g/cm² · ΔMᵢ = ${fmt(a * r, 4)} g`;
-  }
-
-  function syncMicroNumbers() {
-    const p = state.pick;
-    const nx = -M.zx(p.x, p.y), ny = -M.zy(p.x, p.y);
-    const len = Math.hypot(nx, ny, 1);
-    const cos = 1 / len;
-    const gamma = Math.acos(clamp(cos, -1, 1)) * 180 / Math.PI;
-    const dot = $('dot-nums');
-    if (dot) dot.textContent = `n = (${nx.toFixed(3)}, ${ny.toFixed(3)}, 1)，n·k = 1，|n| = ${len.toFixed(4)}`;
-    const foot = $('micro-nums');
-    if (foot) foot.textContent =
-      `γ = ${gamma.toFixed(1)}° · cos γ = ${cos.toFixed(3)} · 1/cos γ = ${(1 / cos).toFixed(3)}`;
-    const press = $('press-nums');
-    if (press) {
-      const flat = (2 * MICRO_HH) ** 2;
-      press.textContent = `dS = ${(flat / cos).toFixed(4)} cm² · dx dy = ${flat.toFixed(4)} cm² · ` +
-        `dx dy / dS = ${cos.toFixed(3)} = cos γ`;
+    const key = `${s.textStep}|${state.n}|${state.pickId}|${state.rhoMode}`;
+    if (lastMath !== key) {
+      let nums = `选中第 ${state.pickId + 1} 块 · 实际 Δx = Δy = ${fmt(p.dx, 4)} cm`;
+      if (s.textStep >= 4) nums += `<br>曲面面积 ≈ <b>${fmt(p.area, 6)}</b> cm²`;
+      if (s.textStep >= 5) nums += ` · 切平面面积 <b>${fmt(p.planeArea, 6)}</b> cm²`;
+      if (s.textStep >= 6) nums += `<br>底面面积 <b>${fmt(p.projectedArea, 6)}</b> cm² · 面积比 <b>${fmt(p.factor, 3)}</b>`;
+      if (s.textStep >= 7) nums += ` · γ = ${fmt(p.gamma * 180 / Math.PI, 1)}°`;
+      if (s.textStep >= 9) nums += `<br>ρᵢ = ${fmt(M.rho(p.x, p.y, state.rhoMode), 3)} g/cm² · 小片质量 ≈ <b>${fmt(p.planeArea * M.rho(p.x, p.y, state.rhoMode), 6)}</b> g`;
+      if (s.textStep < 3) nums = '';
+      $('patch-numbers').innerHTML = nums; lastMath = key;
     }
-    if (labelsMicro[0]) labelsMicro[0].el.textContent = `n = (${nx.toFixed(2)}, ${ny.toFixed(2)}, 1)`;
-    updatePickStats();
+    $('micro-lesson').style.opacity = s.textAlpha;
+    document.querySelector('.lesson-log').style.opacity = s.textAlpha;
   }
 
-  /* ================== 每帧同步 ================== */
-  const UP = new THREE.Vector3(0, 1, 0);
-  function sync() {
-    const u = main.material.uniforms;
-    u.uColorMix.value = P.colorMix;
-    u.uSep.value = P.separate;
-    u.uFall.value = P.fall;
-    u.uLift.value = P.pickLift;
-    u.uPick.value = state.pickId;
-    u.uTime.value = performance.now() / 1000;
-
-    main.boardTint.material.opacity = P.board * 0.92;
-
-    const showMark = (P.separate > 0.02 || P.pickLift > 0.02) && P.fall < 0.9;
-    pickMarker.outline.visible = showMark;
-    pickMarker.outline.material.opacity = clamp(P.separate * 0.9 + P.pickLift);
-    pickDrop.visible = P.separate > 0.05 && P.fall < 0.6;
-    pickDrop.material.opacity = clamp(P.separate * 0.85) * (1 - P.fall);
-
-    labelsMain[2].visible = (P.separate > 0.2 || P.pickLift > 0.2) && P.fall < 0.5;
-    labelsMain[2].pos.set(state.pick.x, state.pick.y,
-      M.z(state.pick.x, state.pick.y) + 0.66 + P.pickLift * 0.3);
-
-    $('counter-value').textContent = fmt(state.sums.mass * P.counter, 4);
-    $('counter-fill').style.width = `${P.counter * 100}%`;
-
-    syncMicro();
+  function render() {
+    const s = C.sample(clock.t); P = s.values;
+    renderText(s);
+    text($('log-step'), `${String(s.step + 1).padStart(2, '0')} / 12`);
+    $('progress').value = clock.t;
+    $('progress').setAttribute('aria-valuetext', `第 ${s.step + 1} 步，${C.steps[s.step].title}`);
+    document.querySelectorAll('.step-dot').forEach((el, i) => { el.classList.toggle('is-active', i === s.step); el.classList.toggle('is-done', i < s.step); el.setAttribute('aria-current', i === s.step ? 'step' : 'false'); });
+    document.querySelectorAll('[data-capsule]').forEach(b => { const on = +b.dataset.capsule === C.steps[s.step].capsule; b.classList.toggle('is-active', on); b.setAttribute('aria-pressed', on); });
+    $('prev').disabled = clock.t <= 0; $('next').disabled = clock.t >= C.duration;
+    const moving = state.playing || (tween && tween.isActive());
+    text($('play'), moving ? 'Ⅱ 暂停' : clock.t >= C.duration ? '↺ 重播' : '▶ 播放');
+    $('play').setAttribute('aria-label', moving ? '暂停演示' : '播放演示');
+    text($('stage-status'), P.transfer > .99 && P.fall < .1 ? '这一块已移到右侧' : C.steps[s.step].title);
+    text($('micro-badge'), P.transfer > .999 ? `同一块 #${state.pickId + 1}` : s.step === 4 ? '正在移入' : '等待取片');
+    text($('stage-caption'), P.fall > .9 ? '质量贡献记在 Dxy 上，面积因子已计入' : 'z = z(x, y) · D = [−2, 2]²');
+    alpha($('sum-receipt'), P.fall);
+    text($('counter-value'), `${fmt(state.sums.mass * P.fall)} g`);
+    text($('counter-note'), `N = ${state.n} · ${state.n ** 2} 块；高精度数值参考 ${fmt(state.exact.mass)} g`);
+    $('section-strip').style.height = `${145 * P.section}px`; $('section-strip').style.opacity = P.section;
+    $('micro-empty').style.opacity = 1 - P.transfer; $('micro-empty').hidden = P.transfer >= .999;
+    alpha($('zoom-note'), P.transfer);
+    text($('zoom-note'), `实际边长 ${fmt(state.patch.dx, 4)} cm · ${P.tangent > .99 ? '切平面近似' : '同一曲面片，显示放大'}`);
+    drawSection();
+    if (graphic) syncGraphic();
   }
 
-  function syncMicro() {
-    if (!micro.patchGroup) return;
-    const press = P.press, Hc = micro.Hc;
-    micro.patchGroup.position.z = lerp(Hc, 0.03, press);
-    micro.patchGroup.scale.z = 1 - 0.97 * press;
+  function drawSection() {
+    const p = state.patch, L = 125, a = p.gamma;
+    const A = [112, 112], B = [A[0] + L * Math.cos(a), A[1] - L * Math.sin(a)], D = [B[0], A[1]];
+    const path = (id, value) => $(id).setAttribute('d', value);
+    path('section-triangle', `M${A} L${B} L${D} Z`);
+    path('section-slope', `M${A} L${B}`); path('section-base', `M${A} L${D}`); path('section-drop', `M${B} L${D}`);
+    const r = 32;
+    path('section-arc', `M${A[0] + r},${A[1]} A${r},${r} 0 0 0 ${A[0] + r * Math.cos(a)},${A[1] - r * Math.sin(a)}`);
+    $('section-angle').setAttribute('x', A[0] + 46 * Math.cos(a / 2)); $('section-angle').setAttribute('y', A[1] - 46 * Math.sin(a / 2) - 4);
+    text($('section-angle'), `γ = ${fmt(a * 180 / Math.PI, 1)}°`);
+    $('section-length').setAttribute('x', (A[0] + B[0]) / 2 - 15); $('section-length').setAttribute('y', (A[1] + B[1]) / 2 - 12);
+    text($('section-length'), '斜长 L');
+  }
 
-    // 竖直光线：微元四角 → 影子四角
-    const arr = micro.rays.geometry.attributes.position.array;
-    const top = micro.patchGroup.position.z, scaleZ = micro.patchGroup.scale.z, hh = MICRO_HH;
-    [[-hh, -hh], [hh, -hh], [hh, hh], [-hh, hh]].forEach(([cx, cy], k) => {
-      const h = M.z(state.pick.x + cx, state.pick.y + cy) - M.z(state.pick.x, state.pick.y);
-      arr.set([cx, cy, top + h * scaleZ, cx, cy, 0.018], k * 6);
+  function projectLabels(list, camera, host) {
+    list.forEach(l => {
+      const p = l.pos.clone().project(camera);
+      l.el.hidden = !l.visible || p.z > 1 || Math.abs(p.x) > 1.1 || Math.abs(p.y) > 1.1;
+      l.el.style.left = `${(p.x / 2 + .5) * host.clientWidth}px`;
+      l.el.style.top = `${(.5 - p.y / 2) * host.clientHeight}px`;
     });
-    micro.rays.geometry.attributes.position.needsUpdate = true;
-    micro.rays.computeLineDistances();
-    micro.rays.material.opacity = P.rays * (0.42 + 0.55 * press);
-    micro.rays.visible = P.rays > 0.02;
+  }
+  function sourceCorners() {
+    const corners = M.cellCorners(state.n, state.pickCell.i, state.pickCell.j);
+    const c = new THREE.Vector3(state.pick.x, state.pick.y, M.z(state.pick.x, state.pick.y));
+    const d1 = new THREE.Vector3(...corners[2]).sub(new THREE.Vector3(...corners[0]));
+    const d2 = new THREE.Vector3(...corners[3]).sub(new THREE.Vector3(...corners[1]));
+    const normal = d1.cross(d2).normalize();
+    const { i, j } = state.pickCell;
+    const r = (((i * 73856093) ^ (j * 19349663)) >>> 0) / 4294967295;
+    return corners.map(v => new THREE.Vector3(...v).sub(c).multiplyScalar(1 - .14 * P.separate).add(c).addScaledVector(normal, (.035 + .11 * r) * P.separate).add(new THREE.Vector3(0, 0, P.pickLift * (.30 + .12 * r))));
+  }
+  function syncGraphic() {
+    const u = main.material.uniforms;
+    u.uColorMix.value = P.colorMix; u.uSep.value = P.separate; u.uLift.value = P.pickLift;
+    u.uFall.value = P.fall; u.uPick.value = state.pickId; u.uExtract.value = P.transfer > .00001 && P.fall < .001 ? 1 : 0;
+    main.boardTint.material.opacity = P.board * .78;
+    main.marker.visible = P.pickLift > .01 && P.fall < .1;
+    main.marker.material.opacity = P.pickLift;
+    labelsMain[0].visible = P.fall < .1;
+    labelsMain[1].visible = P.fall < .8;
+    labelsMain[2].visible = P.pickLift > .2 && P.fall < .1;
+    labelsMain[2].pos.set(state.pick.x, state.pick.y, M.z(state.pick.x, state.pick.y) + .6);
+    text(labelsMain[2].el, P.transfer > .99 ? `#${state.pickId + 1} 原来的位置` : `取这一块 #${state.pickId + 1}`);
 
-    // 斜面法向量在压平时退化为竖直方向
-    const nRaw = M.unitNormal(state.pick.x, state.pick.y);
-    const nDir = new THREE.Vector3(
-      lerp(nRaw[0], 0, press), lerp(nRaw[1], 0, press), lerp(nRaw[2], 1, press)).normalize();
-    const centerZ = micro.patchGroup.position.z;
-
-    micro.nArrow.visible = P.normals > 0.02;
-    micro.nArrow.position.set(0, 0, centerZ);
-    micro.nArrow.quaternion.setFromUnitVectors(UP, nDir);
-    micro.nArrow.setLength(lerp(0.5, 1.05, P.normals));
-    micro.nArrow.userData.mat.opacity = P.normals;
-
-    micro.kArrow.visible = P.normals > 0.02;
-    micro.kArrow.setLength(lerp(0.45, 0.95, P.normals));
-    micro.kArrow.userData.mat.opacity = P.normals;
-
-    micro.kGhost.visible = P.normals > 0.02 && P.arc > 0.02 && press < 0.4;
-    micro.kGhost.position.set(0, 0, centerZ);
-    micro.kGhost.setLength(lerp(0.45, 0.95, Math.min(P.arc, P.normals)));
-    micro.kGhost.userData.mat.opacity = P.normals * (1 - press) * 0.85;
-
-    // 夹角圆弧（在 k 与 n 张成的平面内展开）
-    const gamma = Math.acos(clamp(nDir.z, -1, 1));
-    const nIn = new THREE.Vector3(nDir.x, nDir.y, 0);
-    if (nIn.lengthSq() < 1e-8) nIn.set(1, 0, 0);
-    nIn.normalize();
-    const arcArr = micro.arc.geometry.attributes.position.array;
-    const NPT = 64, reveal = clamp(P.arc);
-    for (let i = 0; i < NPT; i++) {
-      const a = gamma * (i / (NPT - 1)) * reveal;
-      arcArr[i * 3] = 0.55 * Math.sin(a) * nIn.x;
-      arcArr[i * 3 + 1] = 0.55 * Math.sin(a) * nIn.y;
-      arcArr[i * 3 + 2] = 0.55 * Math.cos(a);
+    micro.root.visible = P.transfer >= .999;
+    if (P.tangent !== micro.lastTangent) {
+      const pos = micro.patchMesh.geometry.attributes.position.array;
+      for (let i = 0; i < pos.length; i++) pos[i] = lerp(micro.curved[i], micro.planar[i], P.tangent);
+      micro.patchMesh.geometry.attributes.position.needsUpdate = true;
+      micro.patchMesh.geometry.computeVertexNormals();
+      const edge = micro.border.geometry.attributes.position.array;
+      micro.ring.forEach((k, i) => { edge.set(pos.slice(k * 3, k * 3 + 3), i * 3); });
+      micro.border.geometry.attributes.position.needsUpdate = true;
+      micro.lastTangent = P.tangent;
     }
-    micro.arc.geometry.attributes.position.needsUpdate = true;
-    micro.arc.position.set(0, 0, centerZ);
-    micro.arc.visible = P.arc > 0.02 && gamma > 0.02;
-    micro.arc.material.opacity = 1;
-
-    // 隐函数梯度的两个分量
-    const zx = M.zx(state.pick.x, state.pick.y), zy = M.zy(state.pick.x, state.pick.y);
-    micro.gx.visible = micro.gy.visible = P.grad > 0.02;
-    micro.gx.position.set(0, 0, centerZ + 0.07);
-    micro.gy.position.set(0, 0, centerZ + 0.07);
-    micro.gx.quaternion.setFromUnitVectors(UP, new THREE.Vector3(Math.sign(zx) || 1, 0, 0));
-    micro.gy.quaternion.setFromUnitVectors(UP, new THREE.Vector3(0, Math.sign(zy) || 1, 0));
-    const glx = Math.max(0.26, Math.abs(zx) * 0.78) * P.grad;
-    const gly = Math.max(0.26, Math.abs(zy) * 0.78) * P.grad;
-    micro.gx.setLength(glx);
-    micro.gy.setLength(gly);
-    micro.gx.userData.mat.opacity = P.grad;
-    micro.gy.userData.mat.opacity = P.grad;
-
-    // 影子高亮
-    micro.shadow.material.color.copy(srgb('#93A3B8')).lerp(srgb('#4C74A8'), P.shadowHi);
-    micro.shadow.material.opacity = 0.55 + 0.32 * P.shadowHi;
-    micro.shadowEdge.material.opacity = clamp(0.5 + P.shadowHi);
-    micro.shadowEdge.material.transparent = true;
-
-    // 显微台标签锚点
-    const center = new THREE.Vector3(0, 0, centerZ);
-    labelsMicro[0].pos.copy(center).addScaledVector(nDir, 1.44);
-    labelsMicro[1].pos.set(0.36, -0.05, 0.56);
-    const mid = gamma * 0.5 * clamp(P.arc);
-    labelsMicro[2].pos.set(
-      0.72 * Math.sin(mid) * nIn.x, 0.72 * Math.sin(mid) * nIn.y,
-      centerZ + 0.72 * Math.cos(mid));
-    labelsMicro[3].pos.set(-0.46, 0.1, centerZ - 0.06);
-    labelsMicro[4].pos.set(0.5, -0.08, 0.14);
-    labelsMicro[5].pos.set((Math.sign(zx) || 1) * (glx + 0.26), 0, centerZ + 0.2);
-    labelsMicro[6].pos.set(0, (Math.sign(zy) || 1) * (gly + 0.26), centerZ + 0.2);
-    labelsMicro[7].pos.set(-0.26, 0.12, centerZ + 1.14);
-
-    labelsMicro[0].visible = P.normals > 0.35;
-    labelsMicro[1].visible = P.normals > 0.35;
-    labelsMicro[2].visible = P.arc > 0.45;
-    labelsMicro[3].visible = P.rise > 0.3;
-    labelsMicro[4].visible = P.rise > 0.3;
-    labelsMicro[5].visible = labelsMicro[6].visible = P.grad > 0.5;
-    labelsMicro[7].visible = P.arc > 0.5 && press < 0.35;
+    micro.shadow.visible = micro.shadowEdge.visible = micro.board.visible = P.rays > .01;
+    micro.shadow.material.opacity = P.rays * .28; micro.shadowEdge.material.opacity = P.rays;
+    micro.rays.visible = P.rays > .01; micro.rays.material.opacity = P.rays * .7;
+    const ray = micro.rays.geometry.attributes.position.array;
+    const hh = state.patch.dx / 2;
+    [[-1,-1],[1,-1],[1,1],[-1,1]].forEach(([a, b], k) => {
+      const x = a * 1.1, y = b * 1.1;
+      const h = lerp((M.z(state.pick.x + a * hh, state.pick.y + b * hh) - M.z(state.pick.x, state.pick.y)) * micro.zoom,
+        state.patch.zx * x + state.patch.zy * y, P.tangent) + 1.5;
+      ray.set([x, y, .02, x, y, .02 + (h - .02) * P.rays], k * 6);
+    });
+    micro.rays.geometry.attributes.position.needsUpdate = true; micro.rays.computeLineDistances();
+    const n = micro.normal;
+    micro.nArrow.setDirection(n); micro.nArrow.setLength(.95 * Math.max(.01, P.normals), .16, .09);
+    micro.kArrow.setLength(.95 * Math.max(.01, P.normals), .16, .09);
+    micro.nArrow.visible = micro.kArrow.visible = P.normals > .02;
+    micro.nArrow.traverse(o => { if (o.material) { o.material.transparent = true; o.material.opacity = P.normals; } });
+    micro.kArrow.traverse(o => { if (o.material) { o.material.transparent = true; o.material.opacity = P.normals; } });
+    const horizontal = micro.horizontal;
+    micro.arc.visible = P.normals > .02; micro.arc.material.opacity = P.normals;
+    text(labelsMicro[0].el, P.tangent > .99 ? '切平面小片（近似）' : `同一曲面片 #${state.pickId + 1}`);
+    labelsMicro[0].pos.set(-1.18, .25, 1.6 - state.patch.zx * 1.18 + state.patch.zy * .25);
+    labelsMicro[1].pos.set(.65, -.9, .04);
+    labelsMicro[2].pos.copy(n).multiplyScalar(1.15).add(new THREE.Vector3(0, 0, 1.5));
+    labelsMicro[3].pos.set(.23, .1, 2.7);
+    labelsMicro[4].pos.copy(horizontal).multiplyScalar(.67 * Math.sin(state.patch.gamma / 2)).add(new THREE.Vector3(0, 0, 1.5 + .67 * Math.cos(state.patch.gamma / 2)));
+    labelsMicro.forEach((l, i) => { l.visible = micro.root.visible && (i === 0 || (i === 1 ? P.rays > .7 : P.normals > .7)); });
+    // 标签也随它解释的对象淡入。
+    labelsMicro.forEach((l, i) => { l.el.style.opacity = i === 0 ? 1 : i === 1 ? P.rays : P.normals; });
+    main.controls.update(); micro.controls.update();
+    main.camera.updateMatrixWorld(); micro.camera.updateMatrixWorld();
+    projectLabels(labelsMain, main.camera, $('scene')); projectLabels(labelsMicro, micro.camera, $('micro-scene'));
+    // 两个面积标签放在各自轮廓外，避免投影标签看起来贴在斜片上。
+    const host = $('micro-scene'), w = host.clientWidth, h = host.clientHeight;
+    const screen = v => { const q = new THREE.Vector3(...v).project(micro.camera); return [(q.x / 2 + .5) * w, (.5 - q.y / 2) * h]; };
+    const top = micro.corners.map((v, i) => screen(v.map((a, k) => k === 2 ? lerp(a, micro.planar[[0,16,288,272][i] * 3 + 2], P.tangent) : a)));
+    const bottom = [[-1.1,-1.1,.018],[1.1,-1.1,.018],[1.1,1.1,.018],[-1.1,1.1,.018]].map(screen);
+    const anchor = (el, pts, y) => { el.style.left = `${clamp(pts.reduce((sum,p)=>sum+p[0]/4,0), 95, w-95)}px`; el.style.top = `${clamp(y, 15, h-20)}px`; };
+    anchor(labelsMicro[0].el, top, Math.min(...top.map(p=>p[1])) - 14);
+    anchor(labelsMicro[1].el, bottom, Math.max(...bottom.map(p=>p[1])) + 13);
+    drawTransfer();
   }
 
-  function projectLabels(list, camera, w, h) {
-    for (const item of list) {
-      if (!item.visible) { item.el.hidden = true; continue; }
-      const p = item.pos.clone().project(camera);
-      item.el.hidden = p.z > 1;
-      item.el.style.left = `${(p.x * 0.5 + 0.5) * w}px`;
-      item.el.style.top = `${(-p.y * 0.5 + 0.5) * h}px`;
+  function drawTransfer() {
+    const q = P.transfer, active = q > .00001 && q < .999;
+    const overlay = $('transfer-overlay'); overlay.style.visibility = active ? 'visible' : 'hidden';
+    if (!active) return;
+    const outer = $('workspace').getBoundingClientRect();
+    overlay.setAttribute('viewBox', `0 0 ${outer.width} ${outer.height}`);
+    function point(v, camera, host) {
+      const b = host.getBoundingClientRect(), p = v.clone().project(camera);
+      return [(p.x / 2 + .5) * b.width + b.left - outer.left, (.5 - p.y / 2) * b.height + b.top - outer.top];
     }
+    const corners = sourceCorners();
+    // 飞行边界从原网格边线连续过渡到放大后的曲边，落地时轮廓完全接上。
+    const from = micro.ring.map(k => {
+      const u = (micro.curved[k * 3] / 1.1 + 1) / 2, v = (micro.curved[k * 3 + 1] / 1.1 + 1) / 2;
+      const world = corners[0].clone();
+      if (v <= u) world.addScaledVector(corners[1].clone().sub(corners[0]), u).addScaledVector(corners[2].clone().sub(corners[1]), v);
+      else world.addScaledVector(corners[2].clone().sub(corners[3]), u).addScaledVector(corners[3].clone().sub(corners[0]), v);
+      return point(world, main.camera, $('scene'));
+    });
+    const to = micro.ring.map(k => point(new THREE.Vector3(...micro.curved.slice(k * 3, k * 3 + 3)), micro.camera, $('micro-scene')));
+    const points = from.map((v, i) => [lerp(v[0], to[i][0], q), lerp(v[1], to[i][1], q)]);
+    $('flying-patch').setAttribute('points', points.map(v => v.map(n => n.toFixed(3)).join(',')).join(' '));
+    const color = rampColor(rhoT(state.pick.x, state.pick.y), new THREE.Color()).convertLinearToSRGB();
+    $('flying-patch').setAttribute('fill', '#' + color.getHexString());
+    const center = pts => pts.reduce((a, p) => [a[0] + p[0] / pts.length, a[1] + p[1] / pts.length], [0, 0]);
+    const a = center(from), b = center(points);
+    $('transfer-trail').setAttribute('d', `M${a} L${b}`);
+    $('flying-label').setAttribute('x', b[0]); $('flying-label').setAttribute('y', Math.min(...points.map(p => p[1])) - 15);
   }
 
-  /* ================== 拾取（解析求交，避免对 6 万三角形做射线检测） ================== */
-  const raycaster = new THREE.Raycaster();
-  const hitPoint = new THREE.Vector3();
-  function pickSurface(clientX, clientY, rect) {
-    const ndc = new THREE.Vector2(
-      ((clientX - rect.left) / rect.width) * 2 - 1,
-      -((clientY - rect.top) / rect.height) * 2 + 1);
-    raycaster.setFromCamera(ndc, main.camera);
-    const ray = raycaster.ray;
-    let prevT = 0, prevG = null;
-    for (let t = 0.25; t <= 45; t += 0.05) {
-      const p = ray.at(t, hitPoint);
-      if (Math.abs(p.x) > 2.3 || Math.abs(p.y) > 2.3) { prevG = null; continue; }
-      const g = p.z - M.z(p.x, p.y);
-      if (prevG !== null && prevG > 0 && g <= 0) {
+  function stop() {
+    state.playing = false; if (tween) { tween.pause(); } reducedClock = 0;
+  }
+  function writeLink() {
+    try { history.replaceState(null, '', '#'+new URLSearchParams({ t: clock.t.toFixed(3), n: state.n, rho: state.rhoMode, patch: state.pickId })); } catch { /* file 环境下仍可使用控件。 */ }
+  }
+  function seek(t) {
+    stop(); if (tween) { tween.kill(); tween = null; }
+    clock.t = clamp(t, 0, C.duration); render(); writeLink();
+  }
+  function goToStep(step, instant) {
+    stop(); if (tween) { tween.kill(); tween = null; }
+    const target = clamp(step, 0, C.duration);
+    if (state.reduced || !window.gsap || instant || Math.abs(target - clock.t) > 1.001) { seek(target); return; }
+    // 与播放/拖动复用同一条时刻轴，不独立补间任何对象。
+    tween = gsap.to(clock, { t: target, duration: .95 * Math.abs(target - clock.t), ease: 'none', onUpdate: render,
+      onComplete: () => { tween = null; render(); writeLink(); } });
+    tween.timeScale(state.speed);
+  }
+  function togglePlay() {
+    if (state.playing || (tween && tween.isActive())) { stop(); render(); writeLink(); return; }
+    if (!window.gsap) return;
+    if (clock.t >= C.duration) clock.t = 0;
+    state.playing = true;
+    if (!state.reduced) {
+      if (tween) tween.kill();
+      tween = gsap.to(clock, { t: C.duration, duration: (C.duration - clock.t) * 4.2, ease: 'none', onUpdate: render,
+        onComplete: () => { state.playing = false; render(); writeLink(); } });
+      tween.timeScale(state.speed);
+    }
+    render();
+  }
+  function nextStep() { goToStep(Math.min(C.duration, Math.floor(clock.t + .00001) + 1)); }
+  function prevStep() { goToStep(Math.max(0, Math.ceil(clock.t - .00001) - 1)); }
+  function setPick(x, y) {
+    stop(); state.pick = { x, y }; updatePickId();
+    if (graphic) { rebuildMicro(); resetViews(); }
+    lastText = -1; lastMath = ''; render(); writeLink();
+  }
+
+  function pickSurface(clientX, clientY) {
+    const rect = $('scene').getBoundingClientRect();
+    const raycaster = new THREE.Raycaster();
+    raycaster.setFromCamera(new THREE.Vector2((clientX - rect.left) / rect.width * 2 - 1, 1 - (clientY - rect.top) / rect.height * 2), main.camera);
+    const point = new THREE.Vector3(), ray = raycaster.ray;
+    let prev = null, prevT = 0;
+    for (let t = .25; t < 45; t += .06) {
+      ray.at(t, point);
+      if (Math.abs(point.x) > 2.3 || Math.abs(point.y) > 2.3) { prev = null; continue; }
+      const g = point.z - M.z(point.x, point.y);
+      if (prev !== null && prev > 0 && g <= 0) {
         let lo = prevT, hi = t;
-        for (let k = 0; k < 26; k++) {
-          const mid = (lo + hi) / 2;
-          const q = ray.at(mid, hitPoint);
-          if (q.z - M.z(q.x, q.y) > 0) lo = mid; else hi = mid;
-        }
-        const f = ray.at((lo + hi) / 2, hitPoint);
-        if (Math.abs(f.x) <= 2 && Math.abs(f.y) <= 2) return { x: f.x, y: f.y };
-        return null;
+        for (let k = 0; k < 24; k++) { const mid = (lo + hi) / 2; ray.at(mid, point); if (point.z > M.z(point.x, point.y)) lo = mid; else hi = mid; }
+        ray.at((hi + lo) / 2, point);
+        return Math.abs(point.x) <= 2 && Math.abs(point.y) <= 2 ? { x: point.x, y: point.y } : null;
       }
-      prevT = t; prevG = g;
+      prev = g; prevT = t;
     }
     return null;
   }
-
-  /* ================== 场景搭建 ================== */
-  function setupMain() {
-    main.scene = new THREE.Scene();
-    main.scene.background = new THREE.Color('#ECEEE9');
-    main.camera = new THREE.PerspectiveCamera(38, 1, 0.05, 140);
-    main.camera.up.set(0, 0, 1);
-    main.camera.position.set(CAM_OVERVIEW.pos[0], CAM_OVERVIEW.pos[1], CAM_OVERVIEW.pos[2]);
-    main.renderer = new THREE.WebGLRenderer({ antialias: true });
-    main.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    main.renderer.outputEncoding = THREE.sRGBEncoding;
-    $('scene').prepend(main.renderer.domElement);
-
-    main.controls = new THREE.OrbitControls(main.camera, main.renderer.domElement);
-    main.controls.target.set(CAM_OVERVIEW.target[0], CAM_OVERVIEW.target[1], CAM_OVERVIEW.target[2]);
-    main.controls.enableDamping = true;
-    main.controls.dampingFactor = 0.08;
-    main.controls.enablePan = false;
-    main.controls.minDistance = 2.4;
-    main.controls.maxDistance = 16;
-    main.controls.minPolarAngle = 0.08;
-    main.controls.maxPolarAngle = Math.PI - 0.1;
-
-    main.material = new THREE.ShaderMaterial({
-      uniforms: {
-        uSep: { value: 0 }, uColorMix: { value: 0 }, uPick: { value: 0 },
-        uLift: { value: 0 }, uFall: { value: 0 }, uTime: { value: 0 }
-      },
-      vertexShader: SURFACE_VERT,
-      fragmentShader: SURFACE_FRAG,
-      side: THREE.DoubleSide,
-      extensions: { derivatives: true }
-    });
-
-    buildBoard();
-    buildPickMarker();
-    buildSurface(state.n);
-    buildLabels();
-  }
-
-  function setupMicro() {
-    micro.scene = new THREE.Scene();
-    micro.scene.background = new THREE.Color('#F3F1EA');
-    micro.camera = new THREE.PerspectiveCamera(40, 1, 0.05, 60);
-    micro.camera.up.set(0, 0, 1);
-    micro.renderer = new THREE.WebGLRenderer({ antialias: true });
-    micro.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    micro.renderer.outputEncoding = THREE.sRGBEncoding;
-    $('micro-scene').prepend(micro.renderer.domElement);
-
-    micro.controls = new THREE.OrbitControls(micro.camera, micro.renderer.domElement);
-    micro.controls.enableDamping = true;
-    micro.controls.dampingFactor = 0.09;
-    micro.controls.enablePan = false;
-    micro.controls.minDistance = 1.7;
-    micro.controls.maxDistance = 8;
-    micro.controls.minPolarAngle = 0.15;
-    micro.controls.maxPolarAngle = Math.PI - 0.15;
-    micro.controls.autoRotate = !reduced.matches;
-    micro.controls.autoRotateSpeed = 0.15;
-
-    const cam = microCamGoal();
-    micro.camera.position.set(cam.pos[0], cam.pos[1], cam.pos[2]);
-    micro.controls.target.set(cam.target[0], cam.target[1], cam.target[2]);
-    micro.controls.update();
-
-    micro.scene.add(new THREE.AmbientLight('#ffffff', 0.8));
-    const light = new THREE.DirectionalLight('#ffffff', 0.62);
-    light.position.set(-2.2, -2.8, 4.5);
-    micro.scene.add(light);
-    buildMicro();
-  }
-
-  function resize() {
-    const w = $('scene').clientWidth, h = $('scene').clientHeight;
-    if (w && h) {
-      main.camera.aspect = w / h;
-      main.camera.updateProjectionMatrix();
-      main.renderer.setSize(w, h);
-    }
-    const mw = $('micro-scene').clientWidth, mh = $('micro-scene').clientHeight;
-    if (mw && mh) {
-      micro.camera.aspect = mw / mh;
-      micro.camera.updateProjectionMatrix();
-      micro.renderer.setSize(mw, mh);
-    }
-  }
-
-  /* ================== 交互绑定 ================== */
-  function setN(index) {
-    const n = N_STOPS[clamp(index, 0, N_STOPS.length - 1)];
-    if (n === state.n) return;
-    state.n = n;
-    $('n-label').textContent = `N = ${n} · ${(n * n).toLocaleString('en-US')} 块`;
-    clearTimeout(setN.timer);
-    setN.timer = setTimeout(() => {
-      buildSurface(state.n);
-      rebuildMicro();
-      recompute();
-    }, n > 64 ? 130 : 0);
-  }
-
-  function setRhoMode(mode) {
-    if (mode === state.rhoMode) return;
-    state.rhoMode = mode;
-    document.querySelectorAll('[data-rho]').forEach(b => {
-      const on = b.dataset.rho === mode;
-      b.classList.toggle('is-active', on);
-      b.setAttribute('aria-pressed', String(on));
-    });
-    refreshSurfaceColors();
-    refreshTint();
-    updatePatchColors();
-    recompute();
-  }
-
-  function togglePlay() {
-    if (state.playing) { state.playing = false; updatePlayButton(); return; }
-    if (state.step === STEPS.length - 1) goToStep(0);
-    state.playing = true;
-    state.stepClock = 0;
-    updatePlayButton();
-  }
-
   function bind() {
-    document.querySelectorAll('.stage-pill').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const c = Number(btn.dataset.capsule);
-        const idx = STEPS.findIndex(s => s.capsule === c);
-        state.playing = false;
-        goToStep(idx < 0 ? 0 : idx);
-      });
-    });
-    $('n-slider').addEventListener('input', e => setN(Number(e.target.value)));
-    document.querySelectorAll('[data-rho]').forEach(b =>
-      b.addEventListener('click', () => setRhoMode(b.dataset.rho)));
-    $('play').addEventListener('click', togglePlay);
-    $('prev').addEventListener('click', () => { state.playing = false; goToStep(state.step - 1); });
-    $('next').addEventListener('click', () => { state.playing = false; goToStep(state.step + 1); });
-    $('restart').addEventListener('click', () => { state.playing = false; goToStep(0); });
-    $('speed').addEventListener('change', e => { state.speed = Number(e.target.value); });
-
+    C.steps.forEach((s, i) => { const b = document.createElement('button'); b.type = 'button'; b.className = 'step-dot'; b.setAttribute('aria-label', `第 ${i + 1} 步：${s.title}`); b.title = s.title; b.addEventListener('click', () => goToStep(i)); $('step-track').append(b); });
+    $('next').addEventListener('click', nextStep); $('prev').addEventListener('click', prevStep);
+    $('restart').addEventListener('click', () => seek(0)); $('play').addEventListener('click', togglePlay);
+    $('progress').addEventListener('input', e => seek(+e.target.value));
+    $('speed').addEventListener('change', e => { state.speed = +e.target.value; if (tween) tween.timeScale(state.speed); });
+    $('reduce-motion').checked = state.reduced;
+    const motion = value => { const was = state.playing; stop(); state.reduced = value; $('reduce-motion').checked = value; document.body.dataset.reduced = value;
+      if (value) clock.t = Math.ceil(clock.t); render(); if (was) togglePlay(); };
+    document.body.dataset.reduced = state.reduced;
+    $('reduce-motion').addEventListener('change', e => motion(e.target.checked));
+    media.addEventListener('change', e => motion(e.matches));
+    document.querySelectorAll('[data-capsule]').forEach(b => b.addEventListener('click', () => goToStep(C.steps.findIndex(s => s.capsule === +b.dataset.capsule))));
+    $('n-slider').addEventListener('input', e => { stop(); if (tween) { tween.kill(); tween = null; } state.n = N_STOPS[+e.target.value]; recompute(); writeLink(); });
+    document.querySelectorAll('[data-rho]').forEach(b => b.addEventListener('click', () => { stop(); state.rhoMode = b.dataset.rho; recompute(); writeLink(); }));
+    $('change-patch').addEventListener('click', () => { const id = (state.pickId + Math.max(1, Math.floor(state.n / 2))) % state.n ** 2; const [x, y] = M.cellCenter(state.n, id % state.n, Math.floor(id / state.n)); setPick(x, y); });
+    $('reset-view').addEventListener('click', () => { stop(); resetViews(); render(); });
     document.addEventListener('keydown', e => {
-      if (e.target.closest('button, input, select, a, textarea')) return;
+      if (e.target.closest('button, input, select, a, textarea, summary') || e.ctrlKey || e.metaKey || e.altKey) return;
       if (e.code === 'Space') { e.preventDefault(); togglePlay(); }
-      if (e.code === 'ArrowRight') { e.preventDefault(); state.playing = false; goToStep(state.step + 1); }
-      if (e.code === 'ArrowLeft') { e.preventDefault(); state.playing = false; goToStep(state.step - 1); }
+      if (e.code === 'ArrowRight') { e.preventDefault(); nextStep(); }
+      if (e.code === 'ArrowLeft') { e.preventDefault(); prevStep(); }
+      if (e.code === 'Home') { e.preventDefault(); seek(0); }
     });
-    document.addEventListener('visibilitychange', () => {
-      if (document.hidden && state.playing) { state.playing = false; updatePlayButton(); }
-    });
-
-    // 悬停探针 + 点击换微元
-    const sceneEl = $('scene'), probe = $('probe');
-    let downAt = null;
-    sceneEl.addEventListener('pointermove', e => {
-      const rect = sceneEl.getBoundingClientRect();
-      const hit = P.fall < 0.5 ? pickSurface(e.clientX, e.clientY, rect) : null;
-      if (!hit) { probe.hidden = true; return; }
-      const z = M.z(hit.x, hit.y), r = M.rho(hit.x, hit.y, state.rhoMode);
-      probe.hidden = false;
-      probe.innerHTML = `<b>当前位置 (${hit.x.toFixed(2)}, ${hit.y.toFixed(2)}, ${z.toFixed(2)})</b>` +
-        `<strong>面密度 ρ = ${r.toFixed(3)} g/cm²</strong>`;
-      const lx = e.clientX - rect.left, ly = e.clientY - rect.top;
-      probe.style.left = `${lx}px`;
-      probe.style.top = `${ly}px`;
-      probe.style.transform = lx > rect.width - 215 ? 'translate(calc(-100% - 16px), -50%)' : 'translate(14px, -50%)';
-    });
-    sceneEl.addEventListener('pointerleave', () => { probe.hidden = true; });
-    sceneEl.addEventListener('pointerdown', e => { downAt = { x: e.clientX, y: e.clientY }; });
-    sceneEl.addEventListener('pointerup', e => {
-      if (!downAt) return;
-      const moved = Math.hypot(e.clientX - downAt.x, e.clientY - downAt.y);
-      downAt = null;
-      if (moved > 6 || P.fall >= 0.5) return;
-      const hit = pickSurface(e.clientX, e.clientY, sceneEl.getBoundingClientRect());
-      if (!hit) return;
-      state.pick = hit;
-      updatePickId();
-      rebuildMicro();
-      updatePickStats();
-      if (STEPS[state.step].cam === 'close') applyCamera('close', true);
-    });
-
-    // 显微台：悬停时暂停自转
-    const microEl = $('micro-scene');
-    microEl.addEventListener('pointerenter', () => { micro.controls.autoRotate = false; });
-    microEl.addEventListener('pointerleave', () => { micro.controls.autoRotate = !reduced.matches; });
-
-    new ResizeObserver(resize).observe($('scene'));
-    new ResizeObserver(resize).observe($('micro-scene'));
-    window.addEventListener('resize', resize);
+    document.addEventListener('visibilitychange', () => { if (document.hidden) { stop(); render(); writeLink(); } });
+    if (graphic) {
+      let down = null;
+      const host = $('scene');
+      host.addEventListener('pointerdown', e => { down = [e.clientX, e.clientY]; });
+      host.addEventListener('pointerup', e => { if (!down || Math.hypot(e.clientX - down[0], e.clientY - down[1]) > 6 || P.fall > .01) return; down = null; const p = pickSurface(e.clientX, e.clientY); if (p) setPick(p.x, p.y); });
+      host.addEventListener('pointermove', e => {
+        const p = P.fall < .01 ? pickSurface(e.clientX, e.clientY) : null;
+        $('probe').hidden = !p; if (!p) return;
+        text($('probe'), `ρ = ${fmt(M.rho(p.x, p.y, state.rhoMode), 3)} g/cm²`);
+        const r = host.getBoundingClientRect(); $('probe').style.left = `${clamp(e.clientX - r.left + 12, 5, r.width - 185)}px`; $('probe').style.top = `${clamp(e.clientY - r.top - 32, 5, r.height - 40)}px`;
+      });
+      host.addEventListener('pointerleave', () => { $('probe').hidden = true; down = null; });
+      const observer = new ResizeObserver(resize); observer.observe($('scene')); observer.observe($('micro-scene'));
+    }
+    if (!window.gsap) {
+      $('play').disabled = true; $('engine-notice').hidden = false; text($('engine-notice'), '动画资源未加载，仍可用单步与进度条查看完整演示。');
+    }
   }
 
-  /* ================== 主循环 ================== */
   function animate(now) {
-    const dt = Math.min(0.06, (now - (animate.last || now)) / 1000);
-    animate.last = now;
-
-    if (state.playing) {
-      state.stepClock += dt * state.speed;
-      if (state.stepClock >= STEPS[state.step].hold) {
-        if (state.step < STEPS.length - 1) goToStep(state.step + 1);
-        else { state.playing = false; updatePlayButton(); }
-      }
+    const dt = Math.min(.1, (now - (animate.last || now)) / 1000); animate.last = now;
+    if (state.playing && state.reduced) {
+      reducedClock += dt * state.speed;
+      if (reducedClock >= .9) { reducedClock = 0; clock.t = Math.min(C.duration, Math.floor(clock.t) + 1); if (clock.t >= C.duration) state.playing = false; render(); writeLink(); }
     }
-
-    sync();
-    main.controls.update();
-    micro.controls.update();
-
-    const w = $('scene').clientWidth, h = $('scene').clientHeight;
-    const mw = $('micro-scene').clientWidth, mh = $('micro-scene').clientHeight;
-    projectLabels(labelsMain, main.camera, w, h);
-    projectLabels(labelsMicro, micro.camera, mw, mh);
-
-    main.renderer.render(main.scene, main.camera);
-    micro.renderer.render(micro.scene, micro.camera);
+    if (graphic) {
+      // 用户手动旋转时，投影标签和飞行端点仍与对象对齐。
+      syncGraphic(); main.renderer.render(main.scene, main.camera); micro.renderer.render(micro.scene, micro.camera);
+    }
     requestAnimationFrame(animate);
   }
 
-  /* ================== 公式渲染 ================== */
-  function renderMath() {
-    if (!window.katex) return;
-    document.querySelectorAll('[data-tex]').forEach(el => {
-      try {
-        window.katex.render(el.dataset.tex, el, {
-          displayMode: el.dataset.display === '1',
-          throwOnError: false, strict: false
-        });
-      } catch (err) { console.warn(err); }
-    });
+  const link = new URLSearchParams(location.hash.slice(1));
+  const requestedN = Number(link.get('n') || new URLSearchParams(location.search).get('n'));
+  if (N_STOPS.includes(requestedN)) state.n = requestedN;
+  $('n-slider').value = N_STOPS.indexOf(state.n);
+  if (link.get('rho') === 'uniform') state.rhoMode = 'uniform';
+  const id = Number(link.get('patch'));
+  if (link.has('patch') && Number.isInteger(id) && id >= 0 && id < state.n ** 2) {
+    const [x, y] = M.cellCenter(state.n, id % state.n, Math.floor(id / state.n)); state.pick = { x, y };
   }
-
-  /* ================== 启动 ================== */
-  try {
-    if (!window.THREE || !THREE.OrbitControls) throw new Error('RES');
-    fillSteps();
-    const qn = /(?:^|[?&])n=(\d+)/.exec(location.search);
-    if (qn) {
-      const idx = N_STOPS.indexOf(Number(qn[1]));
-      if (idx >= 0) { state.n = N_STOPS[idx]; $('n-slider').value = String(idx); }
-    }
-    setupMain();
-    setupMicro();
-    buildStepTrack();
-    recompute();
-    bind();
-    resize();
-    renderMath();
-    const jump = /#s(\d+)/.exec(location.hash);
-    goToStep(jump ? clamp(Number(jump[1]) - 1, 0, STEPS.length - 1) : 0, { instant: true });
-    refreshTint();
-    requestAnimationFrame(animate);
-  } catch (error) {
-    console.error(error);
-    const box = $('scene-error');
-    box.hidden = false;
-    box.textContent = error.message === 'RES'
-      ? '三维资源未能加载，请检查网络连接后刷新页面。'
-      : '无法创建三维画面，请使用支持 WebGL 的浏览器并开启图形加速后刷新。';
-    document.querySelectorAll('button, input, select').forEach(el => { el.disabled = true; });
+  updatePickId();
+  if (hasThree) {
+    try { setupMain(); setupMicro(); graphic = true; resetViews(); resize(); }
+    catch (error) { console.warn('三维画面不可用：', error.message); }
   }
+  if (!graphic) {
+    $('scene-error').hidden = false; text($('scene-error'), '三维资源未加载或 WebGL 不可用。仍可逐步查看面积关系与数值；联网并启用图形加速后刷新可恢复图形。');
+    $('micro-empty').innerHTML = '<strong>图形暂不可用</strong><span>下方保留逐步讲解与计算结果。</span>';
+    $('reset-view').disabled = true;
+  }
+  bind(); recompute();
+  const oldStep = /^#s(\d+)$/.exec(location.hash);
+  seek(link.has('t') ? Number(link.get('t')) || 0 : oldStep ? +oldStep[1] - 1 : 0);
+  requestAnimationFrame(animate);
 })();
