@@ -1,3 +1,4 @@
+// 动效选用：A1、A3、B1、C3、D1（见 docs/motion-library.md）
 /* Pure time sampling: no DOM, timers or accumulated animation state. */
 (function (root, factory) {
   const api = factory();
