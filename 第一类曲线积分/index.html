@@ -3,239 +3,69 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="以宏观金属丝、局部微元勾股显微台与底部质量天平汇流槽三条轨道，直观演示第一类曲线积分的物理与几何本质。">
-  <title>第一类曲线积分 · 可视化实验室</title>
-
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Newsreader:opsz,wght@6..72,500;6..72,600&display=swap">
+  <meta name="description" content="从一段细丝的密度与长度出发，联动观察微元勾股关系、质量累加与第一类曲线积分。">
+  <title>第一类曲线积分 · 沿曲线逐段称重</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
   <link rel="stylesheet" href="style.css">
-
   <script defer src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
   <script defer src="model.js"></script>
+  <script defer src="choreo.js"></script>
   <script defer src="app.js"></script>
 </head>
 <body>
-<div class="shell">
-
-  <!-- ═══════════ 顶栏 ═══════════ -->
-  <header class="topbar">
-    <div class="brand">
-      <a class="back-link" href="../index.html#math">&larr; 高等数学</a>
-      <span class="brand-sep" aria-hidden="true"></span>
-      <h1>第一类曲线积分 <em>· 物理与几何直观</em></h1>
-    </div>
-    <div class="transport" role="group" aria-label="演示播放控制">
-      <div class="speed-set" id="speed-set" role="group" aria-label="播放速度">
-        <button type="button" class="speed-btn" data-speed="0.5">0.5x</button>
-        <button type="button" class="speed-btn is-active" data-speed="1">1x</button>
-        <button type="button" class="speed-btn" data-speed="2">2x</button>
-      </div>
-      <button type="button" class="tbtn tbtn-primary" id="btn-auto">▶ 自动演示</button>
-      <button type="button" class="tbtn" id="btn-next">单步 →</button>
-      <button type="button" class="tbtn" id="btn-reset">↺ 复位</button>
-    </div>
+<main class="shell">
+  <header class="heading">
+    <a class="back" href="../index.html#math">← 高等数学</a>
+    <div class="heading-line"><div><h1>第一类曲线积分</h1><p>沿曲线逐段称重，看见 ds 为什么不可省略。</p></div><span class="heading-formula">M = ∫<sub>L</sub> ρ ds</span></div>
   </header>
-
-  <!-- ═══════════ HUD 控制栏 ═══════════ -->
-  <section class="hud" aria-label="认知阶段与参数控制">
-    <div class="capsules" role="tablist" aria-label="认知阶段切换">
-      <button type="button" class="capsule is-active" data-stage="1" role="tab" aria-selected="true">
-        <b>1</b><span>金属丝与非均匀线密度</span>
-      </button>
-      <button type="button" class="capsule" data-stage="2" role="tab" aria-selected="false">
-        <b>2</b><span>微元切分与局部直线化</span>
-      </button>
-      <button type="button" class="capsule" data-stage="3" role="tab" aria-selected="false">
-        <b>3</b><span>勾股展开与定积分求和</span>
-      </button>
-    </div>
-
-    <div class="params">
-      <label class="param param-slider" for="n-slider">
-        <span class="param-name">分割细分 <i>N</i></span>
-        <input id="n-slider" type="range" min="4" max="128" step="1" value="4" aria-label="分割段数 N">
-        <output class="param-out" id="n-out" for="n-slider">4</output>
-      </label>
-
-      <div class="param">
-        <span class="param-name">曲线预设</span>
-        <div class="seg" id="curve-seg">
-          <button type="button" class="seg-btn is-active" data-curve="parabola">抛物线段 y = x²</button>
-          <button type="button" class="seg-btn" data-curve="semicircle">半圆弧线</button>
-          <button type="button" class="seg-btn" data-curve="line">直线对照</button>
-        </div>
-      </div>
-
-      <div class="param">
-        <span class="param-name">线密度分布</span>
-        <div class="seg" id="rho-seg">
-          <button type="button" class="seg-btn" data-density="uniform">均匀 ρ = 1</button>
-          <button type="button" class="seg-btn is-active" data-density="gradient">渐变 ρ = x + y</button>
-        </div>
-      </div>
-    </div>
-
-    <div class="meters" aria-label="物理量计量牌">
-      <div class="meter">
-        <span class="meter-name">总质量 <i>M</i></span>
-        <strong class="meter-value" id="meter-m">0.000</strong>
-        <span class="meter-unit">克 g</span>
-        <span class="meter-sub" id="meter-m-sub">精确 ∫<sub>L</sub>ρ ds = —</span>
-      </div>
-      <div class="meter">
-        <span class="meter-name">曲线弧长 <i>L</i></span>
-        <strong class="meter-value" id="meter-l">0.000</strong>
-        <span class="meter-unit">厘米 cm</span>
-        <span class="meter-sub" id="meter-l-sub">精确 = —</span>
-      </div>
-    </div>
+  <section class="parameters" aria-label="曲线与分割参数">
+    <label>曲线 <select id="curve"><option value="parabola">抛物线 y = x²</option><option value="semicircle">120° 圆弧段</option><option value="line">直线 y = 0.6x + 0.35</option></select></label>
+    <label>线密度 <select id="density"><option value="gradient">ρ = x + y</option><option value="uniform">ρ = 1</option></select></label>
+    <label class="range-param">分割 <span class="mono">N</span> <input id="segments" type="range" min="4" max="128" value="8" aria-label="分割段数"><output id="n-value" class="mono">8</output></label>
+    <label class="segment-param">选段 <input id="selected" type="range" min="1" max="8" value="4" aria-label="选中微元"><output id="selected-value" class="mono">4 / 8</output></label>
   </section>
-
-  <!-- ═══════════ 解说条 ═══════════ -->
-  <div class="narration" id="narration" aria-live="polite">
-    <span class="narration-tag" id="narration-tag">阶段一</span>
-    <div class="narration-body">
-      <h2 id="narration-title">纯净曲线入场</h2>
-      <p id="narration-text">一根光滑的金属细丝 L 静卧在坐标系中。</p>
-    </div>
-    <span class="narration-index" id="narration-index">1 / 8</span>
-  </div>
-
-  <!-- ═══════════ 主舞台 ═══════════ -->
-  <main class="board">
-    <div class="dual-stage" id="dual-stage">
-
-      <!-- 左：宏观曲线主舞台 -->
-      <section class="panel stage-left" aria-label="宏观金属丝主舞台">
-        <header class="panel-head">
-          <div class="panel-title">
-            <span class="panel-kicker">宏观视口</span>
-            <h3>弯曲金属丝主舞台</h3>
-          </div>
-          <div class="panel-tools">
-            <div class="legend" aria-label="颜色越深表示线密度越大">
-              <span id="legend-min">ρ 低</span>
-              <i class="legend-bar" id="legend-bar"></i>
-              <span id="legend-max">ρ 高</span>
-            </div>
-            <button type="button" class="chip-btn" id="btn-swap" disabled>⟳ 换一段</button>
-          </div>
-        </header>
-
-        <div class="canvas-wrap aspect-left" id="left-wrap">
-          <svg id="left-svg" viewBox="0 0 760 540" role="img" aria-label="一根以颜色深浅表示线密度的弯曲金属丝">
-            <g id="g-grid" aria-hidden="true"></g>
-            <g id="g-wire-solid"></g>
-            <g id="g-wire-grad" opacity="0"></g>
-            <g id="g-ticks" opacity="0"></g>
-            <g id="g-chords" opacity="0"></g>
-            <g id="g-select" opacity="0"></g>
-            <g id="g-probe" opacity="0" aria-hidden="true"></g>
-            <rect id="hit-area" x="0" y="0" width="760" height="540" fill="transparent"></rect>
-          </svg>
-
-
-          <div class="float-chip chip-length" id="len-chip" hidden>总长 L = —</div>
-          <div class="float-chip chip-hint" id="hint-chip" hidden></div>
-          <div class="probe-tip" id="probe-tip" role="status" hidden></div>
-
-          <aside class="callout callout-warning fallacy-card" id="fallacy-card" hidden>
-            <span class="callout-tag">破除直觉误区</span>
-            <p>整根细丝<b>各处厚薄与轻重都不均匀</b>，无法直接用「总长 × 某个密度」。</p>
-            <p class="callout-formula"><s>M ≠ L × ρ(任意一点)</s></p>
-            <p>唯一可靠的办法：<b>切成极小段，逐段称重再相加</b>。</p>
-          </aside>
-        </div>
-      </section>
-
-      <!-- 右：局部微元勾股显微台 -->
-      <section class="panel stage-right" aria-label="局部微元勾股显微台">
-        <header class="panel-head">
-          <div class="panel-title">
-            <span class="panel-kicker">显微特写台</span>
-            <h3>局部微元 · 勾股三角形</h3>
-          </div>
-          <span class="micro-chip" id="micro-chip">等待微元</span>
-        </header>
-
-        <div class="canvas-wrap aspect-micro" id="micro-wrap">
-          <svg id="micro-svg" viewBox="0 0 560 440" role="img" aria-label="放大的微元直角三角形">
-            <g id="m-empty">
-              <rect x="46" y="52" width="470" height="336" rx="16" fill="none" stroke="#D6D3CD" stroke-width="2" stroke-dasharray="9 9"></rect>
-              <text x="281" y="205" text-anchor="middle" class="m-empty-title">显微台待机</text>
-              <text x="281" y="238" text-anchor="middle" class="m-empty-sub">进入阶段二后，光束会把某一小段 Δsᵢ 投影到这里</text>
-            </g>
-            <g id="m-shape" opacity="0">
-              <line id="m-base" class="mic-leg" stroke="#57534E" stroke-width="5" stroke-linecap="round" stroke-dasharray="10 7"></line>
-              <line id="m-alt" class="mic-leg" stroke="#2563EB" stroke-width="5" stroke-linecap="round" stroke-dasharray="10 7"></line>
-              <path id="m-angle" fill="none" stroke="#D97706" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"></path>
-              <line id="m-rod-halo" stroke="#FFFFFF" stroke-width="26" stroke-linecap="round"></line>
-              <line id="m-rod" stroke-width="15" stroke-linecap="round"></line>
-            </g>
-          </svg>
-
-          <div class="mic-label" id="lab-s" hidden></div>
-          <div class="mic-label" id="lab-x" hidden></div>
-          <div class="mic-label label-alt" id="lab-y" hidden></div>
-          <div class="mic-label label-slope" id="lab-slope" hidden></div>
-        </div>
-
-        <div class="callout callout-tip" id="micro-tip" hidden></div>
-        <div class="callout callout-note" id="micro-math" hidden></div>
-      </section>
-
-      <!-- 光束投影层 -->
-      <svg class="beam-layer" id="beam-layer" aria-hidden="true">
-        <path id="beam-glow" fill="none" stroke="#2563EB" stroke-opacity=".16" stroke-width="14" stroke-linecap="round"></path>
-        <path id="beam-path" fill="none" stroke="#2563EB" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="10 8"></path>
-        <circle id="beam-dot" r="5" fill="#2563EB" opacity="0"></circle>
+  <section class="stage" aria-label="曲线、微元与质量累加联动舞台">
+    <div class="stage-heading"><span><i id="status-dot"></i><span id="time" class="mono">0.0 s</span><b id="phase">密度着色</b></span><span id="curve-domain" class="mono"></span></div>
+    <div class="stage-scroll" tabindex="0" aria-label="演示图，窄窗口可横向滚动">
+      <svg id="scene" viewBox="0 0 1100 530" role="img" aria-labelledby="scene-title scene-desc">
+        <title id="scene-title">第一类曲线积分：曲线微元与质量求和</title>
+        <desc id="scene-desc">左侧显示细丝的密度分布与选中弦段，右侧按相同比例放大并显示投影，下方将各段近似质量累加。</desc>
+        <defs><pattern id="grid" width="22" height="22" patternUnits="userSpaceOnUse"><path d="M22 0H0V22" fill="none" stroke="#343c38" stroke-opacity=".045"/></pattern><linearGradient id="density-ramp"><stop stop-color="#d9b570"/><stop offset="1" stop-color="#805223"/></linearGradient><marker id="arrow" viewBox="0 0 8 8" refX="6" refY="4" markerWidth="5" markerHeight="5" orient="auto"><path d="M0 0L8 4L0 8" fill="none" stroke="#6b7066"/></marker></defs>
+        <rect width="1100" height="530" fill="url(#grid)"/>
+        <text x="42" y="35" class="section-name">01 / 沿曲线分割</text>
+        <text x="685" y="35" class="section-name">02 / 同一小段，局部放大</text>
+        <path d="M630 26V365" class="divider"/>
+        <g id="axes"></g><g id="wire"></g><g id="chords"></g>
+        <g id="selected-mark"><path id="selected-halo" fill="none" stroke="#2563eb" stroke-opacity=".14" stroke-width="20" stroke-linecap="round"/><path id="selected-chord" fill="none" stroke="#2563eb" stroke-width="5" stroke-linecap="round"/><circle id="point-a" r="4" fill="#2563eb"/><circle id="point-b" r="4" fill="#2563eb"/><text id="selected-label" class="blue-label"></text></g>
+        <circle id="focus" fill="none" stroke="#2563eb" stroke-width="2"/>
+        <g id="density-legend"><rect x="56" y="337" width="84" height="6" rx="3" fill="url(#density-ramp)"/><text x="56" y="365" class="small" id="rho-min"></text><text x="156" y="345" class="small" id="rho-max"></text></g>
+        <text x="56" y="395" id="length" class="small mono"></text>
+        <path id="zoom-link" fill="none" stroke="#2563eb" stroke-width="1.5" stroke-dasharray="5 5"/>
+        <line id="flying-chord" stroke="#2563eb" stroke-width="5" stroke-linecap="round"/>
+        <g id="micro"><path id="micro-halo" stroke="#2563eb" stroke-opacity=".1" stroke-width="20" stroke-linecap="round" fill="none"/><path id="micro-chord" stroke="#2563eb" stroke-width="5" stroke-linecap="round" fill="none"/><g id="triangle"><path id="dx-line" stroke="#6b7066" stroke-width="2" stroke-dasharray="6 5" fill="none"/><path id="dy-line" stroke="#8f6619" stroke-width="2" stroke-dasharray="6 5" fill="none"/><path id="right-angle" stroke="#6b7066" fill="none"/><text id="dx-label" class="small mono"></text><text id="dy-label" class="small mono"></text><text id="ds-label" class="blue-label mono"></text></g><text x="700" y="324" id="micro-info" class="small mono"></text></g>
+        <g id="micro-empty"><path d="M740 215h170" stroke="#e5e4dc" stroke-width="2"/><text x="825" y="245" text-anchor="middle" class="small">选中段将在这里放大</text></g>
+        <foreignObject x="678" y="349" width="392" height="77"><div xmlns="http://www.w3.org/1999/xhtml" id="local-formula" class="local-formula"></div></foreignObject>
+        <g id="event-tag"><rect x="478" y="64" width="116" height="29" rx="5" fill="#eef3fb"/><text id="tag-text" x="536" y="84" text-anchor="middle" class="blue-label"></text></g>
+        <path d="M42 424H1058" class="divider"/>
+        <text x="42" y="452" class="section-name">03 / 按段累加近似质量</text>
+        <text x="718" y="452" text-anchor="end" id="sum-count" class="small mono"></text>
+        <path d="M56 506H720" class="baseline"/><g id="mass-bars"></g><path id="mass-link" fill="none" stroke="#2563eb" stroke-width="1.5" stroke-dasharray="5 5"/>
+        <g id="mass-token"><rect x="-25" y="-12" width="50" height="24" rx="4" fill="#2563eb"/><text x="0" y="5" text-anchor="middle" fill="white" font-size="12">ρᵢ ℓᵢ</text></g>
+        <text x="780" y="452" class="small">累计 Mₙ / g</text><text id="sum-value" x="780" y="491" class="sum-value mono">0.0000</text>
+        <text id="sum-target" x="780" y="516" class="small mono"></text>
       </svg>
     </div>
-
-    <!-- 底部：质量天平汇流槽 -->
-    <section class="panel trough" aria-label="质量天平汇流槽">
-      <header class="panel-head">
-        <div class="panel-title">
-          <span class="panel-kicker">底部辅助区</span>
-          <h3>质量天平汇流槽</h3>
-        </div>
-        <span class="trough-note">每一块 = 一段微元质量 Δmᵢ = ρ(xᵢ, yᵢ) · Δsᵢ</span>
-      </header>
-
-      <div class="trough-body">
-        <div class="basin" id="basin">
-          <div class="basin-grid" aria-hidden="true"></div>
-          <div class="basin-empty" id="basin-empty">微元质量块尚未汇入 —— 走到最后一拍「汇流求和」开始称量</div>
-          <div class="bars" id="bars"></div>
-          <div class="fallers" id="fallers" aria-hidden="true"></div>
-          <div class="basin-floor" aria-hidden="true"></div>
-        </div>
-
-        <div class="scale-card">
-          <span class="scale-name">天平读数 Σ Δmᵢ</span>
-          <strong class="scale-value" id="scale-value">0.000</strong>
-          <span class="scale-unit">克 g</span>
-          <div class="scale-track"><b id="scale-fill"></b></div>
-          <span class="scale-target" id="scale-target">目标 M = —</span>
-        </div>
-      </div>
-
-      <div class="formula-reveal" id="formula-reveal" hidden>
-        <span class="formula-caption">从求和极限到定积分的闭环</span>
-        <div class="formula-line" id="formula-1"></div>
-        <div class="formula-line" id="formula-2"></div>
-      </div>
-    </section>
-  </main>
-
-  <footer class="foot">
-    <span>第一类曲线积分 · 长度加权求和</span>
-    <span class="foot-dot" aria-hidden="true"></span>
-    <span>曲线 L：y = f(x) 上的弧长微元 ds = √(1 + [y′(x)]²) dx</span>
-  </footer>
-</div>
+    <div class="stage-caption"><span id="caption" aria-live="polite"></span><span id="error" class="mono"></span></div>
+    <div id="limit-formula" class="limit-formula" aria-label="积分极限公式"></div>
+  </section>
+  <section class="controls" aria-label="播放与时间控制">
+    <div class="transport"><button id="reset">复位</button><button id="prev">← 上一步</button><button id="play" class="primary">播放</button><button id="next">下一步 →</button><label class="speed-label">速度 <select id="speed" aria-label="播放速度"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option></select></label><label class="motion-label"><input type="checkbox" id="reduce-motion">减少动效</label><span id="position" class="mono"></span></div>
+    <label class="progress-label"><span>演示进度</span><input id="progress" type="range" min="0" max="1000" step="1" value="0" aria-label="演示进度"><output id="duration" class="mono"></output></label>
+    <nav id="steps" class="steps" aria-label="动作时刻"></nav>
+    <p id="notice" class="notice" hidden></p>
+  </section>
+  <footer>示意：x、y 以 cm 计，ρ 以 g/cm 计；有限段取弦长与中点密度，积分参考值由数值积分计算。</footer>
+</main>
 </body>
 </html>
