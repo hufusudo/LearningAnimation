@@ -2,7 +2,7 @@
  * 第一类曲线积分 · 纯计算模型（视图无关）
  * 曲线统一表示为 y = f(x)，x ∈ [a, b]，因此弧长微元可写成
  *   ds = sqrt(1 + [y'(x)]^2) dx
- * 所有数值积分使用自适应步长足够细的 Simpson 法，保证参考值稳定。
+ * 参考积分使用固定步数的复合 Simpson 法；它是数值近似，不是精确值或自适应积分。
  */
 (function (root, factory) {
   const api = factory();
@@ -27,8 +27,8 @@
     },
     semicircle: {
       id: 'semicircle',
-      label: '半圆弧线',
-      short: '半圆弧',
+      label: '120°圆弧段',
+      short: '120°圆弧',
       tex: 'y = \\sqrt{1.21-(x-1.1)^{2}}',
       // 圆心 (1.1, 0)，半径 1.1，取 θ ∈ [30°, 150°]，避免端点出现竖直切线
       a: 1.1 - 1.1 * Math.cos(Math.PI / 6),
@@ -89,12 +89,12 @@
     return out;
   }
 
-  /** 精确弧长 L = ∫ sqrt(1 + y'^2) dx */
+  /** 固定步数 Simpson 数值近似：L = ∫ sqrt(1 + y'^2) dx */
   function arcLength(curve, n) {
     return simpson((x) => Math.sqrt(1 + curve.dy(x) * curve.dy(x)), curve.a, curve.b, n || 2048);
   }
 
-  /** 精确总质量 M = ∫ rho(x, y(x)) sqrt(1 + y'^2) dx */
+  /** 固定步数 Simpson 数值近似：M = ∫ rho(x, y(x)) sqrt(1 + y'^2) dx */
   function totalMass(curve, density, n) {
     return simpson(
       (x) => density.rho(x, curve.y(x)) * Math.sqrt(1 + curve.dy(x) * curve.dy(x)),
@@ -132,7 +132,7 @@
     return out;
   }
 
-  /** 当前 N 下的近似统计 + 高精度参考值 */
+  /** 当前 N 下的分段近似统计 + 固定步数 Simpson 参考近似。 */
   function stats(curve, density, N) {
     const segs = segments(curve, density, N);
     let L = 0;
