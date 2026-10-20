@@ -8,6 +8,8 @@
   <title>插入排序：一步步看懂它如何工作</title>
   <link rel="stylesheet" href="style.css">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js" defer></script>
+  <script src="model.js" defer></script>
+  <script src="choreo.js" defer></script>
   <script src="app.js" defer></script>
 </head>
 <body>
@@ -89,28 +91,36 @@
             <span class="step-counter" id="step-counter">步骤 1</span>
           </div>
 
-          <div class="array-stage">
-            <div class="temp-row">
-              <div class="temp-explainer">
-                <span class="temp-dot" aria-hidden="true"></span>
-                <div><strong>暂存 temp</strong><span>本轮要插入的数</span></div>
-              </div>
-              <div class="temp-slot" id="temp-slot" aria-label="暂存的数">
-                <span class="temp-placeholder">等待取数</span>
+          <div class="array-stage" id="array-stage">
+            <div class="sort-viewport" id="sort-viewport">
+              <div class="sort-scene" id="sort-scene">
+                <svg class="motion-links" id="motion-links" aria-hidden="true"><path id="compare-link"></path></svg>
+                <div class="temp-row">
+                  <div class="temp-explainer">
+                    <span class="temp-dot" aria-hidden="true"></span>
+                    <div><strong>暂存 temp</strong><span>本轮要插入的数</span></div>
+                  </div>
+                  <div class="temp-slot" id="temp-slot" aria-label="暂存的数">
+                    <span class="temp-placeholder">等待取数</span>
+                  </div>
+                </div>
+                <div class="stage-cue" id="stage-cue">左侧已排序，右侧等待处理</div>
+                <div class="pointer-grid" id="pointer-grid" aria-hidden="true"></div>
+                <div class="array-track" id="array-track" role="img" aria-label="当前数组"></div>
+                <div class="index-track" id="index-track" aria-hidden="true"></div>
+                <div class="region-track" id="region-track" aria-hidden="true"></div>
+                <div class="pointer-summary" id="pointer-summary"></div>
+                <div class="tile-layer" id="tile-layer" aria-hidden="true"></div>
               </div>
             </div>
-
-            <div class="sort-viewport">
-              <div class="pointer-grid" id="pointer-grid" aria-hidden="true"></div>
-              <div class="array-track" id="array-track" role="img" aria-label="当前数组"></div>
-              <div class="index-track" id="index-track" aria-hidden="true"></div>
-              <div class="region-track" id="region-track" aria-hidden="true"></div>
-              <div class="legend">
-                <span><i class="legend-swatch swatch-sorted"></i>已排好</span>
-                <span><i class="legend-swatch swatch-active"></i>正在比较</span>
-                <span><i class="legend-swatch swatch-hole"></i>空位</span>
-                <span><i class="legend-swatch swatch-temp"></i>暂存值</span>
-              </div>
+            <p class="scroll-hint" id="scroll-hint" hidden>数组可左右滚动，指针与索引保持对齐。</p>
+            <div class="legend">
+              <span><i class="legend-swatch swatch-sorted"></i>已排好</span>
+              <span><i class="legend-swatch swatch-pending"></i>未处理</span>
+              <span><i class="legend-swatch swatch-active"></i>正在比较</span>
+              <span><i class="legend-swatch swatch-excluded"></i>已排除查找</span>
+              <span><i class="legend-swatch swatch-hole"></i>空位</span>
+              <span><i class="legend-swatch swatch-temp"></i>暂存值</span>
             </div>
           </div>
 
@@ -162,7 +172,7 @@
       <div class="playback">
         <div class="timeline-row">
           <span class="timeline-label" id="timeline-label">第 1 步</span>
-          <input type="range" id="step-slider" min="0" max="1" value="0" step="1" aria-label="拖动查看排序步骤">
+          <input type="range" id="step-slider" min="0" max="1" value="0" step="0.01" aria-label="拖动查看排序步骤与步内动画">
           <span class="timeline-total" id="timeline-total">共 1 步</span>
         </div>
         <div class="control-row">
@@ -172,6 +182,7 @@
             <button type="button" class="control-button secondary" id="next-button" aria-label="下一步"><span>下一步</span> →</button>
             <button type="button" class="reset-button" id="reset-button">重新开始</button>
           </div>
+          <label class="motion-control"><input type="checkbox" id="reduce-motion"> 减少动态效果</label>
           <label class="speed-control">播放速度
             <select id="speed-select" aria-label="自动播放速度">
               <option value="1500">慢一点</option>
@@ -180,7 +191,8 @@
             </select>
           </label>
         </div>
-        <p class="keyboard-hint">可以用键盘的 ← 和 → 单步查看；按空格开始或暂停。</p>
+        <p class="engine-notice" id="engine-notice" hidden>动画引擎未加载，自动播放不可用；仍可单步或拖动查看全部状态。</p>
+        <p class="keyboard-hint">← → 单步查看 · 空格播放／暂停 · Home 复位；进度条可查看步内过程。</p>
       </div>
     </section>
 
