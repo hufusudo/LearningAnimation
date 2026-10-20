@@ -1,13 +1,13 @@
 /**
- * 偏导与可微的几何辨析 —— 数学与内容数据层（2D 版）。
+ * 偏导与可微的几何辨析 —— 数学与内容数据层。
  * 不依赖 DOM：页面与 Node 测试共用（node --test 运行 model.test.cjs）。
  *
  * 约定：
  *   · P = (0, 0)，五个样本都满足 f(P) = 0；
  *   · 穿过 P 的一条直线记作 θ：t 为带符号距离，t>0 沿 θ，t<0 沿 θ+180°；
  *     截线 g(t) = f(t·cosθ, t·sinθ)，割线斜率 g(t)/t；
- *   · 割线斜率在 t→0 时两侧一致，就是这条直线上的偏导（或方向导数）；
- *   · 候选切平面 L(v) = ∇f(P)·v，只在偏导存在时给出；
+ *   · 割线斜率在 t→0 时两侧一致，得到参数化截线的双侧导数；仅坐标方向称偏导；
+ *   · 候选线性近似 L(v) = f_x(P)v₁ + f_y(P)v₂，只在两偏导存在时给出；
  *     误差比 = max_u |f(d·u) − L(d·u)| / d，u 取遍单位圆。
  */
 (function (root) {
@@ -17,7 +17,6 @@
   var DEG = Math.PI / 180;
   var RHO0 = 1.2;        // k=0 时的窗口半径
   var K_MAX = 9;         // 缩放级数：ρ = RHO0·2^(−k)
-  var REVEAL_RHO = 0.01; // 缩到这个距离以内，连续、可微、偏导连续才揭晓
   var DIR_COUNT = 360;   // 误差比取样方向数，1° 一格，包含 45°
 
   var DIRS = [];
@@ -50,7 +49,7 @@
         return { left: null, right: null, twoSided: false };
       },
       text: {
-        axis: '把手转到 0° 或 90°，看坐标轴上的截线。',
+        axis: '转到 0° 或 90°，看坐标轴上的截线。',
         zoom: '把手转到 45°，缩小 ρ，看 P 处的高度。',
         result: '离 P 再近，高度不趋于 0：不连续，也不可微。'
       }
@@ -74,7 +73,7 @@
         return { left: -1, right: 1, twoSided: false };
       },
       text: {
-        axis: '把手转到 0°，看 P 处的截线有没有切线。',
+        axis: '转到 0°，看 P 处的截线有没有切线。',
         zoom: '缩小 ρ，看折角是否随放大而消失。',
         result: '各方向都连续，但 P 处是折角：偏导不存在。'
       }
@@ -101,7 +100,7 @@
         return { left: -k, right: k, twoSided: Math.abs(k) < 1e-9 };
       },
       text: {
-        axis: '把手转到 0° 或 90°，看坐标轴方向。',
+        axis: '转到 0° 或 90°，看坐标轴方向。',
         zoom: '把手转到 45°，缩小 ρ，看误差比。',
         result: '沿 45° 有折角，误差比恒为 0.5：不可微。'
       }
@@ -127,7 +126,7 @@
         return { left: 0, right: 0, twoSided: true };
       },
       text: {
-        axis: '把手转到 0°，看坐标轴上的切线。',
+        axis: '转到 0°，看坐标轴上的切线。',
         zoom: '缩小 ρ，看误差比，再看切线斜率。',
         result: '误差比趋于 0：可微；切线斜率却不收束。'
       }
@@ -152,8 +151,8 @@
         return { left: s, right: s, twoSided: true };
       },
       text: {
-        axis: '把手转到 0°，看切线的斜率。',
-        zoom: '缩小 ρ，看曲面是否变平。',
+        axis: '转到 0°，看切线的斜率。',
+        zoom: '缩小 ρ，看截线是否贴近候选近似。',
         result: '斜率稳定，误差比趋于 0：偏导连续，可微。'
       }
     }
@@ -187,28 +186,29 @@
 
   var TOURS = {
     entry: {
-      start: { theta: 20, k: 0 },
+      start: { sample: 'F1', theta: 20, k: 0 },
       steps: [
-        { sample: 'F1', theta: 20, k: 0, dur: 0, text: '这是 f = xy/(x²+y²)。在 P 处沿一条直线切开，得到截线。' },
-        { sample: 'F1', theta: 0, k: 0, dur: 1.6, text: '沿 x 轴切开：截线水平，切线斜率为 0，偏导存在。' },
-        { sample: 'F1', theta: 45, k: 0, dur: 1.6, text: '换成 45° 的直线：截线在 P 处断开。' },
-        { sample: 'F1', theta: 45, k: 7, dur: 3.2, text: '离 P 再近，高度仍是 0.5，不趋于 f(P)=0。' },
-        { sample: 'F1', theta: 45, k: 7, dur: 0, text: '所以：偏导存在，推不出连续。' },
-        { sample: 'F2', theta: 0, k: 0, dur: 1.6, text: 'F2 = √(x²+y²)：处处连续，但 P 处是折角。' },
-        { sample: 'F2', theta: 0, k: 7, dur: 3.2, text: '放大后折角还在：左斜率 −1，右斜率 +1。' },
-        { sample: 'F2', theta: 0, k: 7, dur: 0, text: '所以：连续，推不出偏导存在。' }
+        { sample: 'F1', theta: 20, k: 0, dur: 0, title: '曲面上剖切', focus: 'plot', text: '蓝面穿过曲面，蓝色交线就是这个方向的截线。' },
+        { sample: 'F1', theta: 0, k: 0, dur: 1.6, title: '沿 x 轴看', focus: 'direction', tag: 'x 轴平坦', text: '沿 x 轴，截线恒为零；这个方向的偏导为零。' },
+        { sample: 'F1', theta: 90, k: 0, dur: 1.6, title: '再看 y 轴', focus: 'direction', tag: '两轴都平', reveal: ['A'], text: '沿 y 轴也为零：原点的两个偏导都存在。' },
+        { sample: 'F1', theta: 45, k: 0, dur: 1.6, title: '换条路径', focus: 'plot', tag: '高度未归零', text: '沿 45°，离开原点后的高度恒为 0.5。' },
+        { sample: 'F1', theta: 45, k: 7, dur: 3.2, title: '缩小邻域', focus: 'error', tag: '仍然断开', reveal: ['B', 'D', 'C'], text: '再靠近也不归零：偏导存在，推不出连续。' },
+        { sample: 'F2', theta: 0, k: 0, dur: 1.6, title: '连续的尖角', focus: 'plot', reveal: ['B'], text: '换看三维圆锥：高度随距离趋零，但原点是尖点。' },
+        { sample: 'F2', theta: 0, k: 7, dur: 3.2, title: '尖角仍在', focus: 'slopes', tag: '两侧不一致', reveal: ['A', 'D', 'C'], text: '左右斜率仍是 −1 与 +1：连续也推不出偏导存在。' }
       ]
     },
     advanced: {
-      start: { theta: 20, k: 0 },
+      start: { sample: 'F3', theta: 0, k: 0 },
       steps: [
-        { sample: 'F3', theta: 0, k: 0, dur: 1.2, text: 'F3 = xy/√(x²+y²)：先看坐标轴方向。' },
-        { sample: 'F3', theta: 45, k: 0, dur: 1.6, text: '沿 45°：截线在 P 有折角，两侧斜率为 −0.5 与 +0.5。' },
-        { sample: 'F3', theta: 45, k: 7, dur: 3.2, text: '放大后折角不变：误差比恒为 0.5，不可微。' },
-        { sample: 'F4', theta: 0, k: 0, dur: 1.6, text: 'F4 = (x²+y²)·sin(1/√(x²+y²))：函数值很小。' },
-        { sample: 'F4', theta: 0, k: 7, dur: 3.2, text: '放大后误差比趋于 0：在 P 处可微。' },
-        { sample: 'F4', theta: 0, k: 8.5, dur: 3.0, text: '但切线斜率在 P 附近来回摆动：偏导不连续。' },
-        { sample: 'F0', theta: 0, k: 0, dur: 2.0, text: 'F0 光滑：偏导连续 ⇒ 可微 ⇒ 偏导存在且连续。' }
+        { sample: 'F3', theta: 0, k: 0, dur: 0, title: '轴上依然平', focus: 'direction', text: 'F3 沿 x 轴截线水平，先记住这个形状。' },
+        { sample: 'F3', theta: 90, k: 0, dur: 1.6, title: '两个偏导存在', focus: 'direction', reveal: ['A', 'B'], text: 'y 轴同样水平；且 |f| ≤ r/2，函数在原点连续。' },
+        { sample: 'F3', theta: 45, k: 0, dur: 1.6, title: '检查线性误差', focus: 'plot', tag: '斜向有折角', text: '沿 45°，蓝线弯折；金色候选平面 L 仍为零。' },
+        { sample: 'F3', theta: 45, k: 7, dur: 3.2, title: '误差没有变小', focus: 'error', tag: '误差比不变', reveal: ['D', 'C'], text: '误差比恒为 0.5：连续且偏导存在，仍不可微。' },
+        { sample: 'F4', theta: 0, k: 0, dur: 1.6, title: '被压低的振荡', focus: 'plot', reveal: ['A', 'B'], text: '换看 F4：函数振荡，但高度被 r² 压住。' },
+        { sample: 'F4', theta: 0, k: 7, dur: 3.2, title: '误差比趋零', focus: 'error', tag: '误差被压住', reveal: ['D'], text: '任意方向的误差比都不超过 r，故在原点可微。' },
+        { sample: 'F4', theta: 0, k: 8.5, dur: 2.4, title: '看附近的导数', focus: 'spark', tag: '邻近仍振荡', reveal: ['C'], text: '原点偏导为零，附近偏导却仍振荡：可微不推出偏导连续。' },
+        { sample: 'F0', theta: 0, k: 0, dur: 1.6, title: '光滑函数对照', focus: 'plot', text: 'F0 的原点 x 斜率为 0.59；候选平面随之倾斜。' },
+        { sample: 'F0', theta: 0, k: 7, dur: 3.2, title: '稳定的线性近似', focus: 'spark', tag: '线性近似成立', reveal: ['A', 'B', 'D', 'C'], text: '偏导连续 ⇒ 可微 ⇒ 连续且偏导存在。' }
       ]
     }
   };
@@ -276,13 +276,19 @@
 
   // 沿这条直线靠近 P 时的高度极限（P 处断开时，它与 f(P) 不同）
   function limitAlong(id, thetaDeg) {
-    return lineValue(id, thetaDeg, 1e-9);
+    if (id !== 'F1') return 0;
+    var u = dirOf(thetaDeg);
+    return u.x * u.y;
   }
 
-  // 所有方向上 |f − L| 的最大值，距离 d>0；偏导不存在时为 null
+  // |f − L| 的最大值（F0为360方向数值近似），距离d>0；两偏导不全时为null
   function errorAbs(id, d) {
     var s = BY_ID[id];
     if (!s.gradAtP || !(d > 0)) return null;
+    // 三个反例用解析值，避免将有限方向采样误当严格最大值。
+    if (id === 'F1') return 0.5;
+    if (id === 'F3') return d / 2;
+    if (id === 'F4') return d * d * Math.abs(Math.sin(1 / d));
     var g = s.gradAtP;
     var best = 0;
     for (var k = 0; k < DIRS.length; k++) {
@@ -332,7 +338,6 @@
     TAU: TAU,
     RHO0: RHO0,
     K_MAX: K_MAX,
-    REVEAL_RHO: REVEAL_RHO,
     DIR_COUNT: DIR_COUNT,
     samples: SAMPLES,
     order: ORDER,
