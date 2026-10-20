@@ -76,13 +76,31 @@
     return [DOMAIN.x0 + (i + 0.5) * dx, DOMAIN.y0 + (j + 0.5) * dy];
   }
 
-  // 中点法求和：面积与质量（就是仪表牌上滚动的数）
+  // 同一选中格子的实际范围；放大图仅缩放坐标，不改变这里的物理面积。
+  function localPatch(n, i, j) {
+    const [x, y] = cellCenter(n, i, j);
+    const dx = 4 / n, dy = 4 / n;
+    const planeArea = dx * dy * dSFactor(x, y);
+    // 曲面面积数值积分，用于和中心切平面近似作区别。
+    const res = 20;
+    let area = 0;
+    for (let a = 0; a < res; a++) for (let b = 0; b < res; b++) {
+      area += dSFactor(x - dx / 2 + (a + 0.5) * dx / res,
+        y - dy / 2 + (b + 0.5) * dy / res) * dx * dy / (res * res);
+    }
+    return { x, y, dx, dy, area, planeArea, projectedArea: dx * dy,
+      factor: dSFactor(x, y), cos: cosGamma(x, y),
+      gamma: Math.acos(cosGamma(x, y)), zx: zx(x, y), zy: zy(x, y) };
+  }
+
+  // 与讲解中的 Σρ_i·面积因子·ΔxΔy 一致的中点法求和。
   function sums(n, mode) {
     let area = 0, mass = 0;
+    const projectedArea = 16 / (n * n);
     for (let i = 0; i < n; i++) {
       for (let j = 0; j < n; j++) {
-        const a = cellArea(n, i, j);
         const [cx, cy] = cellCenter(n, i, j);
+        const a = projectedArea * dSFactor(cx, cy);
         area += a;
         mass += rho(cx, cy, mode) * a;
       }
@@ -113,6 +131,6 @@
   root.SurfaceModel = Object.freeze({
     DOMAIN, RHO_MIN, RHO_MAX,
     z, zx, zy, slope, dSFactor, cosGamma, rawNormal, unitNormal,
-    zRange, rho, cellCorners, cellArea, cellCenter, sums, exact
+    zRange, rho, cellCorners, cellArea, cellCenter, localPatch, sums, exact
   });
 })(typeof globalThis !== 'undefined' ? globalThis : window);
