@@ -3,355 +3,95 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Prim 算法：帝国领土扩张与最小生成树机制 · 可视化实验室</title>
-
-  <!-- Tailwind CSS CDN -->
-  <script src="https://cdn.tailwindcss.com"></script>
-
-  <!-- GSAP 动画引擎 -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
-
-  <!-- KaTeX 公式渲染 -->
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
-  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
-
+  <meta name="description" content="在固定沙盘上观察 Prim 如何从当前树的所有跨界边中选出最小边，逐步构建最小生成树。">
+  <title>Prim 算法：帝国领土扩张与最小生成树</title>
   <link rel="stylesheet" href="style.css">
+  <script defer src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+  <script defer src="model.js"></script>
+  <script defer src="choreo.js"></script>
+  <script defer src="app.js"></script>
 </head>
-<body class="min-h-screen bg-[#FAF9F5] text-stone-900 flex flex-col justify-between antialiased selection:bg-stone-200 overflow-x-hidden">
+<body>
+  <main>
+    <header class="page-header">
+      <a class="back" href="../index.html#ds">← 返回数据结构</a>
+      <div class="heading-line"><h1>Prim 算法<span>帝国领土扩张与最小生成树</span></h1><span class="edition" aria-hidden="true">Prim’s algorithm</span></div>
+      <p class="subtitle">从整片领土的边界寻找最便宜的道路，向外推进，再吞并一座新城。</p>
+    </header>
 
-  <!-- ══════════ 顶部导航条 ══════════ -->
-  <header class="border-b border-[#E5E4DC] bg-[#FAF9F5]/90 backdrop-blur sticky top-0 z-40 px-4 lg:px-8 py-3">
-    <div class="max-w-7xl mx-auto flex items-center justify-between gap-4">
-      <div class="flex min-w-0 items-center gap-3">
-        <a href="../index.html#ds" class="shrink-0 text-xs font-mono text-stone-600 hover:text-stone-900 border border-[#E5E4DC] bg-white px-2.5 py-1.5 rounded-lg flex items-center gap-1 transition-colors shadow-sm" title="返回数据结构">
-          <span>&larr; 返回数据结构</span>
-        </a>
-        <div class="h-4 w-[1px] bg-stone-300 hidden sm:block"></div>
-        <h1 class="text-base font-semibold tracking-tight text-stone-900 truncate">
-          Prim 算法：帝国领土扩张与最小生成树
-        </h1>
+    <section class="stage" aria-label="Prim 算法演示舞台">
+      <div class="stage-top">
+        <div class="clock"><i id="stage-led"></i><span class="mono">t <strong id="time-label">0.00</strong></span><span id="phase-label">首都就绪</span></div>
+        <ol class="phases" aria-label="扩张阶段"><li data-phase="choose"><span>01</span> 选最小边</li><li data-phase="connect"><span>02</span> 沿边修路</li><li data-phase="annex"><span>03</span> 吞并领土</li></ol>
       </div>
-      <div class="flex shrink-0 items-center gap-2">
-        <span class="text-xs font-mono px-2 py-0.5 rounded border border-blue-200 bg-blue-50 text-blue-700 font-medium">
-          Cut Property · 割性质
-        </span>
-        <span class="hidden sm:inline text-xs font-mono px-2 py-0.5 rounded border border-[#E5E4DC] bg-white text-stone-600">
-          考研 408 核心考点
-        </span>
+      <div class="map-scroll" tabindex="0" aria-label="沙盘；窄窗口可在此横向滚动">
+        <svg id="map-svg" viewBox="0 0 1100 480" role="img" aria-labelledby="map-title map-desc">
+          <title id="map-title">Prim 帝国扩张沙盘</title>
+          <desc id="map-desc">绿色圆圈和道路带表示已入树的领土，金色虚线表示一端在树内的候选边，蓝色表示当前最小边。右侧按权值排列全部跨界边。可通过下方首都选择框改变起点。</desc>
+          <defs>
+            <pattern id="grid" width="20" height="20" patternUnits="userSpaceOnUse"><path d="M 20 0 L 0 0 0 20" fill="none" stroke="#343c38" stroke-opacity="0.045" stroke-width="0.8"/></pattern>
+            <!-- Blur + alpha threshold merges the land into one surface, not a decorative glow. -->
+            <filter id="land-merge" x="0" y="0" width="768" height="480" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+              <feGaussianBlur stdDeviation="9"/>
+              <feComponentTransfer><feFuncA type="linear" slope="24" intercept="-10"/></feComponentTransfer>
+            </filter>
+            <filter id="land-outline" x="0" y="0" width="768" height="480" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+              <feGaussianBlur stdDeviation="9"/>
+              <feComponentTransfer result="body"><feFuncA type="linear" slope="24" intercept="-10"/></feComponentTransfer>
+              <feMorphology in="body" operator="dilate" radius="1.2" result="outer"/>
+              <feComposite in="outer" in2="body" operator="out"/>
+            </filter>
+            <filter id="land-frontier" x="0" y="0" width="768" height="480" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+              <feGaussianBlur stdDeviation="9"/>
+              <feComponentTransfer result="body"><feFuncA type="linear" slope="24" intercept="-10"/></feComponentTransfer>
+              <feMorphology in="body" operator="dilate" radius="7" result="outer"/>
+              <feMorphology in="body" operator="erode" radius="4" result="inner"/>
+              <feComposite in="outer" in2="inner" operator="out"/>
+            </filter>
+            <mask id="land-guard" maskUnits="userSpaceOnUse" x="0" y="0" width="768" height="480"><rect width="768" height="480" fill="white"/><g id="land-guard-nodes"></g></mask>
+            <mask id="land-frontier-mask" maskUnits="userSpaceOnUse" x="0" y="0" width="768" height="480"><use href="#territory-shapes" color="white" filter="url(#land-frontier)"/></mask>
+          </defs>
+          <rect width="768" height="480" fill="url(#grid)"/>
+          <line x1="770" x2="770" y1="20" y2="460" stroke="#e5e4dc"/>
+          <g class="map-caption"><text x="26" y="30">领土沙盘</text><text x="26" y="49" class="small">S = 已入树顶点 · 点击节点更换首都</text></g>
+          <g id="territory-layer" pointer-events="none" mask="url(#land-guard)">
+            <g id="territory-fill" color="#dcebdc" filter="url(#land-merge)"><g id="territory-shapes" fill="currentColor" stroke="currentColor"></g></g>
+            <use href="#territory-shapes" color="#6f9c7b" filter="url(#land-outline)"/>
+          </g>
+          <g id="edge-layer"></g>
+          <g id="leader-layer" pointer-events="none"><path id="decision-leader" fill="none" stroke="#315fc3" stroke-width="1.5" stroke-dasharray="4 5" opacity="0"/></g>
+          <g id="frontier-gates" pointer-events="none" mask="url(#land-frontier-mask)"></g>
+          <g id="road-layer" pointer-events="none"></g>
+          <g id="weight-layer" pointer-events="none"></g>
+          <g id="node-layer"></g>
+          <g id="focus-layer" pointer-events="none"></g>
+          <g class="decision-title"><text x="796" y="31">跨界候选</text><text x="1066" y="31" text-anchor="end" id="cut-count">0 条</text><text x="796" y="53" class="small">δ(S) · 只比较一端在 S 内的边</text></g>
+          <text x="812" y="81" class="column-label">树内 → 树外</text><text x="1055" y="81" text-anchor="end" class="column-label">成本</text>
+          <g id="frontier-layer"></g>
+          <g id="frontier-empty"><text x="930" y="196" text-anchor="middle" class="empty-heading">全部领土已连接</text><text x="930" y="221" text-anchor="middle" class="small">没有新的跨界候选边</text></g>
+          <g id="event-tag" pointer-events="none" visibility="hidden"><rect x="-48" y="-14" width="96" height="28" rx="5" fill="#315fc3"/><text text-anchor="middle" y="5" fill="#fff" font-size="12" id="event-text"></text></g>
+          <g id="result-mark" opacity="0"><path d="M 812 386 l 9 9 17 -20" fill="none" stroke="#2d7d62" stroke-width="2.5"/><text x="850" y="390" fill="#2d7d62" font-size="16" font-weight="600">最小生成树完成</text><text x="850" y="414" class="small" id="result-detail"></text></g>
+          <text x="26" y="462" class="small" id="set-label">S = { A }</text>
+        </svg>
       </div>
-    </div>
-  </header>
-
-  <!-- ══════════ 主交互视窗与控制面板 ══════════ -->
-  <main class="flex-1 max-w-7xl w-full mx-auto p-4 lg:p-6 flex flex-col gap-5">
-
-    <!-- 顶部非对称几何圆角与点阵微光卡片 (算法本质直观导引) -->
-    <section class="relative overflow-hidden rounded-2xl rounded-tl-3xl rounded-br-3xl border border-[#E5E4DC] bg-white p-4 lg:p-5 shadow-[0_4px_20px_-4px_rgba(0,0,0,0.04)] ring-1 ring-black/[0.03]">
-      <div class="pointer-events-none absolute inset-0 bg-[radial-gradient(#CBD5E1_1.2px,transparent_1.2px)] bg-[size:14px_14px] [mask-image:radial-gradient(ellipse_70%_60%_at_50%_50%,#000_60%,transparent_100%)]"></div>
-      <div class="relative z-10 flex flex-wrap items-center justify-between gap-2 pb-2.5 border-b border-stone-100">
-        <div class="flex items-center gap-2">
-          <span class="w-2 h-2 rounded-full bg-blue-600 animate-pulse"></span>
-          <h2 class="text-xs font-semibold tracking-wider text-stone-800 uppercase">算法直觉：一张沙盘，一条不断长大的最小生成树</h2>
-        </div>
-        <div class="flex items-center gap-3 text-[11px] font-mono text-stone-500">
-          <span>顶点数: <strong class="text-stone-800" id="meta-n">6</strong></span>
-          <span>边数: <strong class="text-stone-800" id="meta-e">11</strong></span>
-          <span>MST 边数: <strong class="text-stone-800">n − 1</strong></span>
-        </div>
+      <div class="legend" aria-label="图例"><span><i class="owned-key"></i>已入树领土</span><span><i class="cut-key"></i>边界前线 · 跨界候选</span><span><i class="active-key"></i>当前最小边</span><span><i class="internal-key"></i>境内非树边</span><span class="scroll-note">窄窗口可左右滑动沙盘</span></div>
+      <div class="ledger">
+        <div class="cost"><span>累计修路成本</span><strong id="cost-total">0</strong></div>
+        <div class="tree-account"><div class="account-title"><span>已修道路 <b id="tree-count">0 / 5</b></span><span>入树顶点 <b id="owned-count">1 / 6</b></span></div><div id="tree-route" class="tree-route">尚未修路</div></div>
       </div>
-      <div class="relative z-10 pt-3 text-xs text-stone-600 leading-relaxed font-sans grid grid-cols-1 md:grid-cols-3 gap-3">
-        <div class="flex items-start gap-2">
-          <span class="text-blue-600 font-bold shrink-0">①</span>
-          <p><strong>连通加权无向图</strong>：国家是顶点，道路是无向边，权值即修路成本。目标是在<strong>不丢失连通性</strong>的前提下，用最小的总代价连通所有国家。</p>
-        </div>
-        <div class="flex items-start gap-2">
-          <span class="text-amber-600 font-bold shrink-0">②</span>
-          <p><strong>Prim 贪心策略</strong>：从首都出发，凡是与帝国版图接壤的边构成<strong>边界前线（割）</strong>，每回合<strong>只取割上权值最小的那条</strong>修通，然后吞并它另一端的国家。</p>
-        </div>
-        <div class="flex items-start gap-2">
-          <span class="text-emerald-600 font-bold shrink-0">③</span>
-          <p><strong>成环冗余道路作废</strong>：新国并入后若与老领土还有别的通路，那条边已在树上成环，标记 <span class="font-mono">✕</span> 灰化废弃——这正是 MST 只保留 <span class="font-mono">n−1</span> 条边的原因。</p>
-        </div>
-      </div>
+      <div class="narration"><span class="narration-index" id="round-label">起点</span><p id="hud-text" aria-live="polite">首都 A 已入树，接下来比较全部跨界候选边。</p></div>
     </section>
 
-    <!-- ══════════ 核心演示大舞台：左侧沙盘 + 右侧决策台 (左右并排) ══════════ -->
-    <div class="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_340px] gap-4">
-
-      <!-- ────────── 左侧：国家与领土沙盘交互区 ────────── -->
-      <section id="stage-container" class="stage relative w-full h-[clamp(400px,56vh,600px)] rounded-2xl border border-[#E5E4DC] bg-[#FAF9F5] overflow-hidden shadow-sm">
-
-        <!-- 背景光影装饰：天青柔光 + 琥珀柔光 + 18px 工程图纸微网格 -->
-        <div class="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_700px_at_50%_0px,rgba(56,189,248,0.09),transparent)]"></div>
-        <div class="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_500px_at_88%_82%,rgba(245,158,11,0.07),transparent)]"></div>
-        <div class="pointer-events-none absolute inset-0 bg-[linear-gradient(to_right,rgba(0,0,0,0.035)_1px,transparent_1px),linear-gradient(to_bottom,rgba(0,0,0,0.035)_1px,transparent_1px)] bg-[size:18px_18px]"></div>
-
-        <!-- SVG 沙盘本体 -->
-        <svg id="map-svg" class="absolute inset-0 w-full h-full select-none" xmlns="http://www.w3.org/2000/svg">
-          <defs>
-            <!-- 帝国领土气泡：柔光外晕 + 半透明主色填充 + 细描边 -->
-            <filter id="fBlobGlow" x="-45%" y="-45%" width="190%" height="190%">
-              <feGaussianBlur stdDeviation="9" result="b" />
-              <feMerge>
-                <feMergeNode in="b" />
-                <feMergeNode in="b" />
-              </feMerge>
-            </filter>
-            <!-- 皇家骨干路发光 -->
-            <filter id="fEdgeGlow" x="-60%" y="-60%" width="220%" height="220%">
-              <feGaussianBlur stdDeviation="3.4" result="b" />
-              <feMerge>
-                <feMergeNode in="b" />
-                <feMergeNode in="b" />
-                <feMergeNode in="SourceGraphic" />
-              </feMerge>
-            </filter>
-            <linearGradient id="gBlobFill" x1="0%" y1="0%" x2="100%" y2="100%">
-              <stop offset="0%" stop-color="#2563EB" stop-opacity="0.22" />
-              <stop offset="100%" stop-color="#0891B2" stop-opacity="0.13" />
-            </linearGradient>
-          </defs>
-
-          <!-- 领土气泡层：外层 blob-group 专供 3-Stage 转场，内层 blob-breathe 专供环境呼吸脉冲，
-               两者元素分离，避免 gsap.killTweensOf 互相腰斩 -->
-          <g id="blob-group">
-            <g id="blob-breathe">
-              <path id="blob-halo" fill="#2563EB" opacity="0.17" filter="url(#fBlobGlow)" />
-              <path id="blob-fill" fill="url(#gBlobFill)" />
-              <path id="blob-stroke" fill="none" stroke="#2563EB" stroke-width="1.8" stroke-opacity="0.75" stroke-dasharray="8 7" />
-            </g>
-          </g>
-
-          <!-- 道路层 -->
-          <g id="edge-layer"></g>
-
-          <!-- 国家节点层 -->
-          <g id="node-layer"></g>
-
-          <!-- 能量脉冲飞行层 (由 app.js 动态挂载) -->
-          <g id="pulse-layer" pointer-events="none"></g>
-
-          <!-- 几何采样探针层 (不可见, 供气泡形变重采样使用) -->
-          <g id="probe-layer" opacity="0" pointer-events="none" aria-hidden="true"></g>
-        </svg>
-
-        <!-- 沙盘左上角状态徽标 -->
-        <div class="absolute top-3 left-3 z-20 flex items-center gap-2 text-[11px] font-mono px-2.5 py-1 rounded-lg border border-[#E5E4DC] bg-white/85 backdrop-blur-sm shadow-sm text-stone-600">
-          <span class="w-1.5 h-1.5 rounded-full bg-stone-400" id="stage-led"></span>
-          <span id="stage-status">待命 · 请点选首都</span>
-        </div>
-
-        <!-- 沙盘左下角图例 -->
-        <div class="absolute bottom-3 left-3 z-20 flex flex-col gap-1.5 text-[10px] font-mono text-stone-500 bg-white/85 backdrop-blur-sm border border-[#E5E4DC] rounded-xl px-2.5 py-2 shadow-sm">
-          <div class="flex items-center gap-2">
-            <svg width="26" height="8"><line x1="0" y1="4" x2="26" y2="4" stroke="#D6D3CD" stroke-width="2" /></svg>
-            <span>境外普通路</span>
-          </div>
-          <div class="flex items-center gap-2">
-            <svg width="26" height="8"><line x1="0" y1="4" x2="26" y2="4" stroke="#D97706" stroke-width="2" stroke-dasharray="1 6" stroke-linecap="round" /></svg>
-            <span>前线候选边（割）</span>
-          </div>
-          <div class="flex items-center gap-2">
-            <svg width="26" height="8"><line x1="0" y1="4" x2="26" y2="4" stroke="#2563EB" stroke-width="4.5" stroke-linecap="round" /></svg>
-            <span>皇家骨干路 (MST)</span>
-          </div>
-          <div class="flex items-center gap-2">
-            <svg width="26" height="8"><line x1="0" y1="4" x2="26" y2="4" stroke="#D6D3CD" stroke-width="1.5" stroke-dasharray="4 5" opacity="0.75" /><text x="10" y="7" font-size="8" fill="#A8A29E">✕</text></svg>
-            <span>成环冗余（作废）</span>
-          </div>
-        </div>
-
-        <!-- 沙盘右下角实时提示 -->
-        <div id="stage-hint" class="absolute bottom-3 right-3 z-20 text-[10px] font-mono text-amber-700 bg-amber-50/90 backdrop-blur-sm border border-amber-200 rounded-lg px-2.5 py-1.5 shadow-sm">
-          ✎ 点击画布上任意国家，将其设为首都
-        </div>
-      </section>
-
-      <!-- ────────── 右侧：前线决策台与国库账本 ────────── -->
-      <aside class="flex flex-col gap-3 min-w-0">
-
-        <!-- 帝国版图集合状态 -->
-        <div class="relative flex flex-col overflow-hidden rounded-2xl rounded-tl-3xl rounded-br-3xl border border-[#E5E4DC] bg-white p-4 shadow-[0_4px_20px_-4px_rgba(0,0,0,0.05)] ring-1 ring-black/[0.03]">
-          <div class="pointer-events-none absolute inset-0 bg-[radial-gradient(#CBD5E1_1.2px,transparent_1.2px)] bg-[size:14px_14px] [mask-image:radial-gradient(ellipse_70%_60%_at_50%_50%,#000_60%,transparent_100%)]"></div>
-          <div class="relative z-10 flex items-center justify-between pb-2.5 border-b border-stone-100">
-            <div class="flex items-center gap-2">
-              <span class="w-2 h-2 rounded-full bg-blue-600 animate-pulse"></span>
-              <h3 class="text-xs font-semibold uppercase tracking-wider text-stone-700">帝国版图集合</h3>
-            </div>
-            <span class="text-[11px] font-mono text-stone-400">SET STATE</span>
-          </div>
-          <div class="relative z-10 py-3 flex flex-col gap-2.5">
-            <div>
-              <div class="text-[10px] font-mono text-stone-400 mb-1.5">已占领土 · <span id="terr-count" class="text-blue-600">0</span> / <span id="terr-total">6</span></div>
-              <div id="terr-owned" class="flex flex-wrap gap-1.5 min-h-[26px]"></div>
-            </div>
-            <div>
-              <div class="text-[10px] font-mono text-stone-400 mb-1.5">待收复国家 · <span id="pend-count" class="text-amber-600">6</span></div>
-              <div id="terr-pending" class="flex flex-wrap gap-1.5 min-h-[26px]"></div>
-            </div>
-          </div>
-        </div>
-
-        <!-- 边界前线道路清单 (动态割集列表) -->
-        <div class="relative flex flex-col overflow-hidden rounded-2xl rounded-tl-3xl rounded-br-3xl border border-[#E5E4DC] bg-white p-4 shadow-[0_4px_20px_-4px_rgba(0,0,0,0.05)] ring-1 ring-black/[0.03]">
-          <div class="pointer-events-none absolute inset-0 bg-[radial-gradient(#CBD5E1_1.2px,transparent_1.2px)] bg-[size:14px_14px] [mask-image:radial-gradient(ellipse_70%_60%_at_50%_50%,#000_60%,transparent_100%)]"></div>
-          <div class="relative z-10 flex items-center justify-between pb-2.5 border-b border-stone-100">
-            <div class="flex items-center gap-2">
-              <span class="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span>
-              <h3 class="text-xs font-semibold uppercase tracking-wider text-stone-700">边界前线道路清单</h3>
-            </div>
-            <span class="text-[11px] font-mono text-stone-400">CUT · <span id="cut-count">0</span> 条</span>
-          </div>
-
-          <!-- 割性质小提示 -->
-          <div class="relative z-10 mt-2.5 mb-2 text-[10px] font-sans text-amber-900 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5 leading-relaxed">
-            割 <span class="font-mono font-semibold">(<span class="font-serif italic">V</span><sub>T</sub>, <span class="font-serif italic">V</span>−<span class="font-serif italic">V</span><sub>T</sub>)</span> 上的最小权边必属某棵 MST
-          </div>
-
-          <div id="frontier-list" class="relative z-10 flex flex-col gap-1.5 max-h-[230px] overflow-y-auto pr-0.5"></div>
-
-          <div class="relative z-10 -mx-4 -mb-4 mt-3 px-4 py-2 bg-white/70 backdrop-blur-md border-t border-stone-100 flex items-center justify-between text-[10px] font-mono text-stone-400">
-            <span>按权值升序比价</span>
-            <span class="text-amber-600 font-medium" id="cut-min-hint">暂无候选边</span>
-          </div>
-        </div>
-
-        <!-- 国库账本：总修建成本 (KaTeX 局部重绘) -->
-        <div class="relative flex flex-col overflow-hidden rounded-2xl rounded-tl-3xl rounded-br-3xl border border-[#E5E4DC] bg-white p-4 shadow-[0_4px_20px_-4px_rgba(0,0,0,0.05)] ring-1 ring-black/[0.03]">
-          <div class="pointer-events-none absolute inset-0 bg-[radial-gradient(#CBD5E1_1.2px,transparent_1.2px)] bg-[size:14px_14px] [mask-image:radial-gradient(ellipse_70%_60%_at_50%_50%,#000_60%,transparent_100%)]"></div>
-          <div class="relative z-10 flex items-center justify-between pb-2.5 border-b border-stone-100">
-            <div class="flex items-center gap-2">
-              <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-              <h3 class="text-xs font-semibold uppercase tracking-wider text-stone-700">国库账本 · 总修建成本</h3>
-            </div>
-            <span class="text-[11px] font-mono text-stone-400">MST Σw</span>
-          </div>
-
-          <div class="relative z-10 py-3 flex items-end gap-2">
-            <span id="cost-total" class="text-3xl font-mono font-bold text-emerald-600 leading-none">0</span>
-            <span class="text-[11px] font-mono text-stone-400 mb-0.5">万两白银</span>
-            <span class="ml-auto text-[10px] font-mono text-stone-400 mb-0.5" id="cost-edges">已修 0 / 5 条骨干路</span>
-          </div>
-
-          <div id="cost-formula" class="relative z-10 text-sm text-stone-700 overflow-x-auto pb-1"></div>
-
-          <!-- 收官大印：外层负责静态旋转(-rotate-6)，内层 stamp-inner 专供 GSAP 缩放入场，两者不抢 transform -->
-          <div id="cost-stamp" class="hidden absolute inset-0 z-20 flex items-center justify-center bg-white/88 backdrop-blur-[2px]">
-            <div class="-rotate-6">
-              <div id="stamp-inner" class="text-center px-4 py-3 rounded-xl border-[3px] border-double border-emerald-600 text-emerald-700">
-                <div class="text-sm font-bold tracking-widest">最小生成树构建完成</div>
-                <div class="text-[10px] font-mono mt-0.5 text-emerald-600/80">MST SPANNING ALL n VERTICES</div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- 实时 HUD 解说条 -->
-        <div id="hud-bar" class="border border-stone-200/80 bg-white/95 backdrop-blur-md rounded-xl p-3 shadow-sm flex items-start gap-2.5 text-xs">
-          <span id="hud-badge" class="px-2 py-0.5 rounded-full text-[10px] font-mono font-semibold bg-stone-100 text-stone-700 border border-stone-200 shrink-0">IDLE</span>
-          <p id="hud-text" class="text-stone-700 font-sans leading-snug min-w-0">沙盘待命。请在画布上点击任意国家作为帝国首都，随后领土气泡将围绕它生成，并激活首批前线候选道路。</p>
-        </div>
-
-      </aside>
-    </div>
-
-    <!-- ══════════ 底部通栏控制台 ══════════ -->
-    <div class="bg-white border border-[#E5E4DC] rounded-2xl p-4 shadow-sm flex flex-col gap-4">
-
-      <!-- 第一排：首都选择 + 扩张进度 -->
-      <div class="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-stone-100 text-xs">
-        <div class="flex flex-wrap items-center gap-2">
-          <span class="text-stone-400 font-mono text-xs">首都:</span>
-          <span id="capital-chip" class="px-2.5 py-1 rounded-lg border border-dashed border-stone-300 bg-stone-50 text-stone-400 font-mono font-semibold">未定</span>
-          <button id="btn-random-capital" class="tactile-btn inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#E5E4DC] bg-gradient-to-b from-white to-[#F7F6F0] text-xs font-mono font-medium text-stone-700 shadow-[0_1.5px_0_#D6D3CD] hover:bg-stone-50 hover:text-stone-900 active:shadow-none active:translate-y-[1.5px] transition-all select-none" title="随机指定一个国家为首都">
-            <span>🎲 随机指定</span>
-          </button>
-        </div>
-
-        <div class="flex flex-wrap items-center gap-2">
-          <div class="flex items-center gap-2 pr-2 border-r border-stone-200">
-            <span class="text-stone-400 font-mono text-xs">扩张进度:</span>
-            <div id="round-dots" class="flex items-center gap-1"></div>
-          </div>
-          <span id="step-counter" class="text-xs font-mono text-stone-400">回合: 0 / 5</span>
-        </div>
+    <section class="controls" aria-label="演示控制">
+      <div class="control-row">
+        <div class="transport"><button id="btn-reset" title="复位（Home）">复位</button><button id="btn-step-prev" title="上一步（←）">← 上一步</button><button id="btn-play" class="play" title="播放／暂停（空格）"><span id="play-label">▶ 播放</span></button><button id="btn-step-next" title="下一步（→）">下一步 →</button></div>
+        <div class="settings"><label>速度 <select id="speed"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="1.5">1.5×</option><option value="2">2×</option></select></label><label class="motion-label"><input type="checkbox" id="reduce-motion">减少动效</label></div>
       </div>
-
-      <!-- 第二排：播放控制 + 速率 + 地图预设 -->
-      <div class="flex flex-wrap items-center justify-between gap-4">
-        <div class="flex flex-wrap items-center gap-2.5">
-          <!-- 旋转光束流光 CTA (播放 / 暂停) -->
-          <button id="btn-play" class="group relative inline-flex items-center gap-2 px-5 py-2.5 rounded-full overflow-hidden text-xs font-medium text-stone-800 bg-white/80 backdrop-blur-md shadow-[0_2px_12px_rgba(37,99,235,0.12)] hover:shadow-[0_4px_20px_rgba(37,99,235,0.22)] hover:scale-[1.02] active:scale-[0.98] transition-all">
-            <div class="absolute inset-[-150%] w-[400%] h-[400%] pointer-events-none [animation:beam-spin_4s_linear_infinite]">
-              <div class="w-full h-full [background:conic-gradient(from_0deg,transparent_0_300deg,rgba(37,99,235,0.45)_340deg,transparent_360deg)]"></div>
-            </div>
-            <div class="absolute inset-[1px] rounded-full bg-white/90 backdrop-blur-sm pointer-events-none"></div>
-            <span id="btn-play-icon" class="relative z-10 text-blue-600 text-xs">▶</span>
-            <span id="btn-play-text" class="relative z-10 font-sans tracking-wide">启动连续扩张</span>
-          </button>
-
-          <!-- 陶瓷质感双层物理触感微按键 -->
-          <button id="btn-step-prev" class="tactile-btn inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-[#E5E4DC] bg-gradient-to-b from-white to-[#F7F6F0] text-xs font-mono font-medium text-stone-700 shadow-[0_1.5px_0_#D6D3CD] hover:bg-stone-50 hover:text-stone-900 active:shadow-none active:translate-y-[1.5px] transition-all select-none" title="回退到上一个扩张回合">
-            <span>⏮ 单步后退</span>
-          </button>
-
-          <button id="btn-step-next" class="tactile-btn inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-[#E5E4DC] bg-gradient-to-b from-white to-[#F7F6F0] text-xs font-mono font-medium text-stone-700 shadow-[0_1.5px_0_#D6D3CD] hover:bg-stone-50 hover:text-stone-900 active:shadow-none active:translate-y-[1.5px] transition-all select-none" title="执行下一个扩张回合">
-            <span>⏭ 单步步进</span>
-          </button>
-
-          <button id="btn-reset" class="tactile-btn inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-[#E5E4DC] bg-gradient-to-b from-white to-[#F7F6F0] text-xs font-mono font-medium text-stone-600 shadow-[0_1.5px_0_#D6D3CD] hover:bg-stone-50 hover:text-stone-900 active:shadow-none active:translate-y-[1.5px] transition-all select-none" title="复位到首都确立的初始沙盘">
-            <span>↺ 重置</span>
-          </button>
-
-          <!-- 速率调节器 -->
-          <div class="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-[#E5E4DC] bg-[#FAF9F5] text-xs font-mono text-stone-600">
-            <span>速度:</span>
-            <input id="slider-speed" type="range" min="0.5" max="2" step="0.5" value="1" class="taste-slider w-16" title="动画速率调节 (0.5x / 1.0x / 2.0x)">
-            <span id="label-speed" class="font-bold text-stone-800 w-8">1.0x</span>
-          </div>
-        </div>
-
-        <!-- 地图预设组 -->
-        <div class="flex flex-wrap items-center gap-1.5 text-xs font-mono">
-          <span class="text-stone-400 font-sans mr-1">地图预设:</span>
-          <button class="preset-btn active-preset px-2.5 py-1.5 rounded-lg border border-blue-200 bg-blue-50 text-blue-800 hover:bg-blue-100 transition-colors" data-preset="classic">经典 6 国图</button>
-          <button class="preset-btn px-2.5 py-1.5 rounded-lg border border-[#E5E4DC] bg-white text-stone-600 hover:bg-stone-50 transition-colors" data-preset="dense">稠密图 (7 国)</button>
-          <button class="preset-btn px-2.5 py-1.5 rounded-lg border border-[#E5E4DC] bg-white text-stone-600 hover:bg-stone-50 transition-colors" data-preset="chain">稀疏长链图</button>
-        </div>
-      </div>
-
-    </div>
-
-    <!-- ══════════ 考点解析与复杂度小卡片 ══════════ -->
-    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
-      <div class="border border-emerald-200 bg-emerald-50/50 rounded-xl p-3.5 leading-relaxed text-emerald-900 flex items-start gap-2.5">
-        <span class="text-emerald-600 font-bold shrink-0 text-sm">💡</span>
-        <div>
-          <strong class="font-semibold">为什么「取割上最小边」一定正确？(割性质)</strong><br>
-          <span class="text-emerald-800/90">
-            任意把顶点集切成 <span class="font-mono">(<span class="font-serif italic">V</span><sub>T</sub>, <span class="font-serif italic">V</span>−<span class="font-serif italic">V</span><sub>T</sub>)</span> 两半，横跨这个割的<strong>最小权边必然属于某棵最小生成树</strong>。Prim 每一回合做的正是「取当前帝国版图这个割上的最小边」，因此逐条累积得到的骨干路网必定是 MST。图中被标 <span class="font-mono">✕</span> 的道路不是被算法"遗忘"，而是它们在树上已成环，按 MST 定义本就不该入选。
-          </span>
-        </div>
-      </div>
-
-      <div class="border border-sky-200 bg-sky-50/50 rounded-xl p-3.5 leading-relaxed text-sky-900 flex items-start gap-2.5">
-        <span class="text-sky-600 font-bold shrink-0 text-sm">📐</span>
-        <div>
-          <strong class="font-semibold">考研 408 重点：Prim 的两种实现与复杂度</strong><br>
-          <span class="text-sky-800/90">
-            <strong>①</strong> 朴素 Prim：每次从顶点集中线性扫描找最小 <span class="font-mono">lowcost[v]</span>，总时间 <span class="font-mono font-medium">O(V²)</span>，适合稠密图；<strong>②</strong> 堆优化 Prim：用小顶堆维护待比较边，降至 <span class="font-mono font-medium">O(E log V)</span>，适合稀疏图。Prim 与 Kruskal 在连通加权无向图上得到的<strong>总权值完全相同</strong>（MST 唯一性由权值决定，仅边集可不同），区别只在选边顺序：Prim <strong>一次性长大一棵树</strong>，Kruskal <strong>全局排序后不成环地选边</strong>。
-          </span>
-        </div>
-      </div>
-    </div>
-
+      <div class="progress-row"><label for="progress">演示进度</label><input id="progress" type="range" min="0" max="21" step="0.01" value="0"><output id="progress-label" for="progress">0 / 15 步</output></div>
+      <div class="parameter-row"><div class="presets" role="group" aria-label="地图预设"><button data-preset="classic" aria-pressed="true">经典 6 国</button><button data-preset="dense" aria-pressed="false">稠密 7 国</button><button data-preset="chain" aria-pressed="false">稀疏长链</button></div><label>首都 <select id="capital" aria-label="选择首都"></select></label><div class="round-links" id="round-links" aria-label="按回合定位"></div></div>
+      <p id="engine-notice" class="notice" hidden>动画引擎未加载：仍可使用单步、进度条与首都选择浏览完整过程。</p>
+    </section>
+    <footer>示意：领土轮廓表示入树集合；每次取跨界边权最小者，不比较首都到各点的累计距离；同权按原始边序选取。</footer>
   </main>
-
-  <!-- ══════════ 底部署名 ══════════ -->
-  <footer class="border-t border-[#E5E4DC] py-4 text-center text-xs font-mono text-stone-400">
-    LearningAnimation · Prim 帝国领土扩张与最小生成树可视化 · 割性质驱动的贪心状态机
-  </footer>
-
-  <script src="app.js"></script>
 </body>
 </html>
