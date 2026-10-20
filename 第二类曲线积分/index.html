@@ -3,94 +3,42 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="theme-color" content="#081522">
+  <meta name="theme-color" content="#FAF9F5">
   <title>第二类曲线积分 · 变力做功实验台</title>
-  <meta name="description" content="在变力场中沿有向曲线运动，观察力与位移的正交分解、逐程做功与反向变号。">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+  <meta name="description" content="沿有向曲线分段，观察力与位移的分量怎样组成微段功，再逐段汇入第二类曲线积分。">
   <link rel="stylesheet" href="style.css">
-  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+  <script defer src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
   <script defer src="model.js"></script>
+  <script defer src="choreo.js"></script>
   <script defer src="app.js"></script>
 </head>
 <body>
-  <div class="app-shell">
-    <header class="site-header">
-      <div class="identity">
-        <a class="back-link" href="../index.html#math" aria-label="返回高等数学展厅">↖</a>
-        <div class="identity-mark" aria-hidden="true">∮</div>
-        <div><span class="identity-sub">高等数学 · 可视化实验</span><h1>变力做功实验台</h1></div>
+  <header class="site-header"><a href="../index.html#math">← 返回高等数学</a><span>可视化实验室</span></header>
+  <main>
+    <div class="title-row"><div><h1>变力做功实验台</h1><p class="subtitle">第二类曲线积分：看一小段功，怎样沿路累加。</p></div><div class="title-formula">W = ∫<sub>L</sub> F · dr<span>= ∫<sub>L</sub> P dx + Q dy</span></div></div>
+    <section class="parameters" aria-label="实验参数">
+      <label>路径<select id="path-select"><option value="parabola">抛物线弧段</option><option value="polyline">折线路径</option><option value="semicircle">上半圆弧</option></select></label>
+      <label>力场<select id="field-select"><option value="vortex">旋转场 F = (−y, x)</option><option value="radial">径向场 F = (x, y)</option><option value="constant">恒力 F = (1.3, 0.7)</option></select></label>
+      <label>分段数<select id="partition-select"><option value="6">6 段</option><option value="12" selected>12 段</option><option value="24">24 段</option></select></label>
+      <button id="reverse-button" aria-pressed="false">切换方向 <span id="direction">A → B</span></button>
+      <div class="focus-controls" role="group" aria-label="分量聚焦"><span>聚焦</span><button data-focus="all" aria-pressed="true">全部</button><button data-focus="x" aria-pressed="false">水平</button><button data-focus="y" aria-pressed="false">竖直</button></div>
+    </section>
+    <section class="stage" aria-label="变力做功演示舞台">
+      <div class="stage-heading"><div><span id="status-dot" class="status-dot"></span><span id="clock">t = 0.0 s</span><span class="separator">/</span><strong id="segment-label">第 1 / 12 段</strong></div><span id="phase-label">取一小段</span></div>
+      <nav class="phase-nav" aria-label="当前段的演示步骤"><button data-phase="0">1 <span>取一小段</span></button><button data-phase="1">2 <span>水平做功</span></button><button data-phase="2">3 <span>竖直做功</span></button><button data-phase="3">4 <span>两项相加</span></button><button data-phase="4">5 <span>汇入积分</span></button></nav>
+      <p class="stage-hint">图示可左右滑动查看 →</p>
+      <div class="stage-scroll" tabindex="0" aria-label="演示图，窄窗口可在此横向滚动">
+        <svg id="work-svg" viewBox="0 0 1120 540" role="img" aria-labelledby="svg-title svg-description"><title id="svg-title">分段做功与沿程累加</title><desc id="svg-description">左侧在力场中选取有向路径的一段；右侧依次展示力与位移的水平、竖直投影；该段功随后飞入下方的正负功柱并计入总和。</desc><g id="static-scene"></g><g id="dynamic-scene"></g></svg>
       </div>
-      <div class="header-equation" aria-label="第二类曲线积分公式">W = ∫<sub>L</sub> P dx + Q dy</div>
-    </header>
-
-    <main>
-      <section class="intro" aria-labelledby="lesson-title">
-        <div>
-          <div class="eyebrow"><span class="eyebrow-line"></span> 第二类曲线积分 <span class="eyebrow-index">/ 物理直观</span></div>
-          <h2 id="lesson-title">沿着路，一点一点算功。</h2>
-          <p id="stage-description">力随位置改变，曲线方向也不断改变。看清每一小步，再把它们加起来。</p>
-        </div>
-        <div class="live-key"><span class="live-dot"></span><span>实时演示</span><strong id="trip-direction">A → B</strong></div>
-      </section>
-
-      <section class="control-deck" aria-label="演示控制台">
-        <nav class="stage-nav" aria-label="认知阶段">
-          <button class="stage-button active" data-stage="1" aria-current="step"><span>01</span><b>变力场与有向路径</b></button>
-          <button class="stage-button" data-stage="2"><span>02</span><b>正交投影与微功</b></button>
-          <button class="stage-button" data-stage="3"><span>03</span><b>沿程积分与方向</b></button>
-        </nav>
-        <div class="control-row">
-          <label class="select-control"><span>路径</span><select id="path-select"><option value="polyline">折线</option><option value="parabola" selected>抛物线弧段</option><option value="semicircle">顺时针半圆弧</option></select></label>
-          <label class="select-control"><span>力场</span><select id="field-select"><option value="vortex" selected>旋转涡旋场</option><option value="radial">线性发散场</option><option value="constant">恒力场</option></select></label>
-          <button id="reverse-button" class="direction-button" aria-pressed="false" title="切换行走方向"><span class="reverse-icon">⇄</span><span id="reverse-label">A → B 正向</span></button>
-          <div class="play-group"><button id="play-button" class="play-button" aria-label="巡航播放"><span id="play-icon">▶</span><span id="play-label">巡航播放</span></button><button id="step-button" class="step-button" title="向前走一小步">单步 ↗</button></div>
-          <label class="speed-control"><span>速度</span><input id="speed-input" type="range" min="0.5" max="2" step="0.25" value="1"><output id="speed-value">1.00×</output></label>
-        </div>
-      </section>
-
-      <section class="stage-caption" aria-live="polite">
-        <span id="stage-kicker">阶段 01 / 先看整段路</span>
-        <strong id="stage-headline">沿路看清力与前进方向。</strong>
-        <p id="stage-copy">空间中的每一根小箭头，代表那一点的力。涡旋场与发散场中的力随位置变化；恒力场可以作对照。</p>
-      </section>
-
-      <div class="workbench">
-        <section class="panel field-panel" aria-labelledby="field-title">
-          <div class="panel-heading"><div><span class="panel-index">主舞台 / 01</span><h3 id="field-title">变力场中的有向路径</h3></div><span id="field-formula" class="formula-tag">F = (−y, x)</span></div>
-          <div class="field-canvas"><svg id="field-svg" viewBox="0 0 760 500" role="img" aria-label="二维力场、带方向的路径、运动质点和受力箭头"><g id="field-static"></g><g id="field-dynamic"></g></svg><div class="canvas-legend"><span><i class="legend-field"></i>空间力场</span><span><i class="legend-path"></i>有向路径</span><span><i class="legend-force"></i>当前位置的力</span></div></div>
-          <div class="scrub-row"><span id="start-label">A 起点</span><input id="progress-input" type="range" min="0" max="1000" value="0" aria-label="行程进度"><span id="end-label">B 终点</span><output id="progress-value">0%</output></div>
-          <div class="field-note"><span class="note-spark">✦</span><span id="field-note">沿曲线运动时，力可能变化，前进方向也可能改变；不能把整段功直接写成“力 × 距离”。</span></div>
-        </section>
-
-        <aside class="panel micro-panel" aria-labelledby="micro-title">
-          <div class="panel-heading"><div><span class="panel-index">显微台 / 02</span><h3 id="micro-title">把一小步拆成两个方向</h3></div><span class="zoom-badge">局部放大 ×</span></div>
-          <div class="micro-meta"><div><span>当前位置</span><strong id="position-readout">(−2.00, −0.80)</strong></div><div><span>力 · F = (P, Q)</span><strong id="force-readout">(0.80, −2.00)</strong></div></div>
-          <svg id="micro-svg" viewBox="0 0 500 290" role="img" aria-label="受力和微小位移在水平与竖直方向的正交投影"></svg>
-          <div class="micro-focus" role="group" aria-label="查看微功分量"><button data-focus="all" class="active">完整分解</button><button data-focus="x">只看水平</button><button data-focus="y">只看竖直</button></div>
-          <div class="component-rows">
-            <div class="component-row horizontal"><span>水平微功 <small>P · dx</small></span><strong id="micro-x">+0.000 J</strong></div>
-            <div class="component-row vertical"><span>竖直微功 <small>Q · dy</small></span><strong id="micro-y">+0.000 J</strong></div>
-          </div>
-          <div class="derivation"><span class="derivation-heading">力与位移的点积拆解</span><div id="math-derivation" class="math-derivation">dW = F · dr = P dx + Q dy</div><p>斜向变力推动斜向位移，等价于“水平推力做水平功”加“竖直推力做竖直功”。</p></div>
-          <div id="micro-status" class="micro-status">局部夹角为锐角，这一小步做正功。</div>
-        </aside>
-      </div>
-
-      <section class="dashboard" aria-labelledby="dashboard-title">
-        <div class="dashboard-heading"><div><span class="panel-index">能量仪表盘 / 03</span><h3 id="dashboard-title">沿路累加的机械功</h3></div><span id="work-status" class="work-status positive"><i></i>推进 · 正功</span></div>
-        <div class="dashboard-main">
-          <div class="meter-card meter-x"><div><span class="meter-glyph">↔</span><span>水平分量做功</span></div><div class="meter-equation" id="wx-formula">Wₓ = ∫ P dx</div><strong id="work-x">+0.000 <small>J</small></strong><div class="meter-track"><i id="meter-x-fill"></i></div></div>
-          <div class="meter-card meter-y"><div><span class="meter-glyph">↕</span><span>竖直分量做功</span></div><div class="meter-equation" id="wy-formula">Wᵧ = ∫ Q dy</div><strong id="work-y">+0.000 <small>J</small></strong><div class="meter-track"><i id="meter-y-fill"></i></div></div>
-          <div id="total-card" class="meter-card meter-total"><div><span class="meter-glyph">Σ</span><span>实时总功</span></div><div class="meter-equation">W = Wₓ + Wᵧ</div><strong id="work-total">+0.000 <small>J</small></strong><div class="total-caption" id="total-caption">从 A 出发，开始累加</div></div>
-        </div>
-        <div class="work-flow"><div class="flow-label"><span>沿程微功</span><span><i class="positive-swatch"></i>正功 <i class="negative-swatch"></i>负功</span></div><div id="flow-bars" class="flow-bars" aria-label="沿路径每一小步功的正负分布"></div><div class="flow-foot"><span id="flow-start">A</span><span>每根细柱代表一小段有向功</span><span id="flow-end">B</span></div></div>
-        <div id="direction-conclusion" class="direction-conclusion" hidden><div><span class="conclusion-icon">⇄</span><strong>同一路径，掉头后每一份功都变号</strong><p>力场保持原样；dx、dy 同时反向，因此完整反向总功与正向等值异号。</p></div><div id="reversal-formula">∫<sub>L⁻</sub> (P dx + Q dy) = −∫<sub>L⁺</sub> (P dx + Q dy)</div></div>
-      </section>
-      <p class="method-note">坐标单位 m，力单位 N，功单位 J。仪表盘按曲线弧长连续采样并累加；显微台用一小段切向位移说明 dW = P dx + Q dy。</p>
-    </main>
-  </div>
+      <div class="stage-foot"><p id="caption" aria-live="polite">先沿有向路径取一小段，在该段中点取力。</p><span id="completion">已汇入 0 / 12 段</span></div>
+    </section>
+    <section class="controls" aria-label="播放控制">
+      <div class="transport"><button id="reset-button" title="重播（Home）">重播</button><button id="prev-button" title="上一步（←）">← 上一步</button><button id="play-button" class="primary" aria-label="播放">▶ 播放</button><button id="next-button" title="下一步（→）">下一步 →</button><label class="speed">速度<select id="speed-select"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="1.5">1.5×</option><option value="2">2×</option></select></label><label class="motion"><input id="reduced-motion" type="checkbox">减少动效</label></div>
+      <div class="progress-row"><span>演示进度</span><input id="progress-input" type="range" min="0" max="10000" step="1" value="0" aria-label="演示进度"><output id="progress-value">0%</output></div>
+      <p id="engine-notice" class="notice" hidden>动画引擎未加载，播放不可用；仍可单步、拖动进度并切换参数。</p>
+      <p class="keyboard-hint">空格播放 / 暂停 · ← → 逐步 · Home 重播<span id="motion-notice" hidden> · 减少动效：按事件末状态浏览</span></p>
+    </section>
+    <p class="method-note">示意：有向弦分段近似曲线，中点取力，Wₙ = Σ ΔWᵢ ≈ ∫<sub>L</sub> F · dr；坐标 m，力 N，功 J。</p>
+  </main>
 </body>
 </html>

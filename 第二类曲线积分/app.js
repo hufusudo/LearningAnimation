@@ -1,287 +1,244 @@
 (function () {
   'use strict';
-  const M = window.LineIntegralModel;
+  const M = window.LineIntegralModel, C = window.LineIntegralChoreo;
   const $ = id => document.getElementById(id);
-  const colors = { teal: '#69dfc9', blue: '#8cb6ff', coral: '#ff796d', amber: '#ffc06e', white: '#edf5f3' };
-  const descriptions = [
-    { kicker: '阶段 01 / 先看整段路', headline: '沿路看清力与前进方向。', copy: '空间中的每一根小箭头，代表那一点的力。涡旋场与发散场中的力随位置变化；恒力场可以作对照。', note: '沿曲线运动时，力可能变化，前进方向也可能改变；不能把整段功直接写成“力 × 距离”。' },
-    { kicker: '阶段 02 / 把斜向拆开', headline: '一小步的功，来自两个正交方向。', copy: '显微台同时放大受力 F 与微位移 dr。蓝色水平投影相乘、青色竖直投影相乘，再把两份微功相加。', note: '看右侧：力与位移各自分成 x、y 分量。水平配水平，竖直配竖直。' },
-    { kicker: '阶段 03 / 沿路带符号累加', headline: '顺力增加，逆力扣回；掉头整段变号。', copy: '每一小步的 P dx 与 Q dy 流入下方仪表盘。切换方向后，力场保留，位移的两个分量一起反向。', note: '选择“折线 + 旋转涡旋场”，可在同一程看到青色正功与琥珀色负功的接力。' }
+  const colors = { blue: '#285EC1', green: '#287B60', red: '#B54C41', negative: '#A36B23', ink: '#343C38', muted: '#6B7066' };
+  const state = { path: 'parabola', field: 'vortex', count: 12, reverse: false, speed: 1, playing: false,
+    reduced: matchMedia('(prefers-reduced-motion: reduce)').matches, focus: 'all', t: 0 };
+  let experiment, timeline, delayed, limits;
+  const clock = { t: 0 };
+  const fixed = (v, places = 2) => (Math.abs(v) < .5 * 10 ** -places ? 0 : v).toFixed(places);
+  const signed = (v, places = 3) => (v < -.5 * 10 ** -places ? '−' : '+') + fixed(Math.abs(v), places);
+  const n = v => fixed(v, 2);
+  const setText = (id, value) => { if ($(id).textContent !== value) $(id).textContent = value; };
+  const line = (x1, y1, x2, y2, color, width = 1, extra = '') => `<line x1="${n(x1)}" y1="${n(y1)}" x2="${n(x2)}" y2="${n(y2)}" stroke="${color}" stroke-width="${width}" stroke-linecap="round" ${extra}/>`;
+  const text = (x, y, value, cls = '', color = colors.ink, anchor = 'start') => `<text x="${n(x)}" y="${n(y)}" class="${cls}" style="fill:${color}" text-anchor="${anchor}">${value}</text>`;
+  const circle = (x, y, r, fill, extra = '') => `<circle cx="${n(x)}" cy="${n(y)}" r="${n(r)}" fill="${fill}" ${extra}/>`;
+  const path = (d, color, width, extra = '') => `<path d="${d}" fill="none" stroke="${color}" stroke-width="${width}" stroke-linecap="round" stroke-linejoin="round" ${extra}/>`;
+  const pt = p => ({ x: 285 + p.x * 100, y: 229 - p.y * 100 });
+  const mix = (a, b, p) => a + (b - a) * p;
+  const barX = i => 58 + (i + .5) * 730 / state.count;
+  function arrow(a, b, color, width = 2, alpha = 1) {
+    const dx = b.x - a.x, dy = b.y - a.y, length = Math.hypot(dx, dy);
+    if (length < .3) return '';
+    const ux = dx / length, uy = dy / length, h = Math.min(8, length * .4), w = h * .48;
+    return `<g opacity="${n(alpha)}">${line(a.x, a.y, b.x, b.y, color, width)}<path d="M${n(b.x)} ${n(b.y)} L${n(b.x - h * ux - w * uy)} ${n(b.y - h * uy + w * ux)} L${n(b.x - h * ux + w * uy)} ${n(b.y - h * uy - w * ux)} Z" fill="${color}"/></g>`;
+  }
+  function renderStatic() {
+    let out = text(28, 25, '有向路径 L', 'subhead') + text(565, 25,
+      { vortex: 'F = (−y, x)', radial: 'F = (x, y)', constant: 'F = (1.3, 0.7)' }[state.field], 'mono small', colors.muted, 'end');
+    for (let x = -2; x <= 2; x += .5) out += line(pt({x,y:0}).x, 52, pt({x,y:0}).x, 355, '#EDF0EA');
+    for (let y = -1; y <= 1.5; y += .5) out += line(45, pt({x:0,y}).y, 553, pt({x:0,y}).y, '#EDF0EA');
+    out += line(45,229,555,229,'#CED4CC') + line(285,51,285,355,'#CED4CC');
+    out += text(558,223,'x','axis') + text(292,53,'y','axis') + text(278,245,'0','axis',colors.muted,'end');
+    for (const x of [-2,-1,1,2]) out += text(pt({x,y:0}).x,245,String(x),'axis',colors.muted,'middle');
+    for (let x = -2.2; x <= 2.21; x += .55) for (let y = -1; y <= 1.51; y += .5) {
+      const f = M.forceAt(state.field,x,y), norm = Math.hypot(f.P,f.Q);
+      if (norm < .01) continue;
+      const a = pt({x,y}), len = 7 + Math.min(norm * 4,12);
+      out += arrow({x:a.x-f.P/norm*len/2,y:a.y+f.Q/norm*len/2}, {x:a.x+f.P/norm*len/2,y:a.y-f.Q/norm*len/2},'#A7B4A8',1.2,.65);
+    }
+    let d = '';
+    for (let i = 0; i <= 180; i++) { const p = pt(M.pointAt(state.path,i/180)); d += `${i ? 'L' : 'M'}${n(p.x)} ${n(p.y)} `; }
+    out += path(d,'#B2BAB2',2);
+    experiment.segments.forEach(s => {
+      const a=pt(s.start),b=pt(s.end);
+      out += line(a.x,a.y,b.x,b.y,'#AABBD7',1,'stroke-dasharray="3 4"');
+      out += circle(a.x,a.y,2.1,'#93A8C9');
+    });
+    const a = pt(M.pointAt(state.path,0)), b=pt(M.pointAt(state.path,1));
+    out += circle(a.x,a.y,4,'white','stroke="#67766B" stroke-width="1.5"') + text(a.x-13,a.y+21,'A','plot-label',colors.ink,'end');
+    out += circle(b.x,b.y,4,'white','stroke="#67766B" stroke-width="1.5"') + text(b.x+13,b.y+21,'B','plot-label');
+    out += text(35,377,'灰色：原曲线', 'small',colors.muted) + text(153,377,'虚线：有向弦近似','small',colors.muted) + text(360,377,state.reverse?'B → A · 反向':'A → B · 正向','mono small',colors.blue);
+    out += line(598,16,598,379,'#E5E4DC') + text(628,25,'局部放大 · 力与位移分别缩放','subhead');
+    for (const x of [729,963]) {
+      out += line(x-86,149,x+86,149,'#DCE1D9') + line(x,65,x,230,'#DCE1D9');
+      out += text(x+82,164,'x','axis') + text(x+8,71,'y','axis');
+    }
+    out += text(729,51,'力 Fᵢ / N','small',colors.red,'middle') + text(963,51,'位移 Δrᵢ / m','small',colors.blue,'middle');
+    out += line(28,395,1092,395,'#E5E4DC') + text(35,419,'沿程累加','subhead') + text(113,419,'每柱是一段功，向上为正、向下为负','small',colors.muted);
+    out += line(55,467,792,467,'#ADB6AC') + text(43,471,'0','mono small',colors.muted,'end');
+    out += line(826,414,826,523,'#E5E4DC') + text(859,423,'分段总和 Wₙ / J','subhead');
+    $('static-scene').innerHTML = out;
+  }
+  function diagram(segment, reveal, originX, force) {
+    const origin={x:originX,y:149}, vx=force?segment.P:segment.dx, vy=force?segment.Q:segment.dy;
+    const k=73/Math.max(Math.abs(vx),Math.abs(vy), force?.6:.06);
+    const tip={x:origin.x+vx*k,y:origin.y-vy*k};
+    const xAlpha=state.focus==='y'?.18:1, yAlpha=state.focus==='x'?.18:1;
+    let out=arrow(origin,tip,force?colors.red:colors.ink,2.6,.88);
+    out+=circle(origin.x,origin.y,2.6,colors.ink);
+    out+=line(tip.x,origin.y,tip.x,tip.y,'#AAB7A6',1,'stroke-dasharray="3 4" opacity=".55"');
+    out+=line(origin.x,tip.y,tip.x,tip.y,'#AAB7A6',1,'stroke-dasharray="3 4" opacity=".55"');
+    out+=arrow(origin,{x:origin.x+vx*k*reveal.x,y:origin.y},colors.blue,3,xAlpha);
+    out+=arrow(origin,{x:origin.x,y:origin.y-vy*k*reveal.y},colors.green,3,yAlpha);
+    out+=`<g opacity="${n(reveal.x*xAlpha)}">${text(origin.x+vx*k/2,origin.y+(vy<0?-12:21),force?'Pᵢ':'Δxᵢ','value',colors.blue,'middle')}</g>`;
+    out+=`<g opacity="${n(reveal.y*yAlpha)}">${text(origin.x+(vx<0?12:-12),origin.y-vy*k/2,force?'Qᵢ':'Δyᵢ','value',colors.green,vx<0?'start':'end')}</g>`;
+    if (Math.hypot(vx,vy)<1e-9) out+=text(origin.x,185,force?'零力向量':'零位移','small',colors.muted,'middle');
+    out+=text(tip.x+(vx<0?-9:9),tip.y+(vy>0?-8:18),force?'Fᵢ':'Δrᵢ','value',force?colors.red:colors.ink,vx<0?'end':'start');
+    return out;
+  }
+  function detailLayer(v) {
+    const s=experiment.segments[v.index], forceScale=31/Math.max(1,Math.hypot(s.P,s.Q)), a=pt(s.midpoint);
+    let out=arrow(a,{x:a.x+s.P*forceScale,y:a.y-s.Q*forceScale},colors.red,2.6);
+    out+=circle(a.x,a.y,3.2,colors.red)+text(a.x+11,a.y-14,'中点取力','plot-label',colors.red);
+    // The dashed bridge makes the source of the magnified vectors visible.
+    out+=path(`M${n(a.x+12)} ${n(a.y)} L579 ${n(a.y)} L617 149`,'#A9B8D0',1,'stroke-dasharray="3 5"');
+    out+=diagram(s,v,729,true)+diagram(s,v,963,false);
+    const xAlpha=state.focus==='y'?.2:1, yAlpha=state.focus==='x'?.2:1;
+    out+=`<g opacity="${n(v.x*xAlpha)}"><rect x="630" y="255" width="454" height="37" rx="6" fill="#F0F4FC"/>${text(642,279,'Pᵢ Δxᵢ','math',colors.blue)}${text(1080,279,`${signed(s.P,2)} × ${signed(s.dx,3)} = ${signed(s.wx)} J`,'mono value',colors.blue,'end')}</g>`;
+    out+=`<g opacity="${n(v.y*yAlpha)}"><rect x="630" y="301" width="454" height="37" rx="6" fill="#EEF5F0"/>${text(642,325,'Qᵢ Δyᵢ','math',colors.green)}${text(1080,325,`${signed(s.Q,2)} × ${signed(s.dy,3)} = ${signed(s.wy)} J`,'mono value',colors.green,'end')}</g>`;
+    const sign=s.work< -1e-9?'负功':s.work>1e-9?'正功':'零功', color=s.work< -1e-9?colors.negative:s.work>1e-9?colors.green:colors.muted;
+    out+=`<g opacity="${n(v.result)}">${text(640,369,'ΔWᵢ = Pᵢ Δxᵢ + Qᵢ Δyᵢ','math')}${text(1014,369,`${signed(s.work)} J`,'mono value',color,'end')}<rect x="1035" y="348" width="49" height="27" rx="5" fill="${color}"/>${text(1059,367,sign,'small','#fff','middle')}</g>`;
+    return `<g opacity="${n(v.alpha)}">${out}</g>`;
+  }
+  const captions=[
+    '先沿有向路径取一小段，在该段中点取力。',
+    '水平力只与水平位移相乘，得到这一段的水平功。',
+    '竖直力只与竖直位移相乘，得到这一段的竖直功。',
+    '两份功带符号相加，得到这一小段的总功。',
+    '把这一段功送入总和；正功增加，负功扣回。'
   ];
-  const fieldNames = { vortex: 'F = (−y, x)', radial: 'F = (x, y)', constant: 'F = (1.3, 0.7)' };
-  const state = { stage: 1, path: 'parabola', field: 'vortex', reverse: false, progress: 0, playing: false, speed: 1, focus: 'all', lastFrame: 0 };
-  let route = M.buildTrajectory(state.path, state.field);
-  let flowValues = [];
-  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-  const fixed = (v, places = 2) => (Math.abs(v) < 0.5 * Math.pow(10, -places) ? 0 : v).toFixed(places);
-  const signed = (v, places = 3) => (v < -0.5 * Math.pow(10, -places) ? '−' : '+') + fixed(Math.abs(v), places);
-  const px = x => 380 + x * 125;
-  const py = y => 260 - y * 125;
-  const screen = p => ({ x: px(p.x), y: py(p.y) });
-  const n = v => Number(v).toFixed(2);
-  const line = (x1, y1, x2, y2, stroke, width = 1, extra = '') => '<line x1="' + n(x1) + '" y1="' + n(y1) + '" x2="' + n(x2) + '" y2="' + n(y2) + '" stroke="' + stroke + '" stroke-width="' + width + '" stroke-linecap="round" ' + extra + '/>';
-  const circle = (x, y, r, fill, extra = '') => '<circle cx="' + n(x) + '" cy="' + n(y) + '" r="' + r + '" fill="' + fill + '" ' + extra + '/>';
-  const label = (x, y, content, cls = '', anchor = 'start') => '<text x="' + n(x) + '" y="' + n(y) + '" class="' + cls + '" text-anchor="' + anchor + '">' + content + '</text>';
-  function arrow(x1, y1, x2, y2, color, width = 2, opacity = 1) {
-    const dx = x2 - x1, dy = y2 - y1, length = Math.hypot(dx, dy);
-    if (length < 1) return '';
-    const ux = dx / length, uy = dy / length, h = Math.min(10, length * 0.32), wing = Math.min(5, h * 0.52);
-    const points = [
-      [x2, y2],
-      [x2 - h * ux - wing * uy, y2 - h * uy + wing * ux],
-      [x2 - h * ux + wing * uy, y2 - h * uy - wing * ux]
-    ].map(p => n(p[0]) + ',' + n(p[1])).join(' ');
-    return '<g opacity="' + opacity + '">' + line(x1, y1, x2, y2, color, width) + '<polygon points="' + points + '" fill="' + color + '"/></g>';
-  }
-  function pathData(start, end, count = 130) {
-    let result = '';
-    for (let i = 0; i <= count; i++) {
-      const point = screen(M.stateAt(route, start + (end - start) * i / count, state.reverse));
-      result += (i ? ' L ' : 'M ') + n(point.x) + ' ' + n(point.y);
-    }
-    return result;
-  }
-  function drawStaticField() {
-    let grid = '', arrows = '';
-    for (let x = -2; x <= 2.01; x += 0.5) grid += line(px(x), 34, px(x), 457, '#234050', 1, 'opacity=".44"');
-    for (let y = -1.5; y <= 1.51; y += 0.5) grid += line(54, py(y), 706, py(y), '#234050', 1, 'opacity=".44"');
-    for (let x = -2.2; x <= 2.21; x += 0.44) {
-      for (let y = -1.5; y <= 1.51; y += 0.5) {
-        const f = M.forceAt(state.field, x, y), size = Math.hypot(f.P, f.Q);
-        if (size < 0.06) continue;
-        const length = 5 + Math.min(size * 6.7, 17), sx = px(x), sy = py(y);
-        arrows += arrow(sx - f.P / size * length * 0.5, sy + f.Q / size * length * 0.5, sx + f.P / size * length * 0.5, sy - f.Q / size * length * 0.5, '#67919e', 1.25, 0.36 + Math.min(size / 8, 0.25));
-      }
-    }
-    const full = pathData(0, 1), begin = screen(M.stateAt(route, 0, state.reverse)), end = screen(M.stateAt(route, 1, state.reverse));
-    let chevrons = '';
-    [0.19, 0.43, 0.68, 0.88].forEach(fraction => {
-      const a = screen(M.stateAt(route, clamp(fraction - 0.012, 0, 1), state.reverse));
-      const b = screen(M.stateAt(route, clamp(fraction + 0.012, 0, 1), state.reverse));
-      chevrons += arrow(a.x, a.y, b.x, b.y, colors.teal, 2.8, 0.9);
-    });
-    $('field-static').innerHTML = '<rect x="0" y="0" width="760" height="500" fill="transparent"/>' +
-      grid + line(54, py(0), 710, py(0), '#527180', 1.5) + line(px(0), 34, px(0), 458, '#527180', 1.5) +
-      label(714, py(0) - 8, 'x', 'axis-label mono') + label(px(0) + 10, 43, 'y', 'axis-label mono') +
-      arrows + '<path d="' + full + '" fill="none" stroke="#52d9c3" stroke-width="15" opacity=".08" stroke-linecap="round" stroke-linejoin="round"/>' +
-      '<path d="' + full + '" fill="none" stroke="#67d9c4" stroke-width="4" opacity=".32" stroke-linecap="round" stroke-linejoin="round"/>' +
-      '<path class="path-flow" d="' + full + '" fill="none" stroke="#afffe8" stroke-width="2" opacity=".7" stroke-dasharray="3 16" stroke-linecap="round"/>' +
-      chevrons + circle(begin.x, begin.y, 7, '#0f2733', 'stroke="' + colors.teal + '" stroke-width="2"') +
-      circle(end.x, end.y, 7, '#0f2733', 'stroke="' + colors.teal + '" stroke-width="2"') +
-      label(begin.x + (begin.x < 380 ? -16 : 16), begin.y - 12, state.reverse ? 'B' : 'A', 'point-label', begin.x < 380 ? 'end' : 'start') +
-      label(end.x + (end.x < 380 ? -16 : 16), end.y - 12, state.reverse ? 'A' : 'B', 'point-label', end.x < 380 ? 'end' : 'start') +
-      label(75, 48, 'xOy · 空间中的力', 'tiny-label') + label(686, 48, state.reverse ? 'B → A' : 'A → B', 'svg-label mono', 'end');
-    $('field-formula').textContent = fieldNames[state.field];
-    $('start-label').textContent = state.reverse ? 'B 起点' : 'A 起点';
-    $('end-label').textContent = state.reverse ? 'A 终点' : 'B 终点';
-    $('flow-start').textContent = state.reverse ? 'B' : 'A';
-    $('flow-end').textContent = state.reverse ? 'A' : 'B';
-  }
-  function drawDynamicField(current, micro) {
-    const p = screen(current), tip = { x: p.x + current.P * 35, y: p.y - current.Q * 35 };
-    const d = { x: p.x + micro.dx * 145, y: p.y - micro.dy * 145 };
-    const trace = state.progress > 0.001 ? '<path d="' + pathData(0, state.progress, Math.max(3, Math.floor(state.progress * 130))) + '" fill="none" stroke="' + colors.teal + '" stroke-width="5" stroke-linecap="round" opacity=".94"/>' : '';
-    $('field-dynamic').innerHTML = trace +
-      circle(p.x, p.y, 19, colors.teal, 'opacity=".11" class="particle-halo"') +
-      arrow(p.x, p.y, d.x, d.y, colors.blue, 3, 0.92) +
-      arrow(p.x, p.y, tip.x, tip.y, colors.coral, 4, 1) +
-      circle(p.x, p.y, 8, '#e4fff4', 'stroke="#0d2732" stroke-width="3" class="particle-halo"') +
-      circle(p.x, p.y, 3, colors.teal) +
-      label(tip.x + (current.P < 0 ? -11 : 11), tip.y - 9, 'F', 'force-label', current.P < 0 ? 'end' : 'start') +
-      label(d.x + 8, d.y + 16, 'dr', 'blue-label') +
-      '<rect x="79" y="443" width="181" height="29" rx="5" fill="#0b1d2b" stroke="#355466"/>' +
-      label(92, 462, 'r = (' + fixed(current.x) + ', ' + fixed(current.y) + ')', 'tiny-label mono');
-  }
-  function drawMicro(current, micro) {
-    const xAlpha = state.focus === 'y' ? 0.22 : 1;
-    const yAlpha = state.focus === 'x' ? 0.22 : 1;
-    function plot(originX, originY, vx, vy, scale, heading, kind) {
-      const hx = originX + vx * scale, ty = originY - vy * scale;
-      const mx = clamp(originX + vx * scale, 20, 480);
-      const signX = vx < 0 ? -1 : 1, signY = vy < 0 ? 1 : -1;
-      return '<g>' + line(originX - 88, originY, originX + 88, originY, '#496474', 1) +
-        line(originX, originY - 91, originX, originY + 91, '#496474', 1) +
-        label(originX, 29, heading, 'svg-label', 'middle') +
-        label(originX + 86, originY - 7, 'x', 'tiny-label mono', 'end') +
-        label(originX + 7, originY - 78, 'y', 'tiny-label mono') +
-        arrow(originX, originY, hx, originY, colors.blue, 4, xAlpha) +
-        arrow(hx, originY, hx, ty, colors.teal, 4, yAlpha) +
-        line(originX, ty, hx, ty, '#7da1a7', 1, 'stroke-dasharray="3 4" opacity=".38"') +
-        arrow(originX, originY, hx, ty, kind === 'force' ? colors.coral : colors.white, 3.6) +
-        circle(originX, originY, 4, '#dff5ec') +
-        label((originX + mx) / 2, originY + 18, kind === 'force' ? 'P' : 'dx', 'blue-label', 'middle') +
-        label(hx + signX * 11, (originY + ty) / 2 - signY * 3, kind === 'force' ? 'Q' : 'dy', 'teal-label', signX < 0 ? 'end' : 'start') +
-        label(hx + (vx < 0 ? -8 : 9), ty + (vy < 0 ? 19 : -9), kind === 'force' ? 'F' : 'dr', kind === 'force' ? 'force-label' : 'white-label', vx < 0 ? 'end' : 'start') +
-        '<path d="M ' + n(hx - 8 * signX) + ' ' + n(originY) + ' L ' + n(hx - 8 * signX) + ' ' + n(originY + 8 * signY) + ' L ' + n(hx) + ' ' + n(originY + 8 * signY) + '" fill="none" stroke="#95b4b8" stroke-width="1" opacity=".7"/></g>';
-    }
-    const forceMax = Math.max(Math.abs(micro.P), Math.abs(micro.Q), 0.5);
-    const forceScale = Math.min(64, 79 / forceMax);
-    const displacementMax = Math.max(Math.abs(micro.dx), Math.abs(micro.dy), 0.05);
-    const displacementScale = 78 / displacementMax;
-    $('micro-svg').innerHTML = '<rect x="0" y="0" width="500" height="290" fill="transparent"/>' +
-      plot(125, 151, micro.P, micro.Q, forceScale, '受力 F', 'force') +
-      line(250, 28, 250, 249, '#3b5867', 1) +
-      plot(375, 151, micro.dx, micro.dy, displacementScale, '微位移 dr', 'displacement') +
-      label(125, 268, 'P = ' + signed(micro.P, 2) + '  Q = ' + signed(micro.Q, 2), 'tiny-label mono', 'middle') +
-      label(375, 268, 'dx = ' + signed(micro.dx, 2) + '  dy = ' + signed(micro.dy, 2), 'tiny-label mono', 'middle');
-  }
-  function drawFlow() {
-    flowValues = M.workBins(route, state.reverse, 72);
-    const maximum = Math.max(0, ...flowValues.map(Math.abs));
-    $('flow-bars').innerHTML = flowValues.map((value, i) => {
-      const height = value === 0 ? 0 : 5 + 31 * Math.abs(value) / (maximum || 1);
-      const sign = value === 0 ? 'zero' : value > 0 ? 'positive' : 'negative';
-      return '<span class="flow-bar ' + sign + '" data-index="' + i + '" style="height:' + fixed(height, 1) + 'px" title="' + (sign === 'zero' ? '零功' : sign === 'positive' ? '正功 ' : '负功 ') + signed(value, 3) + ' J"></span>';
-    }).join('');
-  }
-  function renderFlow() {
-    const passed = Math.floor(state.progress * flowValues.length);
-    $('flow-bars').querySelectorAll('.flow-bar').forEach((bar, i) => {
-      bar.classList.toggle('passed', i < passed);
-      bar.classList.toggle('current', i === Math.min(passed, flowValues.length - 1));
-    });
-  }
-  function updateMeters(current, micro) {
-    $('work-x').innerHTML = signed(current.wx) + ' <small>J</small>';
-    $('work-y').innerHTML = signed(current.wy) + ' <small>J</small>';
-    $('work-total').innerHTML = signed(current.work) + ' <small>J</small>';
-    const maxX = Math.max(Math.abs(route.total.wx), Math.abs(current.wx), 0.5);
-    const maxY = Math.max(Math.abs(route.total.wy), Math.abs(current.wy), 0.5);
-    $('meter-x-fill').style.width = Math.min(100, Math.abs(current.wx) / maxX * 100) + '%';
-    $('meter-y-fill').style.width = Math.min(100, Math.abs(current.wy) / maxY * 100) + '%';
-    const totalSign = current.work < -0.0005 ? 'negative' : current.work > 0.0005 ? 'positive' : 'zero';
-    $('total-card').classList.toggle('negative', totalSign === 'negative');
-    $('total-caption').textContent = state.progress === 0 ? '从' + (state.reverse ? 'B' : 'A') + '出发，开始累加' :
-      state.progress >= 1 ? '全程完成 · ' + (state.reverse ? 'B → A' : 'A → B') :
-      '已走过 ' + Math.round(state.progress * 100) + '% 的路径';
-    const localSign = state.progress === 0 ? 'zero' : micro.work < -0.0001 ? 'negative' : micro.work > 0.0001 ? 'positive' : 'zero';
-    $('work-status').className = 'work-status ' + localSign;
-    $('work-status').innerHTML = '<i></i>' + (localSign === 'negative' ? '此刻阻力 · 负功' : localSign === 'positive' ? '此刻推进 · 正功' : '等待运动');
-  }
   function render() {
-    const current = M.stateAt(route, state.progress, state.reverse);
-    const micro = M.microAt(route, state.progress, state.reverse);
-    drawDynamicField(current, micro);
-    drawMicro(current, micro);
-    updateMeters(current, micro);
-    renderFlow();
-    $('position-readout').textContent = '(' + fixed(current.x) + ', ' + fixed(current.y) + ')';
-    $('force-readout').textContent = '(' + signed(current.P, 2) + ', ' + signed(current.Q, 2) + ')';
-    $('micro-x').textContent = signed(micro.wx) + ' J';
-    $('micro-y').textContent = signed(micro.wy) + ' J';
-    const angle = micro.angle * 180 / Math.PI;
-    const localSign = Math.abs(angle - 90) < 0.05 || Math.abs(micro.work) < 0.0001 ? 'zero' : micro.work < 0 ? 'negative' : 'positive';
-    $('micro-status').className = 'micro-status ' + localSign;
-    $('micro-status').textContent = localSign === 'zero' ? '力与位移近乎垂直，这一小步的功约为零。' :
-      '力与位移夹角约 ' + angle.toFixed(1) + '°：' + (localSign === 'positive' ? '锐角，做正功，推动质点。' : '钝角，做负功，阻碍质点。');
-    $('progress-input').value = String(Math.round(state.progress * 1000));
-    $('progress-value').textContent = Math.round(state.progress * 100) + '%';
-    $('progress-input').setAttribute('aria-valuetext', '已走完 ' + Math.round(state.progress * 100) + '%，累计功 ' + signed(current.work) + ' 焦耳');
-  }
-  function setStage(number) {
-    state.stage = number;
-    document.querySelectorAll('.stage-button').forEach(button => {
-      const active = Number(button.dataset.stage) === number;
-      button.classList.toggle('active', active);
-      if (active) button.setAttribute('aria-current', 'step');
-      else button.removeAttribute('aria-current');
+    const view=C.sample(experiment,state.t), s=experiment.segments[view.index];
+    let out='';
+    experiment.segments.forEach((item,i)=>{
+      const a=pt(item.start),b=pt(item.end);
+      if (i<view.index) out+=line(a.x,a.y,b.x,b.y,'#6D8CBE',2);
+      const selected=i===view.index?view.select:i===view.index-1?view.oldSelect:0;
+      if(selected>0) out+=`<g opacity="${n(selected)}">${line(a.x,a.y,b.x,b.y,colors.blue,5)}${arrow({x:mix(a.x,b.x,.35),y:mix(a.y,b.y,.35)},{x:mix(a.x,b.x,.66),y:mix(a.y,b.y,.66)},'#fff',2)}</g>`;
     });
-    const content = descriptions[number - 1];
-    $('stage-kicker').textContent = content.kicker;
-    $('stage-headline').textContent = content.headline;
-    $('stage-copy').textContent = content.copy;
-    $('field-note').textContent = content.note;
-    $('direction-conclusion').hidden = !state.reverse;
-    document.body.dataset.stage = number;
-  }
-  function updateDirection() {
-    $('reverse-button').setAttribute('aria-pressed', String(state.reverse));
-    $('reverse-label').textContent = state.reverse ? 'B → A 反向' : 'A → B 正向';
-    $('trip-direction').textContent = state.reverse ? 'B → A' : 'A → B';
-    $('direction-conclusion').hidden = !state.reverse;
-    const statement = $('direction-conclusion').querySelector('p');
-    statement.textContent = '力场保持原样；dx、dy 同时反向。正向总功 ' + signed(route.total.work) + ' J，反向总功 ' + signed(-route.total.work) + ' J。';
-  }
-  function updatePlayButton() {
-    $('play-icon').textContent = state.playing ? 'Ⅱ' : '▶';
-    $('play-label').textContent = state.playing ? '暂停巡航' : '巡航播放';
-    $('play-button').setAttribute('aria-label', state.playing ? '暂停巡航' : '巡航播放');
-  }
-  function rebuild() {
-    route = M.buildTrajectory(state.path, state.field);
-    state.progress = 0;
-    state.playing = false;
-    drawStaticField();
-    drawFlow();
-    updateDirection();
-    updatePlayButton();
-    render();
-  }
-  function initMath() {
-    if (!window.katex) return;
-    const slash = String.fromCharCode(92);
-    const tex = slash + 'mathrm{d}W=' + slash + 'vec F' + slash + 'cdot' + slash + 'mathrm{d}' + slash + 'vec r=' +
-      '(P' + slash + 'vec i+Q' + slash + 'vec j)' + slash + 'cdot(' + slash + 'mathrm{d}x' + slash + 'vec i+' + slash + 'mathrm{d}y' + slash + 'vec j)=' +
-      'P' + slash + 'mathrm{d}x+Q' + slash + 'mathrm{d}y';
-    window.katex.render(tex, $('math-derivation'), { throwOnError: false });
-  }
-  function frame(time) {
-    if (state.playing) {
-      const elapsed = Math.min(64, time - (state.lastFrame || time));
-      state.progress = clamp(state.progress + elapsed / (8500 / state.speed), 0, 1);
-      render();
-      if (state.progress >= 1) {
-        state.playing = false;
-        updatePlayButton();
-      }
+    const pos=pt(view.marker);
+    out+=circle(pos.x,pos.y,9+7*view.focus,'none',`stroke="${colors.blue}" stroke-width="1.6" opacity="${n(view.focus)}"`);
+    out+=circle(pos.x,pos.y,5.2,'#fff',`stroke="${colors.blue}" stroke-width="2.6"`);
+    view.details.forEach(v=>out+=detailLayer(v));
+    const max=Math.max(...experiment.segments.map(item=>Math.abs(item.work)),.05), width=Math.min(24,730/state.count-8);
+    experiment.segments.forEach((item,i)=>{
+      const ratio=i<view.index?1:i===view.index?view.receipt:0;
+      const h=Math.abs(item.work)/max*32, color=item.work<0?colors.negative:colors.green;
+      const bx=barX(i), top=item.work<0?467:467-h;
+      if(h>.01) out+=`<rect x="${n(bx-width/2)}" y="${n(top)}" width="${width}" height="${n(h)}" fill="${color}" opacity=".11"/>`;
+      if(h>.01&&ratio>0) out+=`<rect x="${n(bx-width/2)}" y="${n(item.work<0?467:467-h*ratio)}" width="${width}" height="${n(h*ratio)}" fill="${color}"/>`;
+      if(h<=.01) out+=circle(bx,467,ratio?2.7:1.8,ratio?colors.muted:'#D5DCD2');
+      if(i===view.index) out+=line(bx,510,bx,516,colors.blue,2);
+      if(state.count<=12||i%2===0)out+=text(bx,532,String(i+1),'mono small',i===view.index?colors.blue:colors.muted,'middle');
+    });
+    const totalColor=view.cumulative.work<-.0005?colors.negative:colors.ink;
+    out+=text(859,464,`${signed(view.cumulative.work)} J`,'mono total',totalColor);
+    out+=text(859,489,`Wₓ ${signed(view.cumulative.wx)} J`,'mono small',colors.blue);
+    out+=text(859,507,`Wᵧ ${signed(view.cumulative.wy)} J`,'mono small',colors.green);
+    out+=text(859,528,view.done?'全程完成 · '+(state.reverse?'B → A':'A → B'):'等待当前段汇入','small',colors.muted);
+    if(view.chip.visible){
+      const q=view.chip.progress, x=mix(958,barX(view.index),q),y=mix(357,445,q);
+      out+=path(`M958 357 L${n(barX(view.index))} 445`,'#B9C5B6',1,'stroke-dasharray="3 5"');
+      out+=`<g transform="translate(${n(x)} ${n(y)})"><rect x="-48" y="-14" width="96" height="28" rx="6" fill="white" stroke="${colors.blue}"/>${text(0,4,`${signed(s.work)} J`,'mono small',colors.blue,'middle')}</g>`;
     }
-    state.lastFrame = time;
-    requestAnimationFrame(frame);
+    $('dynamic-scene').innerHTML=out;
+    const svg=$('work-svg'); svg.dataset.time=state.t.toFixed(5);svg.dataset.step=view.step;svg.dataset.work=view.cumulative.work.toFixed(9);
+    setText('clock',`t = ${fixed(state.t,1)} s`);
+    const displayedIndex=Math.floor(view.textStep/5), displayedPhase=view.textStep%5;
+    setText('segment-label',`第 ${displayedIndex+1} / ${state.count} 段`);
+    setText('phase-label',view.done?'全程完成':C.phases[displayedPhase]);
+    $('phase-label').style.opacity=String(view.done?1:view.textAlpha);
+    setText('caption',view.done?`分段总和为 ${signed(experiment.total.work)} J；反向后等值变号。`:captions[displayedPhase]);
+    $('caption').style.opacity=String(view.done?1:view.textAlpha);
+    setText('completion',`已汇入 ${view.completed} / ${state.count} 段`);
+    document.querySelectorAll('[data-phase]').forEach(button=>{
+      const active=Number(button.dataset.phase)===(view.done?4:displayedPhase);
+      if(active)button.setAttribute('aria-current','step');else button.removeAttribute('aria-current');
+    });
+    $('progress-input').value=String(Math.round(state.t/C.duration(experiment)*10000));
+    setText('progress-value',Math.round(state.t/C.duration(experiment)*100)+'%');
+    $('progress-input').setAttribute('aria-valuetext',`第${displayedIndex+1}段，${view.done?"全程完成":C.phases[displayedPhase]}，已汇入${view.completed}段`);
+    $('prev-button').disabled=state.t<=1e-6;$('next-button').disabled=view.done;
   }
-  document.querySelectorAll('.stage-button').forEach(button => button.addEventListener('click', () => setStage(Number(button.dataset.stage))));
-  document.querySelectorAll('.micro-focus button').forEach(button => button.addEventListener('click', () => {
-    state.focus = button.dataset.focus;
-    document.querySelectorAll('.micro-focus button').forEach(item => item.classList.toggle('active', item === button));
-    render();
+  function updatePlaying(){
+    setText('play-button',state.playing?'Ⅱ 暂停':'▶ 播放');
+    $('play-button').setAttribute('aria-label',state.playing?'暂停':'播放');
+    $('status-dot').classList.toggle('running',state.playing);
+  }
+  function pause(){
+    state.playing=false;timeline?.pause();delayed?.kill();delayed=null;updatePlaying();
+  }
+  function seek(t){
+    pause();state.t=C.clamp(t,0,C.duration(experiment));clock.t=state.t;
+    timeline?.time(state.t,true);render();
+  }
+  function nextTime(){return limits.find(t=>t>state.t+1e-6)??C.duration(experiment);}
+  function prevTime(){return [...limits].reverse().find(t=>t<state.t-1e-6)??0;}
+  function reducedTick(){
+    if(!state.playing)return;
+    const target=nextTime();
+    delayed=window.gsap.delayedCall(.9/state.speed,()=>{
+      state.t=target;clock.t=target;timeline.time(target,true);render();
+      if(target>=C.duration(experiment))pause();else reducedTick();
+    });
+  }
+  function play(){
+    if(!window.gsap)return;
+    if(state.playing){pause();return;}
+    if(state.t>=C.duration(experiment))seek(0);
+    state.playing=true;updatePlaying();
+    if(state.reduced)reducedTick();else timeline.timeScale(state.speed).play();
+  }
+  function rebuild(){
+    pause();timeline?.kill();
+    experiment=M.buildPartition(state.path,state.field,state.count,state.reverse);
+    limits=Array.from({length:state.count*5+1},(_,i)=>C.boundary(i));
+    state.t=Math.min(state.t,C.duration(experiment));clock.t=state.t;
+    if(window.gsap){
+      timeline=window.gsap.timeline({paused:true,onUpdate:()=>{state.t=clock.t;render();},onComplete:pause});
+      timeline.fromTo(clock,{t:0},{t:C.duration(experiment),duration:C.duration(experiment),ease:'none',immediateRender:false});
+      timeline.timeScale(state.speed).time(state.t,true);
+    }
+    renderStatic();render();
+    setText('direction',state.reverse?'B → A':'A → B');$('reverse-button').setAttribute('aria-pressed',String(state.reverse));
+  }
+  function applyMotion(){
+    document.body.dataset.motion=state.reduced?'reduce':'full';
+    $('motion-notice').hidden=!state.reduced;
+  }
+  for(const [id,key] of [['path-select','path'],['field-select','field'],['partition-select','count']])$(id).addEventListener('change',e=>{
+    state[key]=key==='count'?Number(e.target.value):e.target.value;rebuild();
+  });
+  $('reverse-button').addEventListener('click',()=>{state.reverse=!state.reverse;rebuild();});
+  $('reset-button').addEventListener('click',()=>seek(0));
+  $('prev-button').addEventListener('click',()=>seek(prevTime()));
+  $('next-button').addEventListener('click',()=>seek(nextTime()));
+  $('play-button').addEventListener('click',play);
+  $('progress-input').addEventListener('input',e=>{
+    let t=Number(e.target.value)/10000*C.duration(experiment);
+    if(state.reduced&&t>0)t=limits.find(end=>end>=t-1e-6)??C.duration(experiment);
+    seek(t);
+  });
+  document.querySelectorAll('[data-phase]').forEach(button=>button.addEventListener('click',()=>{
+    const current=C.sample(experiment,state.t), phase=Number(button.dataset.phase);
+    seek(C.boundary(Math.floor(current.textStep/5)*5+phase+1));
   }));
-  $('path-select').addEventListener('change', event => { state.path = event.target.value; rebuild(); });
-  $('field-select').addEventListener('change', event => { state.field = event.target.value; rebuild(); });
-  $('reverse-button').addEventListener('click', () => {
-    state.reverse = !state.reverse;
-    state.progress = 0;
-    state.playing = true;
-    state.lastFrame = 0;
-    drawStaticField();
-    drawFlow();
-    updateDirection();
-    updatePlayButton();
-    render();
+  document.querySelectorAll('[data-focus]').forEach(button=>button.addEventListener('click',()=>{
+    state.focus=button.dataset.focus;
+    document.querySelectorAll('[data-focus]').forEach(b=>b.setAttribute('aria-pressed',String(b===button)));render();
+  }));
+  $('speed-select').addEventListener('change',e=>{
+    state.speed=Number(e.target.value);timeline?.timeScale(state.speed);
+    if(state.playing&&state.reduced){delayed?.kill();reducedTick();}
   });
-  $('play-button').addEventListener('click', () => {
-    if (state.progress >= 1) state.progress = 0;
-    state.playing = !state.playing;
-    state.lastFrame = 0;
-    updatePlayButton();
-    render();
+  $('reduced-motion').checked=state.reduced;
+  $('reduced-motion').addEventListener('change',e=>{
+    const resume=state.playing;pause();state.reduced=e.target.checked;
+    if(state.reduced&&state.t>0)seek(limits.find(t=>t>=state.t-1e-6)??C.duration(experiment));
+    applyMotion();render();if(resume)play();
   });
-  $('step-button').addEventListener('click', () => {
-    state.playing = false;
-    state.progress = state.progress >= 1 ? 0 : Math.min(1, state.progress + 1 / 24);
-    updatePlayButton();
-    render();
+  document.addEventListener('keydown',e=>{
+    if(e.ctrlKey||e.metaKey||e.altKey||e.target.closest('input,select,textarea,button,a'))return;
+    if(e.code==='Space'){e.preventDefault();play();}
+    if(e.code==='ArrowLeft'){e.preventDefault();seek(prevTime());}
+    if(e.code==='ArrowRight'){e.preventDefault();seek(nextTime());}
+    if(e.code==='Home'){e.preventDefault();seek(0);}
   });
-  $('speed-input').addEventListener('input', event => {
-    state.speed = Number(event.target.value);
-    $('speed-value').textContent = fixed(state.speed, 2) + '×';
-  });
-  $('progress-input').addEventListener('input', event => {
-    state.playing = false;
-    state.progress = Number(event.target.value) / 1000;
-    updatePlayButton();
-    render();
-  });
-  setStage(1);
-  rebuild();
-  initMath();
-  requestAnimationFrame(frame);
+  document.addEventListener('visibilitychange',()=>{if(document.hidden)pause();});
+  window.addEventListener('pagehide',pause);
+  window.addEventListener('beforeunload',()=>{pause();timeline?.kill();});
+  $('engine-notice').hidden=!!window.gsap;$('play-button').disabled=!window.gsap;
+  applyMotion();rebuild();
 })();

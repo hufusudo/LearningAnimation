@@ -70,6 +70,46 @@
     return { path, field, samples, length: last.arc, total: { wx: last.wx, wy: last.wy, work: last.wx + last.wy } };
   }
 
+  function buildPartition(path, field, count = 12, reverse = false) {
+    if (!Number.isInteger(count) || count <= 0 || count % 3 !== 0) {
+      throw new Error('Partition count must be a positive multiple of 3');
+    }
+    const segments = [];
+    let wx = 0, wy = 0, work = 0;
+    for (let step = 0; step < count; step++) {
+      const index = reverse ? count - 1 - step : step;
+      const t0 = index / count, t1 = (index + 1) / count;
+      const forwardStart = pointAt(path, t0), forwardEnd = pointAt(path, t1);
+      const start = reverse ? forwardEnd : forwardStart;
+      const end = reverse ? forwardStart : forwardEnd;
+      const midpoint = { x: (forwardStart.x + forwardEnd.x) / 2, y: (forwardStart.y + forwardEnd.y) / 2 };
+      const dx = end.x - start.x, dy = end.y - start.y;
+      const { P, Q } = forceAt(field, midpoint.x, midpoint.y);
+      const segmentWx = Math.abs(P * dx) < 1e-12 ? 0 : P * dx;
+      const segmentWy = Math.abs(Q * dy) < 1e-12 ? 0 : Q * dy;
+      const segmentWork = Math.abs(segmentWx + segmentWy) < 1e-12 ? 0 : segmentWx + segmentWy;
+      const before = { wx, wy, work };
+      wx += segmentWx;
+      wy += segmentWy;
+      work += segmentWork;
+      if (Math.abs(wx) < 1e-12) wx = 0;
+      if (Math.abs(wy) < 1e-12) wy = 0;
+      if (Math.abs(work) < 1e-12) work = 0;
+      segments.push({
+        index: step, start: { ...start }, end: { ...end }, midpoint,
+        P, Q, dx, dy, wx: segmentWx, wy: segmentWy, work: segmentWork,
+        before, after: { wx, wy, work }
+      });
+    }
+    const reference = buildTrajectory(path, field).total;
+    const sign = reverse ? -1 : 1;
+    return {
+      path, field, count, reverse, segments,
+      total: { wx, wy, work },
+      reference: { wx: sign * reference.wx, wy: sign * reference.wy, work: sign * reference.work }
+    };
+  }
+
   function atArcFraction(route, fraction) {
     const samples = route.samples, target = clamp(fraction, 0, 1) * route.length;
     let lo = 0, hi = samples.length - 1;
@@ -122,7 +162,7 @@
     return bins;
   }
 
-  const api = { pointAt, tangentAt, forceAt, buildTrajectory, atArcFraction, stateAt, microAt, workBins };
+  const api = { pointAt, tangentAt, forceAt, buildTrajectory, buildPartition, atArcFraction, stateAt, microAt, workBins };
   root.LineIntegralModel = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof window === 'undefined' ? globalThis : window);
