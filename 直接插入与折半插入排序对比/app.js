@@ -1,663 +1,370 @@
 (function () {
   'use strict';
-
-  const SAMPLE = [8, 3, 6, 2, 7, 5, 4, 5];
-  const $ = function (id) { return document.getElementById(id); };
-  const labels = {
-    intro: '先看有序区',
-    take: '取出 temp',
-    compare: '关键字比较',
-    locate: '折半查找',
-    position: '确定插入位',
-    shift: '元素右移',
-    insert: '插入完成',
-    done: '排序完成'
-  };
-
+  const { SAMPLE, makeItems, text, buildTrace } = window.InsertionModel;
+  const { sample, textView } = window.InsertionChoreo;
+  const $ = id => document.getElementById(id);
+  const items = makeItems(SAMPLE);
+  const clock = { t: 0 };
+  const BEAT = 1.15;
+  const labels = { intro: '准备', take: '取数', bounds: '圈定区间', mid: '中点定位', locate: '比较',
+    narrow: '移动边界', position: '确定位置', compare: '比较', shift: '右移', insert: '落位', done: '完成' };
+  const colors = { sorted: [221, 239, 227], pending: [242, 241, 237], blue: [234, 240, 254], green: [202, 232, 213] };
   let mode = 'direct';
   let steps = [];
-  let currentIndex = 0;
-  let timer = null;
-  let items = [];
-  let tileById = new Map();
-  let slots = [];
-  let pointerCells = [];
-  let duplicateLetters = new Map();
+  let timeline = null;
+  let reducedCall = null;
+  let running = false;
+  let target = null;
+  let direction = 1;
+  let geometry;
+  const tiles = new Map();
+  const slots = [];
+  const markers = {};
+  const scene = $('sort-scene');
+  const track = $('array-track');
+  const pointerGrid = $('pointer-grid');
+  const regionTrack = $('region-track');
+  const motionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
+  const reduce = $('reduce-motion');
+  reduce.checked = motionQuery.matches;
 
-  const nodes = {
-    modeSummary: $('mode-summary'),
-    roundLabel: $('round-label'),
-    stageTitle: $('stage-title'),
-    stepCounter: $('step-counter'),
-    tempSlot: $('temp-slot'),
-    pointerGrid: $('pointer-grid'),
-    arrayTrack: $('array-track'),
-    indexTrack: $('index-track'),
-    regionTrack: $('region-track'),
-    actionKind: $('action-kind'),
-    actionStep: $('action-step'),
-    actionTitle: $('action-title'),
-    actionCopy: $('action-copy'),
-    decisionNote: $('decision-note'),
-    comparisonCount: $('comparison-count'),
-    shiftCount: $('shift-count'),
-    passCount: $('pass-count'),
-    codeList: $('code-list'),
-    takeaway: $('takeaway-copy'),
-    slider: $('step-slider'),
-    timelineLabel: $('timeline-label'),
-    timelineTotal: $('timeline-total'),
-    previous: $('previous-button'),
-    play: $('play-button'),
-    next: $('next-button'),
-    reset: $('reset-button'),
-    speed: $('speed-select')
-  };
-
-  function prepareItems(values) {
-    const counts = new Map();
-    values.forEach(function (value) { counts.set(value, (counts.get(value) || 0) + 1); });
-    const seen = new Map();
-    duplicateLetters = new Map();
-    items = values.map(function (value, id) {
-      const letterIndex = seen.get(value) || 0;
-      seen.set(value, letterIndex + 1);
-      if (counts.get(value) > 1) duplicateLetters.set(id, String.fromCharCode(97 + letterIndex));
-      return { id: id, value: value };
-    });
+  function setText(node, value) {
+    const next = String(value);
+    if (node.textContent !== next) node.textContent = next;
   }
-
-  function tokenText(item) {
-    if (!item) return '空位';
-    const letter = duplicateLetters.get(item.id);
-    return String(item.value) + (letter ? letter : '');
+  function showText(node, view) {
+    setText(node, view.text);
+    node.style.opacity = view.alpha;
   }
-
-  function tokenHtml(item) {
-    if (!item) return '';
-    const value = document.createElement('span');
-    value.className = 'tile-number';
-    value.textContent = String(item.value);
-    const wrapper = document.createElement('span');
-    wrapper.className = 'value-tile';
-    wrapper.setAttribute('data-item-id', String(item.id));
-    wrapper.appendChild(value);
-    const letter = duplicateLetters.get(item.id);
-    if (letter) {
-      const suffix = document.createElement('small');
-      suffix.textContent = letter;
-      wrapper.appendChild(suffix);
-    }
-    return wrapper;
+  function div(className, parent, content) {
+    const node = document.createElement('div');
+    node.className = className;
+    if (content !== undefined) node.textContent = content;
+    parent.appendChild(node);
+    return node;
   }
+  const sortedBand = div('zone-band sorted-band', track);
+  const pendingBand = div('zone-band pending-band', track);
+  const searchRange = div('search-range', track);
+  const sortedLabel = div('region-label sorted-label', regionTrack);
+  const pendingLabel = div('region-label pending-label', regionTrack);
+  const borderLabel = div('region-boundary', regionTrack, '有序区边界');
+  const placeholder = $('temp-slot').firstElementChild;
+  const codeLines = [];
 
-  function record(trace, array, meta, totals) {
-    const step = Object.assign({
-      phase: 'intro',
-      title: '',
-      copy: '',
-      note: '',
-      line: 0,
-      pass: 1,
-      i: 1,
-      j: null,
-      low: null,
-      high: null,
-      mid: null,
-      compareIndex: null,
-      moveFrom: null,
-      moveTo: null,
-      insertIndex: null,
-      temp: null,
-      outcome: null,
-      nextLow: null,
-      nextHigh: null,
-      sortedCount: 1
-    }, meta, {
-      array: array.slice(),
-      comparisons: totals.comparisons,
-      shifts: totals.shifts,
-      completedPasses: totals.completedPasses
-    });
-    trace.push(step);
-  }
-
-  function buildTrace(inputItems, algorithm) {
-    const array = inputItems.slice();
-    const trace = [];
-    const totals = { comparisons: 0, shifts: 0, completedPasses: 0 };
-    const count = array.length;
-
-    record(trace, array, {
-      phase: 'intro',
-      title: '先把第一个数看作有序',
-      copy: '第一个数自然有序。接下来，每一轮都从右边取一个数，插进左侧。',
-      note: '本例里 5a、5b 是两个相同的数，用来观察原有顺序是否保留。',
-      line: 1,
-      pass: 0,
-      i: 1,
-      sortedCount: 1
-    }, totals);
-
-    for (let i = 1; i < count; i += 1) {
-      const temp = array[i];
-      array[i] = null;
-
-      record(trace, array, {
-        phase: 'take',
-        title: '把 A[' + i + '] 暂存在 temp',
-        copy: '取出 ' + tokenText(temp) + '，先留住这个值；A[' + i + '] 暂时空出来。',
-        note: '左边 ' + i + ' 个数已经有序，这一轮只处理索引 i = ' + i + '。',
-        line: algorithm === 'direct' ? 2 : 1,
-        pass: i,
-        i: i,
-        temp: temp,
-        sortedCount: i
-      }, totals);
-
-      if (algorithm === 'direct') {
-        let j = i - 1;
-        while (j >= 0) {
-          const current = array[j];
-          const mustShift = current.value > temp.value;
-          totals.comparisons += 1;
-          record(trace, array, {
-            phase: 'compare',
-            title: '从右往左比较',
-            copy: 'A[' + j + '] = ' + tokenText(current) + (mustShift ? ' 大于 ' : ' 小于或等于 ') + 'temp = ' + tokenText(temp) + '。',
-            note: mustShift ? tokenText(current) + ' 比 temp 大，所以要向右移。' : '这里已经不大于 temp；停止扫描，把 temp 放在它后面。',
-            line: 4,
-            pass: i,
-            i: i,
-            j: j,
-            temp: temp,
-            compareIndex: j,
-            outcome: mustShift ? 'shift' : 'stop',
-            sortedCount: i
-          }, totals);
-
-          if (!mustShift) break;
-          const from = j;
-          array[j + 1] = current;
-          array[j] = null;
-          totals.shifts += 1;
-          j -= 1;
-          record(trace, array, {
-            phase: 'shift',
-            title: '把较大的数向右挪一格',
-            copy: '将 ' + tokenText(current) + ' 从 A[' + from + '] 移到 A[' + (from + 1) + ']；空位随之移到左边。',
-            note: '每次只挪一个位置，因此插入点左侧的相对顺序不变。',
-            line: 5,
-            pass: i,
-            i: i,
-            j: j,
-            temp: temp,
-            moveFrom: from,
-            moveTo: from + 1,
-            sortedCount: i
-          }, totals);
-        }
-
-        const insertAt = j + 1;
-        array[insertAt] = temp;
-        totals.completedPasses += 1;
-        record(trace, array, {
-          phase: 'insert',
-          title: '把 temp 放进空位',
-          copy: '把 temp = ' + tokenText(temp) + ' 放到 A[' + insertAt + ']。这一轮结束，左侧有序区扩大一格。',
-          note: '只在左边的数严格大于 temp 时才右移；相等的数不会越过彼此。',
-          line: 7,
-          pass: i,
-          i: i,
-          j: j,
-          temp: null,
-          insertIndex: insertAt,
-          sortedCount: i + 1
-        }, totals);
-      } else {
-        let low = 0;
-        let high = i - 1;
-        while (low <= high) {
-          const mid = Math.floor((low + high) / 2);
-          const current = array[mid];
-          const goesBefore = current.value <= temp.value;
-          totals.comparisons += 1;
-          const nextLow = goesBefore ? mid + 1 : low;
-          const nextHigh = goesBefore ? high : mid - 1;
-          record(trace, array, {
-            phase: 'locate',
-            title: '在有序区中点比较',
-            copy: '检查 A[' + mid + '] = ' + tokenText(current) + ' 与 temp = ' + tokenText(temp) + '。',
-            note: goesBefore
-              ? 'A[mid] ≤ temp，插入点还要向右找；low 移到 ' + nextLow + '。'
-              : 'A[mid] > temp，插入点在左半边；high 移到 ' + nextHigh + '。',
-            line: goesBefore ? 5 : 6,
-            pass: i,
-            i: i,
-            low: low,
-            high: high,
-            mid: mid,
-            temp: temp,
-            compareIndex: mid,
-            outcome: goesBefore ? 'left-of-or-equal' : 'greater',
-            nextLow: nextLow,
-            nextHigh: nextHigh,
-            sortedCount: i
-          }, totals);
-          low = nextLow;
-          high = nextHigh;
-        }
-
-        record(trace, array, {
-          phase: 'position',
-          title: 'low 指向插入位置',
-          copy: '查找区间已经收敛。把 temp 插在 low = ' + low + '，也就是所有不大于它的数之后。',
-          note: '使用 A[mid] ≤ temp 时让 low 右移，相同的数会留在 temp 前面。',
-          line: 7,
-          pass: i,
-          i: i,
-          low: low,
-          high: high,
-          temp: temp,
-          insertIndex: low,
-          sortedCount: i
-        }, totals);
-
-        for (let j = i - 1; j >= low; j -= 1) {
-          const current = array[j];
-          array[j + 1] = current;
-          array[j] = null;
-          totals.shifts += 1;
-          record(trace, array, {
-            phase: 'shift',
-            title: '把插入点右侧的数逐个后移',
-            copy: '将 A[' + j + '] = ' + tokenText(current) + ' 右移到 A[' + (j + 1) + ']。',
-            note: '折半查找只更快地找到位置；腾出空位仍要逐个移动元素。',
-            line: 9,
-            pass: i,
-            i: i,
-            j: j,
-            low: low,
-            high: high,
-            mid: null,
-            temp: temp,
-            moveFrom: j,
-            moveTo: j + 1,
-            insertIndex: low,
-            sortedCount: i
-          }, totals);
-        }
-
-        array[low] = temp;
-        totals.completedPasses += 1;
-        record(trace, array, {
-          phase: 'insert',
-          title: '把 temp 放进 low 指向的空位',
-          copy: 'A[' + low + '] = temp = ' + tokenText(temp) + '。本轮完成，左侧有序区扩大一格。',
-          note: '5a 仍排在 5b 前面；折半定位也保留了相同关键字的原有次序。',
-          line: 10,
-          pass: i,
-          i: i,
-          low: low,
-          high: high,
-          temp: null,
-          insertIndex: low,
-          sortedCount: i + 1
-        }, totals);
-      }
-    }
-
-    record(trace, array, {
-      phase: 'done',
-      title: '所有数都进入有序区',
-      copy: '从左到右检查，数组已经排好。每一轮都把一个数插进了已排序前缀。',
-      note: '有序结果：[' + array.map(tokenText).join(', ') + ']。比较决定插入位置，右移负责腾出位置。',
-      line: 0,
-      pass: count - 1,
-      i: count,
-      temp: null,
-      sortedCount: count
-    }, totals);
-
-    return trace;
-  }
-
-  function codeFor(algorithm) {
-    if (algorithm === 'binary') {
-      return [
-        'temp = A[i]',
-        'low = 0, high = i - 1',
-        'while low <= high',
-        '  mid = floor((low + high) / 2)',
-        '  if A[mid] <= temp: low = mid + 1',
-        '  else: high = mid - 1',
-        'position = low',
-        'for j = i - 1 down to low',
-        '  A[j + 1] = A[j]',
-        'A[low] = temp'
-      ];
-    }
-    return [
-      'for i = 1 to n - 1',
-      '  temp = A[i]',
-      '  j = i - 1',
-      '  while j >= 0 and A[j] > temp',
-      '    A[j + 1] = A[j]',
-      '    j = j - 1',
-      '  A[j + 1] = temp'
+  function codeFor() {
+    return mode === 'binary' ? [
+      'temp = A[i]', 'low = 0, high = i - 1', 'while low <= high',
+      '  mid = floor((low + high) / 2)', '  if A[mid] <= temp: low = mid + 1',
+      '  else: high = mid - 1', 'position = low', 'for j = i - 1 down to low',
+      '  A[j + 1] = A[j]', 'A[low] = temp'
+    ] : [
+      'for i = 1 to n - 1', '  temp = A[i]', '  j = i - 1',
+      '  while j >= 0 and A[j] > temp', '    A[j + 1] = A[j]', '    j = j - 1', '  A[j + 1] = temp'
     ];
   }
-
-  function buildStaticBoard() {
-    nodes.arrayTrack.style.setProperty('--slot-count', String(items.length));
-    nodes.pointerGrid.style.setProperty('--slot-count', String(items.length));
-    nodes.indexTrack.style.setProperty('--slot-count', String(items.length));
-    nodes.regionTrack.style.setProperty('--slot-count', String(items.length));
-    nodes.arrayTrack.replaceChildren();
-    nodes.pointerGrid.replaceChildren();
-    nodes.indexTrack.replaceChildren();
-    nodes.regionTrack.replaceChildren();
-    tileById = new Map();
-    slots = [];
-    pointerCells = [];
-
-    items.forEach(function (item, index) {
-      const slot = document.createElement('div');
-      slot.className = 'array-slot';
-      slot.setAttribute('data-index', String(index));
-      slot.setAttribute('aria-label', 'A[' + index + ']');
-      nodes.arrayTrack.appendChild(slot);
-      slots.push(slot);
-
-      const pointerCell = document.createElement('div');
-      pointerCell.className = 'pointer-cell';
-      nodes.pointerGrid.appendChild(pointerCell);
-      pointerCells.push(pointerCell);
-
-      const indexLabel = document.createElement('span');
-      indexLabel.className = 'index-label';
-      indexLabel.textContent = String(index);
-      nodes.indexTrack.appendChild(indexLabel);
-
-      const tile = tokenHtml(item);
-      tileById.set(item.id, tile);
-    });
-  }
-
-  function renderCode(activeLine) {
-    nodes.codeList.replaceChildren();
-    codeFor(mode).forEach(function (source, index) {
-      const line = document.createElement('span');
-      line.className = 'code-line' + (activeLine === index + 1 ? ' is-active' : '');
+  function buildCode() {
+    $('code-list').replaceChildren();
+    codeLines.length = 0;
+    codeFor().forEach((source, index) => {
+      const line = div('code-line', $('code-list'));
       const number = document.createElement('span');
       number.className = 'line-number';
-      number.textContent = String(index + 1);
-      line.appendChild(number);
-      line.appendChild(document.createTextNode(source));
-      nodes.codeList.appendChild(line);
+      number.textContent = index + 1;
+      line.append(number, document.createTextNode(source));
+      codeLines.push(line);
     });
   }
-
-  function addPointer(index, text, className) {
-    if (index === null || index === undefined || index < 0 || index >= pointerCells.length) return;
-    const marker = document.createElement('span');
-    marker.className = 'pointer ' + className;
-    marker.textContent = text;
-    pointerCells[index].appendChild(marker);
-  }
-
-  function renderPointers(step) {
-    pointerCells.forEach(function (cell) { cell.replaceChildren(); });
-    if (step.phase === 'done') return;
-    addPointer(step.i, 'i', 'pointer-i');
-    if (mode === 'direct') {
-      if (step.j !== null && step.j !== undefined) addPointer(step.j, 'j', 'pointer-j');
-    } else {
-      addPointer(step.low, 'low', 'pointer-low');
-      addPointer(step.mid, 'mid', 'pointer-mid');
-      addPointer(step.high, 'high', 'pointer-high');
+  items.forEach((item, index) => {
+    const slot = div('array-slot', track);
+    slot.dataset.index = index;
+    div('hole-mark', slot, '空位');
+    div('excluded-mark', slot);
+    slots.push(slot);
+    div('index-label', $('index-track'), index);
+    const tile = div('value-tile', $('tile-layer'));
+    tile.dataset.itemId = item.id;
+    div('tile-number', tile, item.value);
+    if (item.suffix) {
+      const suffix = document.createElement('small');
+      suffix.textContent = item.suffix;
+      tile.appendChild(suffix);
     }
-  }
+    tiles.set(item.id, tile);
+  });
+  ['low', 'high', 'mid', 'i', 'j'].forEach(name => {
+    const marker = div('pointer pointer-' + name, pointerGrid);
+    const label = document.createElement('span');
+    label.textContent = name;
+    const value = document.createElement('b');
+    marker.append(label, value);
+    const guide = div('pointer-guide guide-' + name, pointerGrid);
+    markers[name] = { marker, value, guide };
+  });
 
-  function renderRegions(step) {
-    nodes.regionTrack.replaceChildren();
-    if (step.sortedCount > 0) {
-      const sorted = document.createElement('span');
-      sorted.className = 'region-label sorted-label';
-      sorted.style.gridColumn = '1 / span ' + step.sortedCount;
-      sorted.textContent = '已排序前缀';
-      nodes.regionTrack.appendChild(sorted);
-    }
-    if (step.phase !== 'done' && step.i < items.length) {
-      const current = document.createElement('span');
-      current.className = 'region-label current-label';
-      current.style.gridColumn = String(step.i + 1);
-      current.textContent = '本轮';
-      nodes.regionTrack.appendChild(current);
-      if (step.i + 1 < items.length) {
-        const pending = document.createElement('span');
-        pending.className = 'region-label pending-label';
-        pending.style.gridColumn = (step.i + 2) + ' / span ' + (items.length - step.i - 1);
-        pending.textContent = '还未处理';
-        nodes.regionTrack.appendChild(pending);
-      }
-    }
+  function measure() {
+    const base = scene.getBoundingClientRect();
+    const first = slots[0].getBoundingClientRect();
+    const second = slots[1].getBoundingClientRect();
+    const temp = $('temp-slot').getBoundingClientRect();
+    const array = track.getBoundingClientRect();
+    $('scroll-hint').hidden = scene.scrollWidth <= $('sort-viewport').clientWidth + 1;
+    geometry = {
+      first: first.left + first.width / 2 - base.left,
+      stride: second.left - first.left,
+      tileY: first.top + first.height / 2 - base.top,
+      tempX: temp.left + temp.width / 2 - base.left,
+      tempY: temp.top + temp.height / 2 - base.top,
+      width: first.width,
+      pointerX: pointerGrid.getBoundingClientRect().left - base.left,
+      arrayY: array.top - base.top
+    };
+    render();
   }
-
-  function movementAnimation(before) {
-    if (!window.gsap || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-    tileById.forEach(function (tile, id) {
-      const previous = before.get(id);
-      if (!previous || !tile.isConnected) return;
-      const next = tile.getBoundingClientRect();
-      const dx = previous.left - next.left;
-      const dy = previous.top - next.top;
-      if (Math.abs(dx) < 1 && Math.abs(dy) < 1) return;
-      window.gsap.killTweensOf(tile);
-      window.gsap.fromTo(tile, { x: dx, y: dy }, {
-        x: 0,
-        y: 0,
-        duration: 0.34,
-        ease: 'power2.out',
-        overwrite: 'auto',
-        clearProps: 'transform'
-      });
+  function mix(a, b, p) { return a.map((value, index) => value + (b[index] - value) * p); }
+  function rgb(a) { return 'rgb(' + a.map(Math.round).join(',') + ')'; }
+  function band(node, x, width, alpha = 1) {
+    node.style.transform = 'translateX(' + x + 'px) scaleX(' + Math.max(0, width) + ')';
+    node.style.opacity = alpha;
+  }
+  function render() {
+    if (!geometry || !steps.length) return;
+    const view = sample(steps, clock.t);
+    const g = geometry;
+    const st = view.state;
+    const boundary = view.sortedCount * g.stride - (g.stride - g.width) / 2;
+    band(sortedBand, -5, boundary + 5);
+    band(pendingBand, boundary + 3, track.clientWidth - boundary + 2);
+    const rangeLeft = view.range.left * g.stride - 3;
+    const rangeWidth = Math.max(0, (view.range.right - view.range.left) * g.stride - (g.stride - g.width) + 6);
+    searchRange.style.transform = 'translateX(' + rangeLeft + 'px)';
+    searchRange.style.width = rangeWidth + 'px';
+    searchRange.style.opacity = view.range.alpha * (rangeWidth > 0 ? 1 : 0);
+    view.tiles.forEach(item => {
+      const tile = tiles.get(item.id);
+      const x = g.first + item.x * g.stride + item.temp * (g.tempX - g.first);
+      const y = g.tileY + item.temp * (g.tempY - g.tileY);
+      tile.style.transform = 'translate(' + x + 'px,' + y + 'px) translate(-50%, -50%)';
+      tile.style.zIndex = item.temp > 0 && item.temp < 1 ? '5' : '2';
+      tile.style.borderColor = item.temp > 0.5 ? '#BD8735' : '#B6C2B6';
     });
-  }
-
-  function render(index, animate) {
-    currentIndex = Math.max(0, Math.min(index, steps.length - 1));
-    const step = steps[currentIndex];
-    const before = new Map();
-    if (animate && window.gsap) {
-      tileById.forEach(function (tile, id) {
-        if (tile.isConnected) before.set(id, tile.getBoundingClientRect());
-      });
-    }
-
-    slots.forEach(function (slot, slotIndex) {
-      const item = step.array[slotIndex];
-      slot.className = 'array-slot';
-      if (slotIndex < step.sortedCount) slot.classList.add('is-sorted');
-      else slot.classList.add('is-unsorted');
-      if (step.compareIndex === slotIndex) slot.classList.add('is-compared');
-      if (step.moveFrom === slotIndex) slot.classList.add('is-shift-source');
-      if (step.moveTo === slotIndex) slot.classList.add('is-shift-target');
-      if (step.phase === 'insert' && step.insertIndex === slotIndex) slot.classList.add('is-inserted');
-      slot.replaceChildren();
-      if (item) {
-        slot.appendChild(tileById.get(item.id));
-        slot.setAttribute('aria-label', 'A[' + slotIndex + '] = ' + tokenText(item));
-      } else {
-        const hole = document.createElement('span');
-        hole.className = 'hole-mark';
-        hole.textContent = '·';
-        slot.appendChild(hole);
-        slot.classList.add('is-hole');
-        slot.setAttribute('aria-label', 'A[' + slotIndex + '] 是空位');
-      }
+    view.slots.forEach((state, index) => {
+      const slot = slots[index];
+      let color = mix(colors.pending, colors.sorted, state.sorted);
+      color = mix(color, colors.blue, state.compared);
+      color = mix(color, colors.green, state.inserted);
+      slot.style.backgroundColor = rgb(color);
+      slot.style.borderColor = state.compared > 0.1 ? '#2563EB' : state.sorted > 0.5 ? '#82B698' : '#C7C7BD';
+      slot.style.boxShadow = '0 0 0 ' + (3 * state.focus) + 'px rgba(37,99,235,' + (0.32 * state.focus) + ')';
+      slot.firstElementChild.style.opacity = state.hole;
+      slot.lastElementChild.style.opacity = state.excluded * 0.75;
+      const item = st.array[index];
+      slot.setAttribute('aria-label', 'A[' + index + '] ' + text(item));
     });
-
-    nodes.tempSlot.replaceChildren();
-    if (step.temp) {
-      nodes.tempSlot.appendChild(tileById.get(step.temp.id));
-      nodes.tempSlot.setAttribute('aria-label', '暂存 temp = ' + tokenText(step.temp));
-    } else {
-      const placeholder = document.createElement('span');
-      placeholder.className = 'temp-placeholder';
-      placeholder.textContent = '等待取数';
-      nodes.tempSlot.appendChild(placeholder);
-      nodes.tempSlot.setAttribute('aria-label', '暂存槽为空');
+    const index = Math.min(Math.floor(clock.t), steps.length - 2);
+    const before = steps[index];
+    const after = steps[index + 1];
+    const progress = clock.t - index;
+    Object.keys(markers).forEach(name => {
+      const { marker, value, guide } = markers[name];
+      const pointer = view.pointers[name];
+      const visible = mode === 'binary' ? name !== 'j' : !['low', 'high', 'mid'].includes(name);
+      // Outside boundaries stay in the left/right gutter and retain their actual value.
+      const x = Math.max(25, Math.min(pointerGrid.clientWidth - 25, g.first - g.pointerX + pointer.index * g.stride));
+      marker.style.transform = 'translateX(' + x + 'px) translateX(-50%)';
+      marker.style.opacity = visible ? pointer.alpha : 0;
+      marker.style.visibility = visible && pointer.alpha > 0 ? 'visible' : 'hidden';
+      marker.classList.toggle('is-outside', pointer.index < 0 || pointer.index >= items.length);
+      guide.style.transform = 'translateX(' + x + 'px)';
+      guide.style.opacity = visible ? pointer.alpha * 0.25 : 0;
+      const a = before[name] == null ? after[name] : before[name];
+      const b = after[name] == null ? before[name] : after[name];
+      showText(value, textView(String(a), String(b), progress, 0.52, 0.78));
+    });
+    const count = Math.round(view.sortedCount);
+    showText(sortedLabel, textView('已排序区\n' + before.sortedCount + ' 格', '已排序区\n' + after.sortedCount + ' 格', progress, 0.72, 0.96));
+    sortedLabel.style.width = Math.max(58, boundary) + 'px';
+    pendingLabel.style.left = boundary + 10 + 'px';
+    const pendingText = textView('未处理\n' + (items.length - before.sortedCount) + ' 格', '未处理\n' + (items.length - after.sortedCount) + ' 格', progress, 0.72, 0.96);
+    showText(pendingLabel, pendingText);
+    if (count === items.length) pendingLabel.style.opacity = 0;
+    borderLabel.style.transform = 'translateX(' + Math.min(boundary, track.clientWidth - 65) + 'px)';
+    borderLabel.style.opacity = count < items.length ? 1 : 0;
+    const tempAlpha = view.tiles.reduce((sum, item) => sum + item.temp, 0);
+    placeholder.style.opacity = 1 - tempAlpha;
+    $('temp-slot').setAttribute('aria-label', st.temp ? '暂存 temp = ' + text(st.temp) : '暂存槽为空');
+    const compared = view.slots.findIndex(slot => slot.compared > 0);
+    const link = $('compare-link');
+    if (compared >= 0) {
+      const x = g.first + compared * g.stride;
+      const y = g.arrayY + 4;
+      link.setAttribute('d', 'M ' + (g.tempX - 28) + ' ' + g.tempY + ' H ' + x + ' V ' + y);
+      link.style.opacity = view.slots[compared].compared * 0.7;
+    } else link.style.opacity = 0;
+    showText($('stage-title'), view.title);
+    showText($('action-title'), view.title);
+    showText($('action-copy'), view.copy);
+    showText($('stage-cue'), view.cue);
+    const round = state => state.phase === 'intro' ? '准备 · 第一个数自然有序' : state.phase === 'done' ? '排序完成' : '第 ' + state.pass + ' 轮 · 取数位 i = ' + state.i;
+    const actionStep = state => state.phase === 'done' ? 'n = ' + items.length : 'i = ' + state.i;
+    showText($('round-label'), textView(round(before), round(after), progress, 0.72, 0.96));
+    showText($('action-kind'), textView(labels[before.phase], labels[after.phase], progress, 0, 0.18));
+    showText($('action-step'), textView(actionStep(before), actionStep(after), progress, 0.72, 0.96));
+    const boundaryNote = st.low == null ? '每轮插入一个数，有序区向右扩展。' :
+      ['position', 'shift', 'insert'].includes(st.phase) ? '查找已结束 · low = ' + st.low + '，high = ' + st.high + ' · 插入位置 ' + st.low :
+        '当前查找：low = ' + st.low + '，high = ' + st.high + (st.low > st.high ? ' · 区间为空' : ' · 闭区间 [' + st.low + ', ' + st.high + ']');
+    showText($('pointer-summary'), textView(pointerSummary(before), pointerSummary(after), progress));
+    showText($('decision-note'), textView(note(before), note(after), progress));
+    $('decision-note').hidden = false;
+    $('pointer-summary').setAttribute('aria-label', boundaryNote);
+    showText($('comparison-count'), view.comparisonText);
+    showText($('shift-count'), view.shiftText);
+    showText($('pass-count'), view.passText);
+    const codeProgress = Math.max(0, Math.min(1, progress / 0.18));
+    codeLines.forEach((line, i) => {
+      const active = (before.line === i + 1 ? 1 - codeProgress : 0) + (after.line === i + 1 ? codeProgress : 0);
+      line.style.backgroundColor = rgb(mix([255, 255, 255], [255, 244, 222], active));
+      line.style.borderLeftColor = 'rgba(180, 115, 16,' + active + ')';
+    });
+    const displayed = Math.round(clock.t) + 1;
+    setText($('step-counter'), '步骤 ' + displayed + ' / ' + steps.length);
+    setText($('timeline-label'), '第 ' + displayed + ' 步');
+    $('step-slider').value = clock.t;
+    $('previous-button').disabled = clock.t <= 0;
+    $('next-button').disabled = clock.t >= steps.length - 1;
+    track.setAttribute('aria-label', '当前数组：' + st.array.map((item, i) => 'A[' + i + '] ' + text(item)).join('，'));
+  }
+  function pointerSummary(st) {
+    if (st.low == null) return st.phase === 'done' ? '全部有序' : '本轮取数位 i = ' + st.i + (st.j == null ? '' : ' · 比较位置 j = ' + st.j);
+    return 'low = ' + st.low + ' · high = ' + st.high + (st.mid == null ? '' : ' · mid = ' + st.mid) +
+      (st.low > st.high ? ' · 区间为空' : ' · 查找 [' + st.low + ', ' + st.high + ']');
+  }
+  function note(st) {
+    if (st.phase === 'take' || st.phase === 'shift') return '有序区正在插入调整；虚线框标记当前空位。';
+    if (st.phase === 'narrow') return '斜纹只表示不再参与查找，元素没有被删除。';
+    if (st.phase === 'position') return 'low > high 不再访问数组；low 是最终插入位置。';
+    if (st.phase === 'locate') return st.copy;
+    return st.phase === 'insert' ? '落位后，有序区底带扩大一格。' : '相等时向右找，保持 5a 在 5b 前面。';
+  }
+  function controls() {
+    $('play-button').innerHTML = running ? 'Ⅱ <span>暂停</span>' : '▶ <span>自动演示</span>';
+    $('play-button').setAttribute('aria-label', running ? '暂停自动演示' : '自动演示');
+    document.body.dataset.playing = running ? 'true' : 'false';
+  }
+  function pause() {
+    if (timeline) timeline.pause();
+    if (reducedCall) { reducedCall.kill(); reducedCall = null; }
+    running = false;
+    controls();
+  }
+  function seek(time) {
+    pause();
+    clock.t = Math.max(0, Math.min(steps.length - 1, time));
+    if (timeline) timeline.time(clock.t * BEAT, true);
+    render();
+  }
+  function onTick() {
+    if (target !== null && ((direction > 0 && clock.t >= target) || (direction < 0 && clock.t <= target))) {
+      clock.t = target;
+      timeline.pause(target * BEAT, true);
+      running = false;
+      controls();
     }
-
-    renderPointers(step);
-    renderRegions(step);
-    renderCode(step.line);
-    if (animate) movementAnimation(before);
-
-    nodes.roundLabel.textContent = step.phase === 'done'
-      ? '排序完成'
-      : step.phase === 'intro'
-        ? '准备 · 第一个数已天然有序'
-        : '第 ' + step.pass + ' 轮 · 插入索引 i = ' + step.i;
-    nodes.stageTitle.textContent = step.phase === 'done'
-      ? '左侧有序区已经覆盖整个数组'
-      : step.phase === 'intro'
-        ? '先把第一个数看作有序'
-        : step.title;
-    nodes.stepCounter.textContent = '步骤 ' + (currentIndex + 1) + ' / ' + steps.length;
-    nodes.actionKind.textContent = labels[step.phase] || '观察';
-    nodes.actionStep.textContent = step.phase === 'done' ? 'n = ' + items.length : (step.i > 0 ? 'i = ' + step.i : '');
-    nodes.actionTitle.textContent = step.title;
-    nodes.actionCopy.textContent = step.copy;
-    nodes.decisionNote.textContent = step.note;
-    nodes.decisionNote.hidden = !step.note;
-    nodes.comparisonCount.textContent = String(step.comparisons);
-    nodes.shiftCount.textContent = String(step.shifts);
-    nodes.passCount.textContent = String(step.completedPasses);
-    nodes.slider.max = String(steps.length - 1);
-    nodes.slider.value = String(currentIndex);
-    nodes.timelineLabel.textContent = '第 ' + (currentIndex + 1) + ' 步';
-    nodes.timelineTotal.textContent = '共 ' + steps.length + ' 步';
-    nodes.previous.disabled = currentIndex === 0;
-    nodes.next.disabled = currentIndex === steps.length - 1;
-
-    const arrayText = step.array.map(function (item, slotIndex) {
-      return item ? 'A[' + slotIndex + '] ' + tokenText(item) : 'A[' + slotIndex + '] 空位';
-    }).join('，');
-    nodes.arrayTrack.setAttribute('aria-label', '当前数组：' + arrayText);
-    updatePlayButton();
+    render();
   }
-
-  function updatePlayButton() {
-    const playing = timer !== null;
-    nodes.play.innerHTML = playing
-      ? 'Ⅱ <span>暂停</span>'
-      : '▶ <span>自动演示</span>';
-    nodes.play.setAttribute('aria-label', playing ? '暂停自动演示' : '自动演示');
+  function reducedAdvance() {
+    if (!running) return;
+    clock.t = Math.min(steps.length - 1, Math.floor(clock.t + 0.0001) + 1);
+    if (timeline) timeline.time(clock.t * BEAT, true);
+    render();
+    if (clock.t >= steps.length - 1) { pause(); return; }
+    reducedCall = window.gsap.delayedCall(0.9, reducedAdvance);
+    reducedCall.timeScale(950 / Number($('speed-select').value));
   }
-
-  function stopPlayback() {
-    if (timer !== null) {
-      window.clearInterval(timer);
-      timer = null;
-    }
-    updatePlayButton();
+  function play() {
+    if (running) { pause(); return; }
+    if (!timeline) return;
+    if (clock.t >= steps.length - 1) seek(0);
+    running = true;
+    direction = 1;
+    target = steps.length - 1;
+    controls();
+    if (reduce.checked) reducedAdvance();
+    else timeline.play();
   }
-
-  function advancePlayback() {
-    if (currentIndex >= steps.length - 1) {
-      stopPlayback();
-      return;
-    }
-    render(currentIndex + 1, true);
-    if (currentIndex >= steps.length - 1) stopPlayback();
+  function step(delta) {
+    const goal = delta > 0 ? Math.min(steps.length - 1, Math.floor(clock.t + 0.0001) + 1) : Math.max(0, Math.ceil(clock.t - 0.0001) - 1);
+    pause();
+    if (!timeline || reduce.checked) { seek(goal); return; }
+    target = goal;
+    direction = delta;
+    if (goal === clock.t) return;
+    running = true;
+    controls();
+    if (delta > 0) timeline.play();
+    else timeline.reverse();
   }
-
-  function startPlayback() {
-    if (timer !== null) {
-      stopPlayback();
-      return;
-    }
-    if (currentIndex >= steps.length - 1) render(0, false);
-    timer = window.setInterval(advancePlayback, Number(nodes.speed.value));
-    updatePlayButton();
-  }
-
-  function updateSummary() {
-    const comparisonText = mode === 'direct'
-      ? '从 i 左边的数开始逐个向左找位置；每发现一个较大的数，就把它右移一格。'
-      : '先用二分法找插入点，再把右侧的数逐个后移；查找更快，移动过程相同。';
-    nodes.modeSummary.textContent = comparisonText + ' 示例数组中有两个相同的 5（5a、5b），可以顺便检查它们的先后顺序。';
-
-    const directTrace = buildTrace(items, 'direct');
-    const directFinal = directTrace[directTrace.length - 1];
-    const binaryTrace = buildTrace(items, 'binary');
-    const binaryFinal = binaryTrace[binaryTrace.length - 1];
-    nodes.takeaway.textContent = mode === 'direct'
-      ? '本例的直接插入：比较 ' + directFinal.comparisons + ' 次，右移 ' + directFinal.shifts + ' 次。遇到相等的数就停下，因此 5a 仍在 5b 前面。'
-      : '同一组数中，折半插入比较 ' + binaryFinal.comparisons + ' 次（直接插入 ' + directFinal.comparisons + ' 次）；两者都右移 ' + binaryFinal.shifts + ' 次。二分省比较，不省移动。';
-  }
-
   function rebuild(nextMode) {
-    stopPlayback();
+    pause();
+    if (timeline) timeline.kill();
     mode = nextMode;
+    document.body.dataset.mode = mode;
     steps = buildTrace(items, mode);
-    currentIndex = 0;
-    document.querySelectorAll('.mode-button').forEach(function (button) {
-      const active = button.dataset.mode === mode;
-      button.classList.toggle('is-active', active);
-      button.setAttribute('aria-selected', active ? 'true' : 'false');
+    clock.t = 0;
+    target = null;
+    if (window.gsap) {
+      timeline = window.gsap.timeline({ paused: true, onUpdate: onTick });
+      timeline.fromTo(clock, { t: 0 }, { t: steps.length - 1, duration: (steps.length - 1) * BEAT, ease: 'none', immediateRender: true });
+      timeline.timeScale(950 / Number($('speed-select').value));
+    }
+    document.querySelectorAll('.mode-button').forEach(button => {
+      button.classList.toggle('is-active', button.dataset.mode === mode);
+      button.setAttribute('aria-selected', String(button.dataset.mode === mode));
     });
-    updateSummary();
-    render(0, false);
+    $('mode-summary').textContent = mode === 'binary' ? '先圈定区间，再定位中点、比较、移动一个边界；区间为空后才开始右移。' : '从右向左比较；较大的数逐个右移，空位向左移动，最后放回 temp。';
+    const processCopy = document.querySelectorAll('.process-step')[1].querySelector(':scope > div > span');
+    setText(processCopy, mode === 'binary' ? '折半收缩查找区间' : '从右往左比较');
+    const direct = buildTrace(items, 'direct').at(-1);
+    const binary = buildTrace(items, 'binary').at(-1);
+    $('takeaway-copy').textContent = '本例：直接比较 ' + direct.comparisons + ' 次，折半比较 ' + binary.comparisons + ' 次；都右移 ' + direct.shifts + ' 次。折半省比较，不省移动。';
+    buildCode();
+    $('step-slider').max = steps.length - 1;
+    setText($('timeline-total'), '共 ' + steps.length + ' 步');
+    $('play-button').disabled = !window.gsap;
+    $('engine-notice').hidden = Boolean(window.gsap);
+    measure();
   }
 
-  prepareItems(SAMPLE);
-  buildStaticBoard();
-  document.querySelectorAll('.mode-button').forEach(function (button) {
-    button.addEventListener('click', function () { rebuild(button.dataset.mode); });
+  document.querySelectorAll('.mode-button').forEach(button => button.addEventListener('click', () => rebuild(button.dataset.mode)));
+  $('previous-button').addEventListener('click', () => step(-1));
+  $('next-button').addEventListener('click', () => step(1));
+  $('play-button').addEventListener('click', play);
+  $('reset-button').addEventListener('click', () => seek(0));
+  $('step-slider').addEventListener('input', event => seek(reduce.checked ? Math.round(Number(event.target.value)) : Number(event.target.value)));
+  $('speed-select').addEventListener('change', () => {
+    const scale = 950 / Number($('speed-select').value);
+    if (timeline) timeline.timeScale(scale);
+    if (reducedCall) reducedCall.timeScale(scale);
   });
-  nodes.previous.addEventListener('click', function () {
-    stopPlayback();
-    render(currentIndex - 1, true);
+  function motionChanged() {
+    const resume = running;
+    pause();
+    document.body.dataset.motion = reduce.checked ? 'reduced' : 'full';
+    if (reduce.checked) seek(Math.ceil(clock.t));
+    if (resume) play();
+  }
+  reduce.addEventListener('change', motionChanged);
+  motionQuery.addEventListener('change', event => { reduce.checked = event.matches; motionChanged(); });
+  document.body.dataset.motion = reduce.checked ? 'reduced' : 'full';
+  document.addEventListener('visibilitychange', () => { if (document.hidden) pause(); });
+  document.addEventListener('keydown', event => {
+    if (event.ctrlKey || event.metaKey || event.altKey || event.target.closest('input, select, textarea, button, a')) return;
+    if (event.code === 'Space') { event.preventDefault(); play(); }
+    if (event.key === 'ArrowRight') { event.preventDefault(); step(1); }
+    if (event.key === 'ArrowLeft') { event.preventDefault(); step(-1); }
+    if (event.key === 'Home') { event.preventDefault(); seek(0); }
   });
-  nodes.next.addEventListener('click', function () {
-    stopPlayback();
-    render(currentIndex + 1, true);
-  });
-  nodes.play.addEventListener('click', startPlayback);
-  nodes.reset.addEventListener('click', function () {
-    stopPlayback();
-    render(0, false);
-  });
-  nodes.slider.addEventListener('input', function () {
-    stopPlayback();
-    render(Number(nodes.slider.value), true);
-  });
-  nodes.speed.addEventListener('change', function () {
-    if (timer !== null) {
-      stopPlayback();
-      startPlayback();
-    }
-  });
-  document.addEventListener('keydown', function (event) {
-    const target = event.target;
-    const tag = target && target.tagName ? target.tagName.toLowerCase() : '';
-    if (tag === 'input' || tag === 'select' || tag === 'button' || tag === 'textarea') return;
-    if (event.key === 'ArrowLeft') {
-      event.preventDefault();
-      stopPlayback();
-      render(currentIndex - 1, true);
-    } else if (event.key === 'ArrowRight') {
-      event.preventDefault();
-      stopPlayback();
-      render(currentIndex + 1, true);
-    } else if (event.code === 'Space' && tag !== 'a') {
-      event.preventDefault();
-      startPlayback();
-    }
-  });
-
+  new ResizeObserver(measure).observe(scene);
+  window.addEventListener('pagehide', () => { pause(); if (timeline) timeline.kill(); });
   rebuild('direct');
 })();
