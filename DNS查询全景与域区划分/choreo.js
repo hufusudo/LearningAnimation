@@ -1,3 +1,4 @@
+// 动效选用：A1、A3、B1、C1、C3、D1、E1（见 docs/motion-library.md）
 /* DNS 查询全景 · 视觉编排：所有画面都是（步骤，步内进度）的纯函数 */
 (function (root, factory) {
   const data = typeof module === 'object' && module.exports ? require('./data.js') : root.DNSData;
