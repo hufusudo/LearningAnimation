@@ -1,899 +1,251 @@
-/**
- * Single-Bus CPU Data Path Simulation Engine
- * 408 计组 · 内部单总线 + 外部系统总线 (ABUS/DBUS/CBUS)
- * 时钟节拍演进 · 控制信号矩阵 · GSAP 数据包流动
- */
-
-// ==========================================================================
-// 1. GLOBAL STATE & CONFIGURATION
-// ==========================================================================
-
-const State = {
-  currentInstruction: 'ADD_MEM',
-  currentStepIndex: 0,
-  isPlaying: false,
-  playbackSpeed: 1.0,
-  playTimer: null,
-  activeTween: null,
-
-  operandA: 21,
-  operandB: 42,
-
-  registers: {
-    PC: 0x0800,
-    MAR: 0x0800,
-    MDR: 0x00000000,
-    IR: 0x00000000,
-    Y: 0x00000000,
-    Z: 0x00000000,
-    ACC: 0x00000015,
-    R0: 0x00001008,
-    R1: 0x0000002A,
-    FLAGS: { Z: 0, C: 0, S: 0, V: 0 }
-  }
-};
-
-// 数据包颜色: 随所在总线变色 (内总线琥珀 / ABUS 蓝 / DBUS 绿)
-const BUS_TOKEN_COLORS = {
-  internal: '#F59E0B',
-  abus: '#2563EB',
-  dbus: '#059669'
-};
-
-// 全部微操作控制信号 (circuitId = 电路图上的高亮元素, 显式映射避免命名歧义)
-const ALL_SIGNALS = [
-  { id: 'PC_out',     label: 'PC_out',     circuitId: 'sig-pcout',     desc: 'PC 经三态门送内总线' },
-  { id: 'PC_in',      label: 'PC_in',      circuitId: 'sig-pcin',      desc: '总线数据打入 PC' },
-  { id: 'PC_MUX_SEL', label: 'PC_MUX_SEL', circuitId: 'sig-pcmuxsel',  desc: 'PC 多路选择器 (0:PC+4, 1:Bus)' },
-  { id: 'MAR_in',     label: 'MAR_in',     circuitId: 'sig-marin',     desc: '内总线打入 MAR' },
-  { id: 'MDR_in',     label: 'MDR_in',     circuitId: 'sig-mdrin',     desc: '内总线打入 MDR' },
-  { id: 'MDR_out',    label: 'MDR_out',    circuitId: 'sig-mdrout',    desc: 'MDR 送内总线' },
-  { id: 'MDR_inE',    label: 'MDR_inE',    circuitId: 'sig-mdrine',    desc: '外数据总线 (DBUS) 打入 MDR' },
-  { id: 'MDR_outE',   label: 'MDR_outE',   circuitId: 'sig-mdroute',   desc: 'MDR 送外数据总线' },
-  { id: 'IR_in',      label: 'IR_in',      circuitId: 'sig-irin',      desc: '内总线打入 IR' },
-  { id: 'IR_out',     label: 'IR_out',     circuitId: 'sig-irout',     desc: 'IR 地址码/立即数送内总线' },
-  { id: 'Y_in',       label: 'Y_in',       circuitId: 'sig-yin',       desc: '内总线打入暂存器 Y' },
-  { id: 'Z_in',       label: 'Z_in',       circuitId: 'sig-zin',       desc: 'ALU 结果打入暂存器 Z' },
-  { id: 'Z_out',      label: 'Z_out',      circuitId: 'sig-zout',      desc: '暂存器 Z 送内总线' },
-  { id: 'ACC_in',     label: 'ACC_in',     circuitId: 'sig-accin',     desc: '内总线打入 ACC' },
-  { id: 'ACC_out',    label: 'ACC_out',    circuitId: 'sig-accout',    desc: 'ACC 送内总线' },
-  { id: 'R0_out',     label: 'R0_out',     circuitId: 'sig-r0out',     desc: 'R0 送内总线' },
-  { id: 'R1_out',     label: 'R1_out',     circuitId: 'sig-r1out',     desc: 'R1 送内总线' },
-  { id: 'ALU_ADD',    label: 'ALU_ADD',    circuitId: 'sig-aluadd',    desc: 'ALU 执行加法' },
-  { id: 'MEM_Read',   label: 'MEM_Read',   circuitId: 'sig-memread',   desc: '主存读命令 (经 CBUS)' },
-  { id: 'MEM_Write',  label: 'MEM_Write',  circuitId: 'sig-memwrite',  desc: '主存写命令 (经 CBUS)' }
-];
-
-const SIGNAL_CIRCUIT_MAP = Object.fromEntries(ALL_SIGNALS.map(s => [s.id, s.circuitId]));
-
-function toHex32(val) {
-  return '0x' + ((val >>> 0).toString(16).toUpperCase().padStart(8, '0'));
-}
-function toHex16(val) {
-  return '0x' + ((val & 0xFFFF).toString(16).toUpperCase().padStart(4, '0'));
-}
-
-// ==========================================================================
-// 2. INSTRUCTION MICRO-STEP SPECIFICATIONS
-//    flowPath: 数据包 GSAP 轨道 (与 index.html SVG 几何一致)
-//    busType:  internal | abus | dbus (决定数据包颜色)
-// ==========================================================================
-
-function getInstructionSteps(instType, opA, opB) {
-  const sum = (opA + opB) & 0xFFFFFFFF;
-  const isZero = sum === 0 ? 1 : 0;
-  const isNegative = (sum & 0x80000000) !== 0 ? 1 : 0;
-  const carry = (opA + opB) > 0xFFFFFFFF ? 1 : 0;
-  const signA = (opA >> 31) & 1;
-  const signB = (opB >> 31) & 1;
-  const signRes = (sum >> 31) & 1;
-  const overflow = (signA === signB && signA !== signRes) ? 1 : 0;
-  const flagsResult = { Z: isZero, C: carry, S: isNegative, V: overflow };
-
-  // ---- 取指周期 T0-T3 (公共) ----
-  const fetchSteps = [
-    {
-      id: 'T0',
-      phase: '取指周期 (Fetch)',
-      phaseBadgeClass: 'bg-blue-100 text-blue-800',
-      rtl: '(PC) → MAR    ；PC_out = 1, MAR_in = 1',
-      signals: ['PC_out', 'MAR_in'],
-      action: 'PC 中的指令首地址经三态门送上内部单总线，MAR 输入门开启，在时钟上升沿将地址 0x0800 打入 MAR。',
-      sourceComponent: 'box-pc',
-      targetComponent: 'box-mar',
-      activeGate: 'gate-pcout',
-      activeWires: ['wire-pc-to-bus', 'bus-internal-trunk', 'wire-bus-to-mar'],
-      flowPath: [{ x: 478, y: 130 }, { x: 622, y: 130 }],
-      busType: 'internal',
-      tokenVal: '0x0800',
-      registersAfter: { PC: 0x0800, MAR: 0x0800 },
-      memoryHighlight: null,
-      memoryState: '空闲 (IDLE)'
-    },
-    {
-      id: 'T1',
-      phase: '取指周期 (Fetch)',
-      phaseBadgeClass: 'bg-blue-100 text-blue-800',
-      rtl: '1 → R (经 CBUS), (PC) + 4 → PC (经专用加法器与 MUX)',
-      signals: ['MEM_Read', 'PC_MUX_SEL', 'PC_in'],
-      action: 'CU 经控制总线 CBUS 向主存发出读命令 (MEM_Read)；MAR 中的地址经地址总线 ABUS 送入主存译码。同时专用 +4 加法器完成 PC 自增，经 PC-MUX 打入 PC，不占用内总线与 ALU。',
-      sourceComponent: 'box-mar',
-      targetComponent: 'comp-main-memory',
-      activeGate: null,
-      activeWires: ['wire-mar-to-abus', 'bus-abus-trunk', 'wire-cbus', 'bus-cbus-trunk', 'wire-pc-to-adder', 'wire-adder-to-mux', 'wire-mux-to-pc'],
-      flowPath: [{ x: 762, y: 130 }, { x: 910, y: 130 }, { x: 1055, y: 105 }],
-      busType: 'abus',
-      tokenVal: '0x0800',
-      registersAfter: { PC: 0x0804, MAR: 0x0800 },
-      memoryHighlight: '0800',
-      memoryState: '正在读取指令 (READING)'
-    },
-    {
-      id: 'T2',
-      phase: '取指周期 (Fetch)',
-      phaseBadgeClass: 'bg-blue-100 text-blue-800',
-      rtl: 'M(MAR) → MDR    ；MDR_inE = 1 (DBUS → MDR)',
-      signals: ['MEM_Read', 'MDR_inE'],
-      action: '主存将 0x0800 处的 32 位指令机器码 0x02001008 送上外部数据总线 DBUS，MDR 开启外总线输入门 (MDR_inE) 将其锁存 —— 主存数据经 DBUS 流入 CPU。',
-      sourceComponent: 'comp-main-memory',
-      targetComponent: 'box-mdr',
-      activeGate: null,
-      activeWires: ['bus-dbus-trunk', 'wire-mdr-to-dbus', 'wire-cbus', 'bus-cbus-trunk'],
-      flowPath: [{ x: 1055, y: 400 }, { x: 1055, y: 330 }, { x: 910, y: 330 }, { x: 800, y: 330 }, { x: 778, y: 330 }],
-      busType: 'dbus',
-      tokenVal: '0x02001008',
-      registersAfter: { MDR: 0x02001008 },
-      memoryHighlight: '0800',
-      memoryState: '指令已就绪 (READY)'
-    },
-    {
-      id: 'T3',
-      phase: '取指周期 (Fetch)',
-      phaseBadgeClass: 'bg-blue-100 text-blue-800',
-      rtl: '(MDR) → IR    ；MDR_out = 1, IR_in = 1，CU 译码',
-      signals: ['MDR_out', 'IR_in'],
-      action: 'MDR 开启内总线侧三态门，将指令机器码送上内部单总线，IR 输入门锁存指令，CU 随即完成操作码译码。取指周期结束。',
-      sourceComponent: 'box-mdr',
-      targetComponent: 'box-ir',
-      activeGate: 'gate-mdrout',
-      activeWires: ['wire-mdr-to-bus', 'bus-internal-trunk', 'wire-bus-to-ir'],
-      flowPath: [{ x: 620, y: 350 }, { x: 560, y: 350 }, { x: 260, y: 345 }],
-      busType: 'internal',
-      tokenVal: '0x02001008',
-      registersAfter: { IR: 0x02001008 },
-      memoryHighlight: null,
-      memoryState: '空闲 (IDLE)'
-    }
-  ];
-
-  if (instType === 'ADD_MEM') {
-    return [
-      ...fetchSteps,
-      {
-        id: 'T4',
-        phase: '取操作数周期 (Operand Fetch)',
-        phaseBadgeClass: 'bg-amber-100 text-amber-800',
-        rtl: 'Ad(IR) → MAR    ；IR_out = 1, MAR_in = 1',
-        signals: ['IR_out', 'MAR_in'],
-        action: 'IR 中的形式地址字段 0x1008 经三态门送上内部单总线，MAR 输入门接收该操作数主存地址。',
-        sourceComponent: 'box-ir',
-        targetComponent: 'box-mar',
-        activeGate: 'gate-irout',
-        activeWires: ['wire-ir-to-bus', 'bus-internal-trunk', 'wire-bus-to-mar'],
-        flowPath: [{ x: 260, y: 310 }, { x: 560, y: 310 }, { x: 560, y: 130 }, { x: 622, y: 130 }],
-        busType: 'internal',
-        tokenVal: '0x1008',
-        registersAfter: { MAR: 0x1008 },
-        memoryHighlight: null,
-        memoryState: '空闲 (IDLE)'
-      },
-      {
-        id: 'T5',
-        phase: '取操作数周期 (Operand Fetch)',
-        phaseBadgeClass: 'bg-amber-100 text-amber-800',
-        rtl: '1 → R, M(MAR) → MDR    ；MDR_inE = 1',
-        signals: ['MEM_Read', 'MDR_inE'],
-        action: 'MAR 地址 0x1008 经 ABUS 送主存译码 (绿色数据包为地址流向，随后主存读出操作数)；读出的操作数 B 经外部数据总线 DBUS 流入 MDR。',
-        sourceComponent: 'comp-main-memory',
-        targetComponent: 'box-mdr',
-        activeGate: null,
-        activeWires: ['wire-mar-to-abus', 'bus-abus-trunk', 'bus-dbus-trunk', 'wire-mdr-to-dbus', 'wire-cbus', 'bus-cbus-trunk'],
-        flowPath: [{ x: 1055, y: 400 }, { x: 1055, y: 330 }, { x: 910, y: 330 }, { x: 800, y: 330 }, { x: 778, y: 330 }],
-        busType: 'dbus',
-        tokenVal: toHex32(opB),
-        registersAfter: { MDR: opB },
-        memoryHighlight: '1008',
-        memoryState: '操作数读取完毕 (READY)'
-      },
-      {
-        id: 'T6',
-        phase: '准备操作数 (Operand Buffer)',
-        phaseBadgeClass: 'bg-amber-100 text-amber-800',
-        rtl: '(MDR) → Y    ；MDR_out = 1, Y_in = 1',
-        signals: ['MDR_out', 'Y_in'],
-        action: 'MDR 打开内总线三态门，将操作数 B 送上内部单总线，暂存器 Y 输入门将其锁存。单总线同一时刻只能传一个数，所以必须先缓存到 Y。',
-        sourceComponent: 'box-mdr',
-        targetComponent: 'box-y',
-        activeGate: 'gate-mdrout',
-        activeWires: ['wire-mdr-to-bus', 'bus-internal-trunk', 'wire-bus-to-y'],
-        flowPath: [{ x: 620, y: 350 }, { x: 560, y: 350 }, { x: 560, y: 465 }, { x: 502, y: 465 }],
-        busType: 'internal',
-        tokenVal: toHex32(opB),
-        registersAfter: { Y: opB },
-        memoryHighlight: null,
-        memoryState: '空闲 (IDLE)'
-      },
-      {
-        id: 'T7',
-        phase: '执行周期 (Execute ALU)',
-        phaseBadgeClass: 'bg-emerald-100 text-emerald-800',
-        rtl: '(ACC) + (Y) → Z    ；ACC_out = 1, ALU_ADD = 1, Z_in = 1',
-        signals: ['ACC_out', 'ALU_ADD', 'Z_in'],
-        action: 'ACC 经内总线提供操作数 (流入 ALU 端口 B)，Y 提供另一操作数 (端口 A)；ALU 执行加法，结果打入输出暂存器 Z，标志位 ZF/CF/SF/OF 同步生成。',
-        sourceComponent: 'box-acc',
-        targetComponent: 'box-z',
-        activeGate: 'gate-accout',
-        activeWires: ['wire-acc-to-bus', 'bus-internal-trunk', 'wire-bus-to-alu', 'wire-y-to-alu', 'wire-alu-to-z'],
-        flowPath: [{ x: 180, y: 888 }, { x: 560, y: 888 }, { x: 560, y: 600 }, { x: 479, y: 600 }, { x: 425, y: 648 }],
-        busType: 'internal',
-        tokenVal: toHex32(sum),
-        registersAfter: { Z: sum, FLAGS: flagsResult },
-        memoryHighlight: null,
-        memoryState: '空闲 (IDLE)'
-      },
-      {
-        id: 'T8',
-        phase: '写回周期 (Writeback)',
-        phaseBadgeClass: 'bg-purple-100 text-purple-800',
-        rtl: '(Z) → ACC    ；Z_out = 1, ACC_in = 1',
-        signals: ['Z_out', 'ACC_in'],
-        action: '暂存器 Z 打开三态门，将加法结果送上内部单总线，ACC 输入门打入新值。指令周期执行完毕。',
-        sourceComponent: 'box-z',
-        targetComponent: 'box-acc',
-        activeGate: 'gate-zout',
-        activeWires: ['wire-z-to-bus', 'bus-internal-trunk', 'wire-bus-to-acc'],
-        flowPath: [{ x: 497, y: 678 }, { x: 560, y: 678 }, { x: 560, y: 868 }, { x: 182, y: 868 }],
-        busType: 'internal',
-        tokenVal: toHex32(sum),
-        registersAfter: { ACC: sum },
-        memoryHighlight: null,
-        memoryState: '空闲 (IDLE)'
-      }
-    ];
-  }
-
-  if (instType === 'ADD_INDIRECT') {
-    return [
-      ...fetchSteps,
-      {
-        id: 'T4',
-        phase: '间址周期 (Indirect)',
-        phaseBadgeClass: 'bg-amber-100 text-amber-800',
-        rtl: '(R0) → MAR    ；R0_out = 1, MAR_in = 1',
-        signals: ['R0_out', 'MAR_in'],
-        action: 'R0 中存放的操作数有效地址 0x1008 送上内总线，打入 MAR。寄存器间接寻址：寄存器内容是操作数的主存地址。',
-        sourceComponent: 'box-r0',
-        targetComponent: 'box-mar',
-        activeGate: 'gate-r0out',
-        activeWires: ['wire-r0-to-bus', 'bus-internal-trunk', 'wire-bus-to-mar'],
-        flowPath: [{ x: 180, y: 728 }, { x: 560, y: 728 }, { x: 560, y: 130 }, { x: 622, y: 130 }],
-        busType: 'internal',
-        tokenVal: '0x1008',
-        registersAfter: { MAR: 0x1008 },
-        memoryHighlight: null,
-        memoryState: '空闲 (IDLE)'
-      },
-      {
-        id: 'T5',
-        phase: '取操作数周期 (Operand Fetch)',
-        phaseBadgeClass: 'bg-amber-100 text-amber-800',
-        rtl: '1 → R, M(MAR) → MDR    ；MDR_inE = 1',
-        signals: ['MEM_Read', 'MDR_inE'],
-        action: 'CU 经 CBUS 发读命令，MAR 地址经 ABUS 送主存译码，读出的操作数 B 经 DBUS 流入 MDR。',
-        sourceComponent: 'comp-main-memory',
-        targetComponent: 'box-mdr',
-        activeGate: null,
-        activeWires: ['wire-mar-to-abus', 'bus-abus-trunk', 'bus-dbus-trunk', 'wire-mdr-to-dbus', 'wire-cbus', 'bus-cbus-trunk'],
-        flowPath: [{ x: 1055, y: 400 }, { x: 1055, y: 330 }, { x: 910, y: 330 }, { x: 800, y: 330 }, { x: 778, y: 330 }],
-        busType: 'dbus',
-        tokenVal: toHex32(opB),
-        registersAfter: { MDR: opB },
-        memoryHighlight: '1008',
-        memoryState: '操作数就绪 (READY)'
-      },
-      {
-        id: 'T6',
-        phase: '准备操作数 (Operand Buffer)',
-        phaseBadgeClass: 'bg-amber-100 text-amber-800',
-        rtl: '(MDR) → Y    ；MDR_out = 1, Y_in = 1',
-        signals: ['MDR_out', 'Y_in'],
-        action: 'MDR 经内总线将操作数 B 送入暂存器 Y 锁存，为 ALU 运算做准备。',
-        sourceComponent: 'box-mdr',
-        targetComponent: 'box-y',
-        activeGate: 'gate-mdrout',
-        activeWires: ['wire-mdr-to-bus', 'bus-internal-trunk', 'wire-bus-to-y'],
-        flowPath: [{ x: 620, y: 350 }, { x: 560, y: 350 }, { x: 560, y: 465 }, { x: 502, y: 465 }],
-        busType: 'internal',
-        tokenVal: toHex32(opB),
-        registersAfter: { Y: opB },
-        memoryHighlight: null,
-        memoryState: '空闲 (IDLE)'
-      },
-      {
-        id: 'T7',
-        phase: '执行周期 (Execute ALU)',
-        phaseBadgeClass: 'bg-emerald-100 text-emerald-800',
-        rtl: '(ACC) + (Y) → Z    ；ACC_out = 1, ALU_ADD = 1, Z_in = 1',
-        signals: ['ACC_out', 'ALU_ADD', 'Z_in'],
-        action: 'ACC 经内总线送入 ALU，与 Y 中操作数相加，结果锁存至 Z，标志位同步更新。',
-        sourceComponent: 'box-acc',
-        targetComponent: 'box-z',
-        activeGate: 'gate-accout',
-        activeWires: ['wire-acc-to-bus', 'bus-internal-trunk', 'wire-bus-to-alu', 'wire-y-to-alu', 'wire-alu-to-z'],
-        flowPath: [{ x: 180, y: 888 }, { x: 560, y: 888 }, { x: 560, y: 600 }, { x: 479, y: 600 }, { x: 425, y: 648 }],
-        busType: 'internal',
-        tokenVal: toHex32(sum),
-        registersAfter: { Z: sum, FLAGS: flagsResult },
-        memoryHighlight: null,
-        memoryState: '空闲 (IDLE)'
-      },
-      {
-        id: 'T8',
-        phase: '写回周期 (Writeback)',
-        phaseBadgeClass: 'bg-purple-100 text-purple-800',
-        rtl: '(Z) → ACC    ；Z_out = 1, ACC_in = 1',
-        signals: ['Z_out', 'ACC_in'],
-        action: '暂存器 Z 经内总线将结果写回 ACC，指令执行完成。',
-        sourceComponent: 'box-z',
-        targetComponent: 'box-acc',
-        activeGate: 'gate-zout',
-        activeWires: ['wire-z-to-bus', 'bus-internal-trunk', 'wire-bus-to-acc'],
-        flowPath: [{ x: 497, y: 678 }, { x: 560, y: 678 }, { x: 560, y: 868 }, { x: 182, y: 868 }],
-        busType: 'internal',
-        tokenVal: toHex32(sum),
-        registersAfter: { ACC: sum },
-        memoryHighlight: null,
-        memoryState: '空闲 (IDLE)'
-      }
-    ];
-  }
-
-  if (instType === 'ADD_REG') {
-    return [
-      ...fetchSteps,
-      {
-        id: 'T4',
-        phase: '取操作数 (Register Fetch)',
-        phaseBadgeClass: 'bg-amber-100 text-amber-800',
-        rtl: '(R1) → Y    ；R1_out = 1, Y_in = 1',
-        signals: ['R1_out', 'Y_in'],
-        action: '寄存器 R1 中的操作数直接经内总线送入暂存器 Y 锁存，全程无需访问主存。',
-        sourceComponent: 'box-r1',
-        targetComponent: 'box-y',
-        activeGate: 'gate-r1out',
-        activeWires: ['wire-r1-to-bus', 'bus-internal-trunk', 'wire-bus-to-y'],
-        flowPath: [{ x: 180, y: 802 }, { x: 560, y: 802 }, { x: 560, y: 465 }, { x: 502, y: 465 }],
-        busType: 'internal',
-        tokenVal: toHex32(opB),
-        registersAfter: { Y: opB },
-        memoryHighlight: null,
-        memoryState: '空闲 (IDLE)'
-      },
-      {
-        id: 'T5',
-        phase: '执行周期 (Execute ALU)',
-        phaseBadgeClass: 'bg-emerald-100 text-emerald-800',
-        rtl: '(ACC) + (Y) → Z    ；ACC_out = 1, ALU_ADD = 1, Z_in = 1',
-        signals: ['ACC_out', 'ALU_ADD', 'Z_in'],
-        action: 'ACC 经内总线送入 ALU 与 Y 中操作数相加，结果锁存至 Z。',
-        sourceComponent: 'box-acc',
-        targetComponent: 'box-z',
-        activeGate: 'gate-accout',
-        activeWires: ['wire-acc-to-bus', 'bus-internal-trunk', 'wire-bus-to-alu', 'wire-y-to-alu', 'wire-alu-to-z'],
-        flowPath: [{ x: 180, y: 888 }, { x: 560, y: 888 }, { x: 560, y: 600 }, { x: 479, y: 600 }, { x: 425, y: 648 }],
-        busType: 'internal',
-        tokenVal: toHex32(sum),
-        registersAfter: { Z: sum, FLAGS: flagsResult },
-        memoryHighlight: null,
-        memoryState: '空闲 (IDLE)'
-      },
-      {
-        id: 'T6',
-        phase: '写回周期 (Writeback)',
-        phaseBadgeClass: 'bg-purple-100 text-purple-800',
-        rtl: '(Z) → ACC    ；Z_out = 1, ACC_in = 1',
-        signals: ['Z_out', 'ACC_in'],
-        action: '暂存器 Z 经内总线将结果写回 ACC，寄存器寻址加法指令完成（不访存，总节拍数最少）。',
-        sourceComponent: 'box-z',
-        targetComponent: 'box-acc',
-        activeGate: 'gate-zout',
-        activeWires: ['wire-z-to-bus', 'bus-internal-trunk', 'wire-bus-to-acc'],
-        flowPath: [{ x: 497, y: 678 }, { x: 560, y: 678 }, { x: 560, y: 868 }, { x: 182, y: 868 }],
-        busType: 'internal',
-        tokenVal: toHex32(sum),
-        registersAfter: { ACC: sum },
-        memoryHighlight: null,
-        memoryState: '空闲 (IDLE)'
-      }
-    ];
-  }
-
-  // ADD_IMM
-  return [
-    ...fetchSteps,
-    {
-      id: 'T4',
-      phase: '取立即数 (Immediate)',
-      phaseBadgeClass: 'bg-amber-100 text-amber-800',
-      rtl: 'Ad(IR) → Y    ；IR_out = 1, Y_in = 1',
-      signals: ['IR_out', 'Y_in'],
-      action: 'IR 中的立即数字段直接经内总线送入暂存器 Y，操作数随指令一起取出，无需再次访存。',
-      sourceComponent: 'box-ir',
-      targetComponent: 'box-y',
-      activeGate: 'gate-irout',
-      activeWires: ['wire-ir-to-bus', 'bus-internal-trunk', 'wire-bus-to-y'],
-      flowPath: [{ x: 260, y: 310 }, { x: 560, y: 310 }, { x: 560, y: 465 }, { x: 502, y: 465 }],
-      busType: 'internal',
-      tokenVal: toHex32(opB),
-      registersAfter: { Y: opB },
-      memoryHighlight: null,
-      memoryState: '空闲 (IDLE)'
-    },
-    {
-      id: 'T5',
-      phase: '执行周期 (Execute ALU)',
-      phaseBadgeClass: 'bg-emerald-100 text-emerald-800',
-      rtl: '(ACC) + (Y) → Z    ；ACC_out = 1, ALU_ADD = 1, Z_in = 1',
-      signals: ['ACC_out', 'ALU_ADD', 'Z_in'],
-      action: 'ACC 经内总线送入 ALU 与立即数相加，结果锁存至 Z。',
-      sourceComponent: 'box-acc',
-      targetComponent: 'box-z',
-      activeGate: 'gate-accout',
-      activeWires: ['wire-acc-to-bus', 'bus-internal-trunk', 'wire-bus-to-alu', 'wire-y-to-alu', 'wire-alu-to-z'],
-      flowPath: [{ x: 180, y: 888 }, { x: 560, y: 888 }, { x: 560, y: 600 }, { x: 479, y: 600 }, { x: 425, y: 648 }],
-      busType: 'internal',
-      tokenVal: toHex32(sum),
-      registersAfter: { Z: sum, FLAGS: flagsResult },
-      memoryHighlight: null,
-      memoryState: '空闲 (IDLE)'
-    },
-    {
-      id: 'T6',
-      phase: '写回周期 (Writeback)',
-      phaseBadgeClass: 'bg-purple-100 text-purple-800',
-      rtl: '(Z) → ACC    ；Z_out = 1, ACC_in = 1',
-      signals: ['Z_out', 'ACC_in'],
-      action: '暂存器 Z 经内总线将结果写回 ACC，立即寻址加法指令完成。',
-      sourceComponent: 'box-z',
-      targetComponent: 'box-acc',
-      activeGate: 'gate-zout',
-      activeWires: ['wire-z-to-bus', 'bus-internal-trunk', 'wire-bus-to-acc'],
-      flowPath: [{ x: 497, y: 678 }, { x: 560, y: 678 }, { x: 560, y: 868 }, { x: 182, y: 868 }],
-      busType: 'internal',
-      tokenVal: toHex32(sum),
-      registersAfter: { ACC: sum },
-      memoryHighlight: null,
-      memoryState: '空闲 (IDLE)'
-    }
-  ];
-}
-
-// ==========================================================================
-// 3. UI INITIALIZATION
-// ==========================================================================
-
-function initSignalMatrix() {
-  const container = document.getElementById('signal-matrix-grid');
-  container.innerHTML = '';
-  ALL_SIGNALS.forEach(sig => {
-    const badge = document.createElement('div');
-    badge.id = `badge-sig-${sig.id}`;
-    badge.className = 'signal-badge inactive flex items-center justify-between taste-tooltip-box';
-    badge.innerHTML = `
-      <span>${sig.label}</span>
-      <span class="text-[9px] opacity-70 font-mono-num sig-val">0</span>
-      <span class="taste-tooltip-content">${sig.desc}</span>
-    `;
-    container.appendChild(badge);
-  });
-}
-
-function initTimeline() {
-  const steps = getInstructionSteps(State.currentInstruction, State.operandA, State.operandB);
-  const container = document.getElementById('timeline-container');
-  container.innerHTML = '';
-
-  steps.forEach((step, idx) => {
-    const btn = document.createElement('button');
-    btn.className = `timeline-node px-3 py-1.5 rounded-xl border text-xs font-mono font-bold flex flex-col items-center gap-0.5 min-w-[72px] transition ${idx === 0 ? 'current' : 'future'}`;
-    btn.dataset.index = idx;
-    btn.innerHTML = `
-      <span>${step.id}</span>
-      <span class="text-[9px] font-normal opacity-80">${step.phase.split(' ')[0]}</span>
-    `;
-    btn.addEventListener('click', () => {
-      pausePlayback();
-      goToStep(idx);
-    });
-    container.appendChild(btn);
-  });
-}
-
-function updateTimelineView(currIdx) {
-  document.querySelectorAll('.timeline-node').forEach((node, idx) => {
-    node.classList.remove('current', 'passed', 'future');
-    if (idx === currIdx) node.classList.add('current');
-    else if (idx < currIdx) node.classList.add('passed');
-    else node.classList.add('future');
-  });
-}
-
-let lastRenderedRegs = {};
-
-function updateRegisterTable() {
-  const regs = [
-    { name: 'PC', hex: toHex16(State.registers.PC), desc: '下一条指令地址' },
-    { name: 'MAR', hex: toHex16(State.registers.MAR), desc: 'ABUS 地址输出源' },
-    { name: 'MDR', hex: toHex32(State.registers.MDR), desc: 'DBUS 双向中继' },
-    { name: 'IR', hex: toHex32(State.registers.IR), desc: '操作码 + 地址码' },
-    { name: 'Y', hex: toHex32(State.registers.Y), desc: 'ALU 输入暂存' },
-    { name: 'Z', hex: toHex32(State.registers.Z), desc: 'ALU 输出暂存' },
-    { name: 'ACC', hex: toHex32(State.registers.ACC), desc: '累加器' },
-    { name: 'R0', hex: toHex32(State.registers.R0), desc: '间址指针 0x1008' },
-    { name: 'R1', hex: toHex32(State.registers.R1), desc: '通用寄存器' },
-    { name: 'FLAGS', hex: `Z${State.registers.FLAGS.Z} C${State.registers.FLAGS.C} S${State.registers.FLAGS.S} V${State.registers.FLAGS.V}`, desc: '零/进位/符号/溢出' }
-  ];
-
-  document.getElementById('register-table-body').innerHTML = regs.map(r => {
-    const isChanged = lastRenderedRegs[r.name] !== undefined && lastRenderedRegs[r.name] !== r.hex;
-    return `
-      <tr class="${isChanged ? 'bg-amber-100/60 transition-colors duration-500' : ''}">
-        <td class="py-1 font-bold text-stone-900">${r.name}</td>
-        <td class="py-1 font-mono-num ${isChanged ? 'text-blue-600 font-bold' : 'text-amber-700 font-semibold'}">${r.hex}</td>
-        <td class="py-1 text-stone-500 text-[11px]">${r.desc}</td>
-      </tr>
-    `;
-  }).join('');
-
-  // 触发 SVG 内寄存器数值跳变动效
-  regs.forEach(r => {
-    const svgVal = document.getElementById(`val-${r.name.toLowerCase()}`);
-    if (svgVal) {
-      svgVal.textContent = r.hex;
-      if (lastRenderedRegs[r.name] !== undefined && lastRenderedRegs[r.name] !== r.hex) {
-        gsap.fromTo(svgVal, { fill: '#2563EB', scale: 1.25 }, { fill: '#B45309', scale: 1.0, duration: 0.4, ease: 'back.out(2)' });
-      }
-    }
-    lastRenderedRegs[r.name] = r.hex;
-  });
-
-  document.getElementById('flag-z').textContent = State.registers.FLAGS.Z;
-  document.getElementById('flag-c').textContent = State.registers.FLAGS.C;
-  document.getElementById('flag-s').textContent = State.registers.FLAGS.S;
-  document.getElementById('flag-v').textContent = State.registers.FLAGS.V;
-}
-
-// ==========================================================================
-// 4. STEP RENDERING (GSAP)
-// ==========================================================================
-
-function clearActiveVisuals() {
-  document.querySelectorAll('.bus-internal-wire, .bus-abus-line, .bus-dbus-line, .bus-cbus-line, .bus-trunk').forEach(el => {
-    el.classList.remove('active', 'flow-animating');
-  });
-  document.querySelectorAll('.component-box').forEach(el => {
-    el.classList.remove('highlight-in', 'highlight-out', 'highlight-active');
-  });
-  document.querySelectorAll('.tristate-gate').forEach(el => el.classList.remove('open'));
-  document.querySelectorAll('#cpu-svg .signal-badge, #cpu-svg .pin-label').forEach(el => {
-    el.classList.remove('active');
-    el.classList.add('inactive');
-  });
-  ALL_SIGNALS.forEach(sig => {
-    const badge = document.getElementById(`badge-sig-${sig.id}`);
-    if (badge) {
-      badge.classList.remove('active');
-      badge.classList.add('inactive');
-      badge.querySelector('.sig-val').textContent = '0';
-    }
-  });
-  gsap.set(document.getElementById('data-packet'), { opacity: 0 });
-  document.querySelectorAll('.memory-svg-row rect').forEach(rect => {
-    rect.setAttribute('fill', '#F8FAFC');
-    rect.setAttribute('stroke', '#E2E8F0');
-  });
-}
-
-function applyStep(step, animate = true) {
-  clearActiveVisuals();
-
-  // 1. 文本区
-  document.getElementById('badge-phase').textContent = step.phase;
-  document.getElementById('badge-phase').className = `px-2 py-0.5 rounded text-[11px] font-mono font-bold ${step.phaseBadgeClass}`;
-  document.getElementById('badge-cycle-num').textContent = `${step.id} 时钟节拍`;
-  document.getElementById('rtl-formula').textContent = step.rtl;
-  document.getElementById('hardware-action-desc').textContent = step.action;
-  document.getElementById('canvas-status-step').textContent = `时钟周期: ${step.id} (${step.phase.split(' ')[0]})`;
-  document.getElementById('canvas-status-rtl').textContent = `微操作: ${step.rtl}`;
-
-  // 2. 控制信号 (矩阵 + 电路图, 经显式 circuitId 映射)
-  step.signals.forEach(sigId => {
-    const matrixBadge = document.getElementById(`badge-sig-${sigId}`);
-    if (matrixBadge) {
-      matrixBadge.classList.remove('inactive');
-      matrixBadge.classList.add('active');
-      matrixBadge.querySelector('.sig-val').textContent = '1';
-    }
-    const circuitElId = SIGNAL_CIRCUIT_MAP[sigId];
-    if (circuitElId) {
-      const el = document.getElementById(circuitElId);
-      if (el) {
-        el.classList.remove('inactive');
-        el.classList.add('active');
-      }
-    }
-  });
-  document.getElementById('active-signals-count').textContent = `有效: ${step.signals.length} 个`;
-
-  // 3. 导线与总线高亮
-  step.activeWires.forEach(wireId => {
-    const el = document.getElementById(wireId);
-    if (el) el.classList.add('active', 'flow-animating');
-  });
-
-  // 4. 三态门
-  if (step.activeGate) {
-    const gateEl = document.getElementById(step.activeGate);
-    if (gateEl) gateEl.classList.add('open');
-  }
-
-  // 5. 源/目标部件高亮
-  if (step.sourceComponent) {
-    const src = document.getElementById(step.sourceComponent);
-    if (src) src.classList.add('highlight-out');
-  }
-  if (step.targetComponent) {
-    const tgt = document.getElementById(step.targetComponent);
-    if (tgt) tgt.classList.add('highlight-in');
-  }
-
-  // 6. 寄存器状态
-  if (step.registersAfter) {
-    Object.assign(State.registers, step.registersAfter);
-  }
-  updateRegisterTable();
-
-  // 7. 主存高亮 + 译码地址
-  document.getElementById('mem-decoded-addr').textContent = `MAR = ${toHex16(State.registers.MAR)}`;
-  if (step.memoryHighlight) {
-    const memRow = document.getElementById(`mem-row-${step.memoryHighlight}`);
-    if (memRow) {
-      const rect = memRow.querySelector('rect');
-      if (rect) {
-        rect.setAttribute('fill', '#EFF6FF');
-        rect.setAttribute('stroke', '#3B82F6');
-      }
-    }
-    document.getElementById('mem-decoded-addr').textContent = `MAR = 0x${step.memoryHighlight}`;
-  }
-  const memLed = document.getElementById('mem-status-led');
-  const memText = document.getElementById('mem-status-text');
-  memText.textContent = `存储器状态: ${step.memoryState}`;
-  if (step.signals.includes('MEM_Read')) memLed.setAttribute('fill', '#10B981');
-  else if (step.signals.includes('MEM_Write')) memLed.setAttribute('fill', '#EF4444');
-  else memLed.setAttribute('fill', '#94A3B8');
-
-  // 更新时钟周期指示灯状态 (Taste-Skill 呼吸脉冲)
-  const canvasLed = document.getElementById('canvas-status-led');
-  if (canvasLed) {
-    canvasLed.className = 'pulse-led ' + (
-      step.phase.includes('取指') ? 'pulse-led-amber' :
-      step.phase.includes('间址') ? 'pulse-led-rose' : 'pulse-led-emerald'
-    );
-  }
-
-  // 8. GSAP 数据包流动 (颜色随所在总线变化，带微弹性触觉反馈)
-  if (animate && step.flowPath && step.flowPath.length >= 2) {
-    const packet = document.getElementById('data-packet');
-    const packetBody = document.getElementById('packet-body');
-    const packetText = document.getElementById('data-packet-text');
-    packetText.textContent = step.tokenVal;
-    packetBody.setAttribute('fill', BUS_TOKEN_COLORS[step.busType] || BUS_TOKEN_COLORS.internal);
-
-    const dur = 1.0 / State.playbackSpeed;
-    const path = step.flowPath;
-
-    gsap.set(packet, { x: path[0].x, y: path[0].y, opacity: 0, scale: 0.5 });
-
-    const tl = gsap.timeline();
-    tl.to(packet, { opacity: 1, scale: 1, duration: 0.22 * dur, ease: 'back.out(1.8)' });
-    for (let i = 1; i < path.length; i++) {
-      tl.to(packet, {
-        x: path[i].x,
-        y: path[i].y,
-        duration: (0.7 * dur) / (path.length - 1),
-        ease: 'power2.inOut'
-      });
-    }
-    tl.to(packet, {
-      opacity: 0,
-      scale: 0.5,
-      duration: 0.18 * dur,
-      ease: 'power2.in',
-      onComplete: () => {
-        if (step.targetComponent) {
-          const tgt = document.getElementById(step.targetComponent);
-          if (tgt) {
-            // GSAP 弹性回弹打入动效 (Tactile clock-in bounce)
-            gsap.timeline()
-              .to(tgt, { scale: 1.04, duration: 0.12, ease: 'back.out(2)' })
-              .to(tgt, { scale: 1.0, duration: 0.2, ease: 'power2.out' });
-          }
-        }
-      }
-    });
-
-    if (State.activeTween) State.activeTween.kill();
-    State.activeTween = tl;
-  }
-}
-
-function goToStep(index, animate = true) {
-  const steps = getInstructionSteps(State.currentInstruction, State.operandA, State.operandB);
-  if (index < 0 || index >= steps.length) return;
-
-  State.currentStepIndex = index;
-  updateTimelineView(index);
-
-  // 重放累积状态至当前节拍
-  resetHardwareState();
-  for (let i = 0; i <= index; i++) {
-    if (steps[i].registersAfter) Object.assign(State.registers, steps[i].registersAfter);
-  }
-
-  applyStep(steps[index], animate);
-}
-
-function nextStep() {
-  const steps = getInstructionSteps(State.currentInstruction, State.operandA, State.operandB);
-  if (State.currentStepIndex < steps.length - 1) {
-    goToStep(State.currentStepIndex + 1, true);
-  } else if (State.isPlaying) {
-    goToStep(0, true);
-  }
-}
-
-function prevStep() {
-  if (State.currentStepIndex > 0) goToStep(State.currentStepIndex - 1, true);
-}
-
-// ==========================================================================
-// 5. PLAYBACK
-// ==========================================================================
-
-function startPlayback() {
-  State.isPlaying = true;
-  const iconSvg = document.getElementById('play-icon-svg');
-  if (iconSvg) {
-    iconSvg.innerHTML = '<rect x="5" y="4" width="4" height="16" rx="1"></rect><rect x="15" y="4" width="4" height="16" rx="1"></rect>';
-  }
-  document.getElementById('play-text').textContent = '暂停播放';
-
-  function playLoop() {
-    if (!State.isPlaying) return;
-    const steps = getInstructionSteps(State.currentInstruction, State.operandA, State.operandB);
-    const stepDurationMs = 1600 / State.playbackSpeed;
-
-    if (State.currentStepIndex < steps.length - 1) {
-      nextStep();
-      State.playTimer = setTimeout(playLoop, stepDurationMs);
-    } else {
-      State.playTimer = setTimeout(() => {
-        if (!State.isPlaying) return;
-        goToStep(0, true);
-        State.playTimer = setTimeout(playLoop, stepDurationMs);
-      }, stepDurationMs * 1.5);
-    }
-  }
-  playLoop();
-}
-
-function pausePlayback() {
-  State.isPlaying = false;
-  clearTimeout(State.playTimer);
-  if (State.activeTween) State.activeTween.kill();
-  const iconSvg = document.getElementById('play-icon-svg');
-  if (iconSvg) {
-    iconSvg.innerHTML = '<polygon points="5,3 19,12 5,21"></polygon>';
-  }
-  document.getElementById('play-text').textContent = '自动播放';
-}
-
-function togglePlayback() {
-  if (State.isPlaying) pausePlayback();
-  else startPlayback();
-}
-
-// ==========================================================================
-// 6. HARDWARE STATE & OPERANDS
-// ==========================================================================
-
-function resetHardwareState() {
-  State.registers = {
-    PC: 0x0800,
-    MAR: 0x0800,
-    MDR: 0x00000000,
-    IR: 0x00000000,
-    Y: 0x00000000,
-    Z: 0x00000000,
-    ACC: State.operandA,
-    R0: 0x00001008,
-    R1: State.operandB,
-    FLAGS: { Z: 0, C: 0, S: 0, V: 0 }
+/* DOM 只呈现 CpuChoreo.sample(t)；GSAP 只推进唯一的时钟。 */
+(function () {
+  'use strict';
+  const M = window.CpuModel, C = window.CpuChoreo;
+  const $ = id => document.getElementById(id);
+  const NS = 'http://www.w3.org/2000/svg';
+  const nodes = {
+    PC: [60,100,215,72,'PC · 程序计数器'], IR: [60,220,215,72,'IR · 指令寄存器'],
+    ACC: [60,340,215,72,'ACC · 累加器'], R0: [60,460,140,72,'R0 · 地址指针'], R1: [235,460,140,72,'R1 · 通用寄存器'],
+    MAR: [490,100,210,72,'MAR · 地址寄存器'], MDR: [490,220,210,72,'MDR · 数据缓冲'],
+    Y: [490,340,135,72,'Y · 输入暂存'], ALU: [665,340,135,72,'ALU · 加法器'], Z: [665,460,135,72,'Z · 结果暂存'],
+    CU: [300,170,90,72,'控制器'], MEM_INST: [900,130,155,100,'0x0800 · 指令'], MEM_DATA: [900,320,155,100,'0x1008 · 数据']
   };
-}
-
-function updateOperandCalculations() {
-  const rawA = document.getElementById('input-op-a').value.trim();
-  const rawB = document.getElementById('input-op-b').value.trim();
-  let valA = parseInt(rawA, rawA.startsWith('0x') ? 16 : 10);
-  let valB = parseInt(rawB, rawB.startsWith('0x') ? 16 : 10);
-  if (isNaN(valA)) valA = 21;
-  if (isNaN(valB)) valB = 42;
-
-  State.operandA = valA & 0xFFFFFFFF;
-  State.operandB = valB & 0xFFFFFFFF;
-
-  const b0 = (State.operandB >> 24) & 0xFF;
-  const b1 = (State.operandB >> 16) & 0xFF;
-  const b2 = (State.operandB >> 8) & 0xFF;
-  const b3 = State.operandB & 0xFF;
-  document.getElementById('mem-byte-1008-0').textContent = '0x' + b0.toString(16).padStart(2, '0').toUpperCase();
-  document.getElementById('mem-byte-1008-1').textContent = '0x' + b1.toString(16).padStart(2, '0').toUpperCase();
-  document.getElementById('mem-byte-1008-2').textContent = '0x' + b2.toString(16).padStart(2, '0').toUpperCase();
-  document.getElementById('mem-byte-1008-3').textContent = '0x' + b3.toString(16).padStart(2, '0').toUpperCase();
-  document.getElementById('mem-val-1008').textContent = `数值: ${toHex32(State.operandB)} (${State.operandB})`;
-
-  initTimeline();
-  resetHardwareState();
-  goToStep(0, false);
-}
-
-// ==========================================================================
-// 7. BOOTSTRAP
-// ==========================================================================
-
-document.addEventListener('DOMContentLoaded', () => {
-  initSignalMatrix();
-  updateOperandCalculations();
-
-  document.getElementById('instruction-select').addEventListener('change', (e) => {
-    pausePlayback();
-    State.currentInstruction = e.target.value;
-    const titles = {
-      ADD_MEM: '当前指令: ADD [1008H], ACC (主存直接寻址)',
-      ADD_INDIRECT: '当前指令: ADD (R0), ACC (寄存器间接寻址)',
-      ADD_REG: '当前指令: ADD R1, ACC (寄存器直接寻址)',
-      ADD_IMM: '当前指令: ADD #42H, ACC (立即数寻址)'
-    };
-    document.getElementById('cu-op-desc').textContent = titles[State.currentInstruction] || '';
-    initTimeline();
-    resetHardwareState();
-    goToStep(0, false);
+  const nodeEls = {}, routeEls = {};
+  const svg = (tag, attrs = {}) => { const el = document.createElementNS(NS, tag); for (const [k,v] of Object.entries(attrs)) el.setAttribute(k,v); return el; };
+  function text(el, value) { value = String(value); if (el.textContent !== value) el.textContent = value; }
+  function alpha(el, a) { if (el instanceof SVGElement) el.setAttribute('opacity', a.toFixed(4)); else el.style.opacity = a.toFixed(4); }
+  function initDiagram() {
+    for (const [id, [x,y,w,h,name]] of Object.entries(nodes)) {
+      const group = svg('g', { id: 'node-' + id, class: id.startsWith('MEM') ? 'memory-node' : '' });
+      const halo = svg('rect', { x:x-5,y:y-5,width:w+10,height:h+10,rx:12,class:'node-halo',opacity:0 });
+      const body = svg('rect', { x,y,width:w,height:h,rx:8,class:'node-body' });
+      const label = svg('text', { x:x+10,y:y+20,class:'node-name' }); label.textContent = name;
+      const value = svg('text', { x:x+10,y:y+45,class:'node-value' });
+      const sub = svg('text', { x:x+10,y:y+61,class:'node-sub' });
+      const role = svg('text', { x:x+w-8,y:y-10,'text-anchor':'end',class:'node-role' });
+      group.append(halo,body,label,value,sub,role); $('nodes-layer').append(group);
+      nodeEls[id] = { group,halo,body,value,sub,role };
+    }
+    for (const [id, points] of Object.entries(C.ROUTES)) {
+      const d = points.map((p,i) => (i ? 'L' : 'M') + p.join(' ')).join(' ');
+      const isAddress = id === 'mar-memory', isExternal = id.endsWith('-mdr');
+      const base = svg('path', { d,class:'wire' + (isAddress ? ' address' : isExternal ? ' external' : '') });
+      $('wire-layer').append(base);
+      const line = svg('path', { d,class:'active-wire',opacity:0 });
+      line.style.stroke = isAddress ? '#42678C' : isExternal ? '#2D7D62' : '#A45B20';
+      $('active-wire-layer').append(line); routeEls[id] = line;
+    }
+  }
+  function loadLink() {
+    const h = new URLSearchParams(location.hash.slice(1));
+    const mode = M.MODES.includes(h.get('mode')) ? h.get('mode') : 'ADD_MEM';
+    const a = h.has('a') ? M.parseWord(h.get('a')) : 21;
+    let b = h.has('b') ? M.parseWord(h.get('b')) : 42;
+    if (mode === 'ADD_IMM' && b > 0xFFFF) b = 42;
+    const t = Number(h.get('t'));
+    return { mode, a:a ?? 21, b:b ?? 42, t:Number.isFinite(t) && t >= 0 ? t : 0 };
+  }
+  const link = loadLink();
+  let seq = M.buildSequence(link.mode, link.a, link.b), clock = { t:Math.min(link.t, seq.duration) };
+  let timeline = null, reducedTimer = null, playing = false, stepTarget = null, lastHash = 0;
+  let reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const engine = !!window.gsap;
+    function writeLink(force = false) {
+    if (!force && performance.now() - lastHash < 300) return;
+    lastHash = performance.now();
+    const hash = new URLSearchParams({ mode:seq.mode, a:String(seq.a), b:String(seq.b), t:clock.t.toFixed(3) });
+    try { history.replaceState(null, '', '#' + hash); } catch { /* file:// 也保留可用操作。 */ }
+  }
+  function setMotion() { document.body.dataset.motion = reduced ? 'reduced' : 'full'; $('reduced-motion').checked = reduced; }
+  function makeTimeline() {
+    if (timeline) timeline.kill();
+    if (!engine) return;
+    const start = clock.t;
+    timeline = gsap.timeline({ paused:true, onUpdate:() => { render(); writeLink(); }, onComplete:finish });
+    timeline.to(clock, { t:seq.duration, duration:seq.duration, ease:'none', startAt:{ t:0 }, immediateRender:false });
+    timeline.time(start, true).pause(); clock.t = start;
+    timeline.timeScale(Number($('speed-select').value));
+  }
+  function initSteps() {
+    $('progress').max = seq.duration;
+    $('timeline-container').replaceChildren();
+    seq.steps.forEach((s,i) => {
+      const btn = document.createElement('button');
+      btn.innerHTML = `<span>${String(i+1).padStart(2,'0')}</span>${s.phase}`;
+      btn.title = `${s.title} · 点击查看完成状态`;
+      btn.setAttribute('aria-label', `步骤 ${i+1}：${s.title}，查看完成状态`);
+      btn.addEventListener('click', () => seek((i+1)*4));
+      $('timeline-container').append(btn);
+    });
+    $('phase-nav').replaceChildren();
+    [...new Set(seq.steps.map(s => s.phase))].forEach(phase => {
+      const btn = document.createElement('button'); btn.textContent = phase;
+      btn.addEventListener('click', () => seek(seq.steps.findIndex(s => s.phase === phase)*4));
+      $('phase-nav').append(btn);
+    });
+    text(nodeEls.MEM_INST.value, seq.instruction);
+    nodeEls.MEM_INST.value.setAttribute('class','node-value instruction-value');
+    text(nodeEls.MEM_INST.sub, '32 位指令 · 字段示意');
+    text(nodeEls.MEM_DATA.value, seq.b); text(nodeEls.MEM_DATA.sub, M.hex(seq.b));
+  }
+  function displayNode(id, view) {
+    const el = nodeEls[id]; if (!el) return;
+    let value = view.value, sub = '', small = false;
+    if (id === 'PC' || id === 'MAR' || id === 'R0') { value = M.hex(value,4); sub = id === 'PC' ? '下一条待取指令的地址' : id === 'MAR' ? '送往主存的地址' : '指向主存 0x1008'; }
+    else if (id === 'IR') { value = value ?? '—'; sub = value === '—' ? '等待装入指令' : '指令字段（非机器码）'; small = true; }
+    else if (typeof value === 'string') { sub = '指令字段（非机器码）'; small = true; }
+    else { sub = M.hex(value); }
+    text(el.value,value); text(el.sub,sub);
+    el.value.setAttribute('class','node-value' + (small ? ' instruction-value' : (id === 'Y' || id === 'Z' || id === 'R1') ? ' short-value' : ''));
+    if (!small && String(value).length > 9 && (id === 'Y' || id === 'Z' || id === 'R1')) el.value.style.fontSize = '15px'; else el.value.style.fontSize = '';
+    alpha(el.value,view.alpha); alpha(el.sub,view.alpha);
+  }
+  function blend(a,b,q) { const rgb = h => h.startsWith('rgb') ? h.match(/\d+/g).map(Number) : h.match(/\w\w/g).map(v=>parseInt(v,16)); const x=rgb(a),y=rgb(b); return 'rgb('+x.map((v,i)=>Math.round(v+(y[i]-v)*q)).join(',')+')'; }
+  function render() {
+    const s = C.sample(seq,clock.t,reduced || !engine);
+    const { step,state }=s;
+    for (const id of ['PC','MAR','MDR','IR','ACC','R0','R1','Y','Z']) displayNode(id,s.values[id]);
+    text(nodeEls.CU.value,state.decoded ? 'ADD' : '—'); text(nodeEls.CU.sub,state.decoded ? '已译码' : '待译码');
+    alpha(nodeEls.CU.value,s.values.decoded.alpha); alpha(nodeEls.CU.sub,s.values.decoded.alpha);
+    const eq = `${state.aluA ?? '—'} + ${state.aluB ?? '—'}`;
+    text(nodeEls.ALU.value,state.resultReady ? String(state.Z) : '＋');
+    text(nodeEls.ALU.sub,state.resultReady ? '结果 → Z' : '等待两端输入');
+    nodeEls.ALU.value.style.fontSize = state.resultReady && String(state.Z).length>9 ? '15px' : '19px';
+    alpha(nodeEls.ALU.value,Math.min(s.values.resultReady.alpha,s.values.Z.alpha));
+    alpha(nodeEls.ALU.sub,s.values.resultReady.alpha);
+    text($('alu-b-label'),`${state.resultReady ? '已算原输入' : '总线输入'}：${state.aluB ?? '—'}`); alpha($('alu-b-label'),Math.min(s.values.aluB.alpha,s.values.resultReady.alpha));
+    text($('alu-a-label'),state.aluA === null ? 'Y 输入：—' : eq); alpha($('alu-a-label'),s.values.aluA.alpha);
+    for (const [id,el] of Object.entries(nodeEls)) {
+      const source = step.source === id, target = step.target === id;
+      const q = C.clamp((s.p-.65)/.15), selection = q*q*(3-2*q);
+      const selected = ((step.before.selected===id ? 1 : 0)*(1-selection)+(step.after.selected===id ? 1 : 0)*selection)*.6;
+      const baseFill = blend('FFFFFF','EBF5EF',selected*.8), baseStroke = blend('D7DDD3','2D7D62',selected);
+      el.body.style.fill = blend(baseFill,target ? 'EBF5EF' : 'FFF2E4',(source || target ? s.activity : 0)*.8);
+      el.body.style.stroke = blend(baseStroke,target ? '2D7D62' : 'A45B20',source || target ? s.activity : 0);
+      alpha(el.halo,source ? s.activity * (1-C.clamp((s.p-.18)/.25)) : 0);
+      text(el.role,source && target ? '专用自增' : source ? '送出' : target ? (s.p < .72 ? '等待接收' : '已接收') : '');
+      alpha(el.role,s.activity);
+    }
+    for (const [route,el] of Object.entries(routeEls)) alpha(el,route===step.route ? s.activity : 0);
+    const packet=$('data-packet'), p=s.packet;
+    packet.setAttribute('visibility',p.alpha>.001 ? 'visible' : 'hidden');
+    packet.setAttribute('transform',`translate(${p.x} ${p.y})`); alpha(packet,p.alpha);
+    packet.querySelector('rect').style.fill = step.route==='mar-memory' ? '#42678C' : step.route.endsWith('-mdr') ? '#2D7D62' : '#A45B20';
+    text($('packet-kind'),step.kind); text($('packet-value'),step.value);
+    $('packet-value').style.fontSize = step.value.length>13 ? '11px' : '14px';
+    const target=nodes[step.target], tag=$('event-tag');
+    const tagX=['Y','ALU'].includes(step.target) ? 565 : Math.max(105,Math.min(985,target[0]+target[2]/2));
+    const tagY=(['Y','ALU'].includes(step.target) ? 451 : target[1]+target[3]+19)+s.tag.dy;
+    tag.setAttribute('transform',`translate(${tagX} ${tagY})`); alpha(tag,s.tag.alpha);
+    tag.setAttribute('visibility',s.tag.alpha>.001 ? 'visible':'hidden'); text($('event-tag-text'),step.tag);
+    const read=step.signals.includes('Read'); $('memory-read').setAttribute('visibility',read && s.activity>.001 ? 'visible':'hidden'); alpha($('memory-read'),s.activity);
+    text($('action-title'),s.title.text); alpha($('action-title'),s.title.alpha);
+    text($('narration'),s.why.text); alpha($('narration'),s.why.alpha);
+    text($('phase-name'),s.phase.text); alpha($('phase-name'),s.phase.alpha);
+    text($('step-number'),`${String(s.complete ? seq.steps.length : Math.ceil(clock.t/4)).padStart(2,'0')} / ${seq.steps.length}`);
+    text($('action-status'),s.complete ? '演示完成' : s.status);
+    const routeName=step.route==='mar-memory' ? '地址线' : step.route.endsWith('-mdr') ? '外部数据线' : ['y-alu','alu-z'].includes(step.route) ? '专用线路' : step.route==='pc-increment' ? '专用自增器' : step.route==='ir-cu' ? '译码线路' : '内部单总线';
+    text($('transfer-source'),step.source.replace('MEM_INST','主存 · 指令').replace('MEM_DATA','主存 · 数据'));
+    text($('transfer-target'),step.target.replace('MEM_INST','主存').replace('MEM_DATA','主存'));
+    text($('transfer-kind'),`${routeName} · ${step.kind}`); alpha($('transfer-readout'),s.activity);
+    text($('signals'),step.signals.join(' · ')); alpha($('signals'),s.activity);
+    const holding=['y-alu','alu-z'].includes(step.route) && state.bus!==null;
+    const internal=['pc-mar','mdr-ir','ir-mar','r0-mar','mdr-y','r1-y','ir-y','acc-alu','z-acc'].includes(step.route);
+    text($('bus-owner'),holding ? `单总线：ACC 持续供数 ${seq.a}` : internal && s.activity>.02 ? `单总线：仅 ${step.source} 送出` : state.bus!==null ? `单总线：ACC 保持 ${seq.a}` : '单总线：空闲');
+    text($('flags'),Object.entries(state.flags).map(([k,v])=>`${k}=${v}`).join('  ')); alpha($('flags'),s.values.flags.alpha);
+    $('completion').hidden=!s.complete; text($('completion'),`ACC = ${seq.a} + ${seq.b} → ${seq.result}`);
+    $('progress').value=clock.t; text($('time-readout'),`${clock.t.toFixed(1)} / ${seq.duration} s`);
+    [...$('timeline-container').children].forEach((btn,i)=>{
+      const current=clock.t>0 && i===Math.max(0,Math.ceil(clock.t/4)-1);
+      btn.className=current ? 'current' : (i+1)*4<clock.t ? 'passed' : '';
+      if(current) btn.setAttribute('aria-current','step'); else btn.removeAttribute('aria-current');
+    });
+    [...$('phase-nav').children].forEach(btn=>btn.classList.toggle('active',btn.textContent===s.phase.text));
+    $('btn-step-prev').disabled=clock.t<=0;
+    $('btn-step-next').disabled=clock.t>=seq.duration;
+    if(stepTarget!==null && clock.t>=stepTarget-1e-6) { const targetTime=stepTarget; stepTarget=null; playing=false; timeline?.time(targetTime,true).pause(); clock.t=targetTime; render(); updatePlayback();writeLink(true); }
+  }
+  function updatePlayback() {
+    text($('play-text'),playing ? '暂停' : clock.t>=seq.duration ? '重新播放' : '播放');
+    $('status-led').classList.toggle('running',playing);
+  }
+  function stop() {
+    playing=false;stepTarget=null;timeline?.pause(); if(reducedTimer) clearTimeout(reducedTimer);reducedTimer=null;
+    updatePlayback();writeLink(true);
+  }
+  function finish() { stop();clock.t=seq.duration;render();updatePlayback();writeLink(true); }
+  function seek(t) {
+    stop();clock.t=C.clamp(t,0,seq.duration);
+    if(reduced || !engine)clock.t=Math.min(seq.duration,Math.ceil(clock.t/4)*4);
+    timeline?.time(clock.t,true).pause();render();updatePlayback();writeLink(true);
+  }
+  function reducedTick() {
+    if(!playing)return;
+    reducedTimer=setTimeout(()=>{
+      clock.t=Math.min(seq.duration,(Math.floor(clock.t/4)+1)*4);timeline?.time(clock.t,true).pause();render();writeLink();
+      if(clock.t>=seq.duration)finish();else reducedTick();
+    },1400/Number($('speed-select').value));
+  }
+  function play() {
+    if(!engine)return;
+    if(clock.t>=seq.duration)seek(0);
+    playing=true;stepTarget=null;updatePlayback();
+    if(reduced)reducedTick();else timeline.play();
+  }
+  function advance() {
+    stop(); const target=Math.min(seq.duration,(Math.floor((clock.t+1e-6)/4)+1)*4);
+    if(!engine||reduced) { seek(target);return; }
+    // 单步同样演示完整传送，结束在本步终态；再次点击则前进到下一个事件边界。
+    stepTarget=target;playing=true;timeline.play();updatePlayback();
+  }
+  function back() { seek(Math.max(0,(Math.ceil((clock.t-1e-6)/4)-1)*4)); }
+  function applyParameters() {
+    const a=M.parseWord($('input-op-a').value),b=M.parseWord($('input-op-b').value);
+    if($('instruction-select').value==='ADD_IMM' && b!==null && b>0xFFFF) {
+      stop();$('input-error').hidden=false;text($('input-error'),'立即数采用16位无符号字段（0～65535），其余寻址支持32位加数；仍保留上次有效状态。');
+      $('input-op-b').setAttribute('aria-invalid','true');$('instruction-select').value=seq.mode;return;
+    }
+    if(a===null||b===null) {
+      stop(); $('input-error').hidden=false;text($('input-error'),'请输入 0～4294967295 的整数，或 0x 开头的十六进制；演示仍保留上次有效值。');
+      $('input-op-a').setAttribute('aria-invalid',String(a===null));$('input-op-b').setAttribute('aria-invalid',String(b===null));return;
+    }
+    stop();$('input-error').hidden=true;$('input-op-a').removeAttribute('aria-invalid');$('input-op-b').removeAttribute('aria-invalid');
+    const t=clock.t;seq=M.buildSequence($('instruction-select').value,a,b);clock.t=Math.min(t,seq.duration);
+    if(reduced || !engine)clock.t=Math.min(seq.duration,Math.ceil(clock.t/4)*4);
+    initSteps();makeTimeline();render();updatePlayback();writeLink(true);
+  }
+  initDiagram(); $('instruction-select').value=seq.mode;$('input-op-a').value=seq.a;$('input-op-b').value=seq.b;
+  setMotion();
+  if(reduced || !engine)clock.t=Math.min(seq.duration,Math.ceil(clock.t/4)*4);
+  initSteps();makeTimeline();render();updatePlayback();
+  $('btn-play-pause').disabled=!engine;$('engine-notice').hidden=engine;
+  $('btn-play-pause').addEventListener('click',()=>playing ? stop() : play());
+  $('btn-reset').addEventListener('click',()=>seek(0));$('btn-step-prev').addEventListener('click',back);$('btn-step-next').addEventListener('click',advance);
+  $('progress').addEventListener('input',e=>seek(Number(e.target.value)));
+  $('instruction-select').addEventListener('change',applyParameters);
+  for(const id of ['input-op-a','input-op-b'])$(id).addEventListener('input',applyParameters);
+  $('speed-select').addEventListener('change',()=>{
+    timeline?.timeScale(Number($('speed-select').value));
+    if(playing&&reduced){clearTimeout(reducedTimer);reducedTick();}
+    text($('pace-hint'),reduced ? '减少动效：按步骤停留，无飞行与补间' : `每步 ${(4/Number($('speed-select').value)).toFixed(1)} 秒 · 到达后才改数值 · 结束后停留`);
   });
-
-  document.getElementById('btn-play-pause').addEventListener('click', togglePlayback);
-  document.getElementById('btn-step-next').addEventListener('click', () => { pausePlayback(); nextStep(); });
-  document.getElementById('btn-step-prev').addEventListener('click', () => { pausePlayback(); prevStep(); });
-  document.getElementById('btn-reset').addEventListener('click', () => { pausePlayback(); resetHardwareState(); goToStep(0, false); });
-
-  document.getElementById('speed-slider').addEventListener('input', (e) => {
-    State.playbackSpeed = parseFloat(e.target.value);
-    document.getElementById('speed-val').textContent = State.playbackSpeed.toFixed(1) + 'x';
+  $('reduced-motion').addEventListener('change',()=>{
+    const resume=playing;stop();reduced=$('reduced-motion').checked;setMotion();
+    if(reduced)clock.t=Math.min(seq.duration,Math.ceil(clock.t/4)*4);
+    timeline?.time(clock.t,true).pause();render();updatePlayback();
+    text($('pace-hint'),reduced ? '减少动效：按步骤停留，无飞行与补间' : `每步 ${(4/Number($('speed-select').value)).toFixed(1)} 秒 · 到达后才改数值 · 结束后停留`);
+    if(resume&&clock.t<seq.duration)play();writeLink(true);
   });
-
-  document.getElementById('input-op-a').addEventListener('input', updateOperandCalculations);
-  document.getElementById('input-op-b').addEventListener('input', updateOperandCalculations);
-
-  goToStep(0, false);
-});
+  document.addEventListener('visibilitychange',()=>{if(document.hidden)stop();});
+  document.addEventListener('keydown',e=>{
+    if(e.target instanceof Element&&e.target.closest('input,select,textarea,button,a,[tabindex]'))return;
+    if(e.ctrlKey||e.altKey||e.metaKey)return;
+    if(e.code==='Space'){e.preventDefault();playing ? stop():play();}
+    if(e.code==='ArrowRight'){e.preventDefault();advance();}
+    if(e.code==='ArrowLeft'){e.preventDefault();back();}
+    if(e.code==='Home'){e.preventDefault();seek(0);}
+  });
+  window.addEventListener('pagehide',()=>{stop();timeline?.kill();});
+  writeLink(true);
+})();
