@@ -1,562 +1,260 @@
-(() => {
+(function(){
   'use strict';
-
-  const plot = { left: 62, right: 727, top: 31, bottom: 355 };
-  const plotWidth = plot.right - plot.left;
-  const plotHeight = plot.bottom - plot.top;
-  const alphaInput = document.getElementById('alpha-level');
-  const singleDf = document.getElementById('single-df');
-  const fDf1 = document.getElementById('f-df1');
-  const fDf2 = document.getElementById('f-df2');
-  const backButton = document.getElementById('step-back');
-  const nextButton = document.getElementById('step-next');
-  const numberFormat = new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 4 });
-
-  const distributions = {
-    chi: {
-      title: 'χ² 分布曲线',
-      context: 'χ² 分布只取非负值，由一个自由度决定形状。',
-      notation: df => `X ~ χ²(${df})`,
-      quantileSymbol: 'χ²<sub>α</sub>',
-      minimumDf: 2,
-      lowerBound: 0,
-      parameters: () => ({ df: Number(singleDf.value) }),
-      pdf: (x, { df }) => {
-        if (x < 0) return 0;
-        const a = df / 2;
-        return Math.exp((a - 1) * Math.log(Math.max(x, 1e-12)) - x / 2 - a * Math.log(2) - logGamma(a));
-      },
-      survival: (x, { df }) => x <= 0 ? 1 : regularizedGammaQ(df / 2, x / 2),
-      range(q, parameters, alpha) {
-        let max = Math.max(5, q * 1.5);
-        const tailTolerance = Math.min(alpha, 1 - alpha) * 0.01;
-        while (this.survival(max, parameters) > tailTolerance && max < 1e12) max *= 2;
-        return [0, max];
-      }
-    },
-    t: {
-      title: 't 分布曲线',
-      context: 't 分布关于 0 对称；自由度越大，曲线越接近标准正态。',
-      notation: df => `T ~ t(${df})`,
-      quantileSymbol: 't<sub>α</sub>',
-      minimumDf: 1,
-      lowerBound: -Infinity,
-      parameters: () => ({ df: Number(singleDf.value) }),
-      pdf: (x, { df }) => Math.exp(logGamma((df + 1) / 2) - logGamma(df / 2) - 0.5 * Math.log(df * Math.PI) - ((df + 1) / 2) * Math.log1p(x * x / df)),
-      survival: (x, { df }) => {
-        if (x === 0) return 0.5;
-        const halfTail = 0.5 * regularizedBeta(df / (df + x * x), df / 2, 0.5);
-        return x > 0 ? halfTail : 1 - halfTail;
-      },
-      range(q, parameters, alpha) {
-        let extent = Math.max(4.5, Math.abs(q) * 1.7 + 1.2);
-        const tailTolerance = Math.min(alpha, 1 - alpha) * 0.01;
-        while (this.survival(extent, parameters) > tailTolerance && extent < 1e12) extent *= 2;
-        return [-extent, extent];
-      }
-    },
-    f: {
-      title: 'F 分布曲线',
-      context: 'F 分布只取非负值；分子与分母各有一个自由度。',
-      notation: (df1, df2) => `F ~ F(${df1}, ${df2})`,
-      quantileSymbol: 'F<sub>α</sub>',
-      minimumDf: 2,
-      lowerBound: 0,
-      parameters: () => ({ df1: Number(fDf1.value), df2: Number(fDf2.value) }),
-      pdf: (x, { df1, df2 }) => {
-        if (x < 0) return 0;
-        const a = df1 / 2;
-        const b = df2 / 2;
-        const safeX = Math.max(x, 1e-12);
-        return Math.exp(a * Math.log(df1 / df2) + (a - 1) * Math.log(safeX) - logBeta(a, b) - ((df1 + df2) / 2) * Math.log1p((df1 / df2) * safeX));
-      },
-      survival: (x, { df1, df2 }) => {
-        if (x <= 0) return 1;
-        const z = df2 / (df2 + df1 * x);
-        return regularizedBeta(z, df2 / 2, df1 / 2);
-      },
-      range(q, parameters, alpha) {
-        let max = Math.max(4, q * 1.5);
-        const tailTolerance = Math.min(alpha, 1 - alpha) * 0.01;
-        while (this.survival(max, parameters) > tailTolerance && max < 1e12) max *= 2;
-        return [0, max];
-      }
-    }
+  const M=SamplingModel,C=SamplingChoreo,$=id=>document.getElementById(id),NS='http://www.w3.org/2000/svg';
+  const setText=(id,value)=>{if($(id).textContent!==value)$(id).textContent=value;};
+  const setHtml=(id,value)=>{if($(id).innerHTML!==value)$(id).innerHTML=value;};
+  const attr=(el,key,value)=>{if(el.getAttribute(key)!==String(value))el.setAttribute(key,value);};
+  const clamp=C.clamp,hash=new URLSearchParams(location.hash.slice(1));
+  function num(key,fallback,min,max,integer=false){
+    const raw=hash.get(key),v=raw===null||raw.trim()===''?NaN:Number(raw);
+    return Number.isFinite(v)?clamp(integer?Math.round(v):v,min,max):fallback;
+  }
+  const state={
+    key:['chi','t','f'].includes(hash.get('d'))?hash.get('d'):'chi',
+    chiDf:num('chi',8,2,30,true),tDf:num('nu',8,1,30,true),df1:num('n1',5,2,20,true),df2:num('n2',10,1,30,true),
+    alpha:[.1,.05,.01].includes(Number(hash.get('a')))?Number(hash.get('a')):.05,
+    t:num('t',0,0,15),speed:[.5,1,1.5,2].includes(Number(hash.get('s')))?Number(hash.get('s')):1,
+    reduced:hash.has('rm')?hash.get('rm')==='1':matchMedia('(prefers-reduced-motion: reduce)').matches,playing:false
   };
-
-  let selected = 'chi';
-  let step = 0;
-  let transitionId = 0;
-
-  function logGamma(z) {
-    const coefficients = [
-      676.5203681218851, -1259.1392167224028, 771.32342877765313,
-      -176.61502916214059, 12.507343278686905, -0.13857109526572012,
-      9.9843695780195716e-6, 1.5056327351493116e-7
+  const P={left:72,right:1002,top:45,bottom:292},PW=P.right-P.left,PH=P.bottom-P.top;
+  let prepared,view,cacheKey='',timeline,reducedCall,linkTimer,frameRequest;
+  const fmt=(v,n=4)=>{
+    if(Math.abs(v)<.5*10**-n)v=0;
+    return Math.abs(v)>=1000?v.toFixed(1):v.toFixed(n);
+  };
+  const tick=v=>v===0?'0':Math.abs(v)<.001?v.toExponential(1).replace('e-','e−'):Math.abs(v)>=1000?v.toFixed(0):Math.abs(v)>=10?v.toFixed(1):Number(v.toPrecision(3)).toString();
+  const pct=v=>(100*v).toFixed(2)+'%';
+  function params(){return state.key==='f'?{df1:state.df1,df2:state.df2}:{df:state.key==='chi'?state.chiDf:state.tDf};}
+  function notation(){return state.key==='chi'?`X ∼ χ²(${state.chiDf})`:state.key==='t'?`T ∼ t(${state.tDf})`:`X ∼ F(${state.df1}, ${state.df2})`;}
+  function saveLink(immediate=false){
+    clearTimeout(linkTimer);
+    const write=()=>{
+      const h=new URLSearchParams({d:state.key,chi:state.chiDf,nu:state.tDf,n1:state.df1,n2:state.df2,a:state.alpha,t:state.t.toFixed(3),s:state.speed,rm:state.reduced?'1':'0'});
+      try{history.replaceState(null,'','#'+h);}catch{/* 本地环境禁止修改地址时，演示仍可操作。 */}
+    };
+    if(immediate)write();else linkTimer=setTimeout(write,240);
+  }
+  function currentFrame(){
+    const real=C.sample(state.t,state.alpha);
+    if(!state.reduced)return real;
+    const next=C.boundaries.find(t=>t>state.t+1e-7);
+    const result=C.sample(next??15,state.alpha);
+    result.phase=real.phase;result.name=real.name;result.captionIndex=real.phase;result.captionAlpha=1;
+    return result;
+  }
+  function stop(){
+    state.playing=false;timeline?.pause();reducedCall?.kill();reducedCall=undefined;
+    setText('play','播放演示');$('status-dot').classList.remove('playing');saveLink(true);
+  }
+  function seek(t,user=true){
+    if(user)stop();state.t=clamp(t,0,15);timeline?.time(state.t,true);render();saveLink(user);
+  }
+  function step(direction){
+    const found=direction>0?C.stops.find(t=>t>state.t+.001):[...C.stops].reverse().find(t=>t<state.t-.001);
+    seek(found??(direction>0?15:0));
+  }
+  function reducedTick(){
+    reducedCall=gsap.delayedCall(.9/state.speed,()=>{
+      if(!state.playing)return;
+      const next=C.boundaries.find(t=>t>state.t+.001);
+      if(next===undefined){stop();return;}
+      seek(next,false);if(next>=15)stop();else reducedTick();
+    });
+  }
+  function play(){
+    if(!timeline)return;
+    if(state.playing){stop();return;}
+    if(state.t>=15)seek(0,false);
+    state.playing=true;setText('play','暂停演示');$('status-dot').classList.add('playing');
+    if(state.reduced)reducedTick();else timeline.timeScale(state.speed).play(state.t);
+  }
+  function change(fn){stop();fn();cacheKey='';render();saveLink(true);}
+  function makeSvg(tag,attrs,label){
+    const el=document.createElementNS(NS,tag);
+    for(const [key,value]of Object.entries(attrs))el.setAttribute(key,value);
+    if(label!==undefined)el.textContent=label;return el;
+  }
+  function grid(id,r,yMax,box=P,xticks=6,yticks=3){
+    const g=$(id);g.replaceChildren();
+    for(let i=0;i<=yticks;i++){
+      const y=box.bottom-(box.bottom-box.top)*i/yticks;
+      g.append(makeSvg('line',{x1:box.left,x2:box.right,y1:y,y2:y,class:'grid-line'}));
+      g.append(makeSvg('text',{x:box.left-10,y:y+4,'text-anchor':'end'},tick(yMax*i/yticks)));
+    }
+    g.append(makeSvg('path',{d:`M${box.left} ${box.top}V${box.bottom}H${box.right+6}`,class:'axis-line'}));
+    for(let i=0;i<=xticks;i++){
+      const x=box.left+(box.right-box.left)*i/xticks;
+      g.append(makeSvg('line',{x1:x,x2:x,y1:box.bottom,y2:box.bottom+4,class:'axis-line'}));
+      g.append(makeSvg('text',{x,y:box.bottom+18,'text-anchor':'middle'},tick(r[0]+(r[1]-r[0])*i/xticks)));
+    }
+  }
+  function prepare(){
+    const key=JSON.stringify([state.key,params(),state.alpha]);if(key===cacheKey)return;
+    cacheKey=key;prepared=M.prepare(state.key,params(),state.alpha);
+    const bodyBase=Math.max(.5,M.upperQuantile(state.key,.25,params())*2);
+    const tailEnd=M.upperQuantile(state.key,state.alpha*.05,params());
+    const heavy=tailEnd>bodyBase*8;
+    const xMax=heavy?Math.max(state.key==='t'?4.5:2,bodyBase):Math.max(prepared.xMax,tailEnd);
+    const xMin=state.key==='t'?-xMax:0;
+    const values=new Set([xMin,xMax,prepared.upper,prepared.lower,...prepared.points.map(p=>p.x)]);
+    for(let i=0;i<=800;i++)values.add(xMin+(xMax-xMin)*i/800);
+    const points=[...values].filter(v=>v>=xMin&&v<=xMax).sort((a,b)=>a-b).map(x=>({x,y:M.pdf(state.key,x,params())}));
+    const x=v=>P.left+(v-xMin)/(xMax-xMin)*PW,y=v=>P.bottom-v/prepared.yMax*PH;
+    const omittedLeft=state.key==='t'?1-M.survival(state.key,xMin,params()):0;
+    const omittedRight=M.survival(state.key,xMax,params());
+    view={xMin,xMax,x,y,points,heavy,omittedLeft,omittedRight};
+    attr($('density-curve'),'d',points.map((p,i)=>`${i?'L':'M'}${x(p.x).toFixed(3)},${y(p.y).toFixed(3)}`).join(''));
+    grid('plot-grid',[xMin,xMax],prepared.yMax);
+    setText('window-note',`主图 x ∈ [${tick(xMin)}, ${tick(xMax)}] · 图外概率：左 ${pct(omittedLeft)}，右 ${pct(omittedRight)}`);
+  }
+  function areaPath(a,b,x,y,points,baseline,boxMin,boxMax){
+    a=clamp(a,boxMin,boxMax);b=clamp(b,boxMin,boxMax);if(b<=a)return'';
+    const values=[{x:a,y:M.pdf(state.key,a,params())},...points.filter(p=>p.x>a&&p.x<b),{x:b,y:M.pdf(state.key,b,params())}];
+    return `M${x(a)},${baseline}`+values.map(p=>`L${x(p.x)},${y(p.y)}`).join('')+`L${x(b)},${baseline}Z`;
+  }
+  function drawMain(f,q){
+    const {x,y,xMin,xMax,points}=view,qx=x(q),visible=q>=xMin&&q<=xMax;
+    const boundary=clamp(qx,P.left,P.right);
+    attr($('left-area'),'d',areaPath(xMin,q,x,y,points,P.bottom,xMin,xMax));
+    attr($('right-area'),'d',areaPath(q,xMax,x,y,points,P.bottom,xMin,xMax));
+    $('left-area').style.opacity=.7*f.leftWeight;$('right-area').style.opacity=.7*f.rightWeight;
+    const leftReach=(boundary-P.left)*f.leftReveal,rightReach=(P.right-boundary)*f.rightReveal;
+    for(const [k,v]of Object.entries({x:boundary-leftReach,y:P.top,width:leftReach,height:PH}))attr($('left-clip-rect'),k,v);
+    for(const [k,v]of Object.entries({x:boundary,y:P.top,width:rightReach,height:PH}))attr($('right-clip-rect'),k,v);
+    for(const[k,v]of Object.entries({x1:boundary,x2:boundary,y1:P.top+10,y2:P.bottom}))attr($('quantile-line'),k,v);
+    $('quantile-line').style.opacity=visible?.45+.55*f.focus:0;
+    attr($('quantile-point'),'cx',boundary);attr($('quantile-point'),'cy',y(M.pdf(state.key,q,params())));
+    $('quantile-point').style.opacity=visible?f.focus:0;
+    const ux=x(prepared.upper);
+    for(const[k,v]of Object.entries({x1:ux,x2:ux,y1:P.top+10,y2:P.bottom}))attr($('upper-reference'),k,v);
+    $('upper-reference').style.opacity=f.move*.5*(prepared.upper<=xMax?1:0);
+    const labelX=clamp(boundary+9,P.left+8,P.right-169);
+    attr($('quantile-label-bg'),'x',labelX);attr($('quantile-label-bg'),'y',P.top+7);
+    attr($('quantile-label'),'x',labelX+8);attr($('quantile-label'),'y',P.top+25);
+    const label=f.move===0?'qα':f.move===1?'q(1−α)':'移动边界 q';
+    setText('quantile-label',`${label} = ${fmt(q)}`);
+    $('quantile-label-group').style.opacity=visible?.7+.3*f.focus:0;
+    setText('offscreen-point',visible?'':`${label} = ${fmt(q)} → 局部窗口`);
+    const toLeft=f.leftWeight>=f.rightWeight,tagX=toLeft?(P.left+boundary)/2:(P.right+boundary)/2;
+    attr($('region-tag'),'x',clamp(tagX,P.left+65,P.right-65));attr($('region-tag'),'y',P.bottom-23);
+    attr($('region-tag'),'text-anchor','middle');
+    $('region-tag').style.fill=toLeft?'#926522':'#256f60';
+    const room=toLeft?boundary-P.left:P.right-boundary;
+    $('region-tag').style.opacity=visible&&room>80?Math.max(f.leftWeight,f.rightWeight):0;
+    setText('region-tag',f.move>0&&f.move<1?'边界移动中':toLeft?(f.move===1?'左尾 α':'左侧 1−α'):(f.move===1?'右侧 1−α':'右尾 α'));
+    const arrowY=P.top+75,start=clamp(ux,P.left,P.right),end=boundary;
+    attr($('direction-arrow'),'d',`M${start},${arrowY}H${end}m8,-5l-8,5l8,5`);
+    $('direction-arrow').style.opacity=f.move>0&&f.move<1?.65:0;
+    return boundary;
+  }
+  function drawDetail(f,q){
+    const needLeft=state.key!=='t'&&(prepared.lower-view.xMin)/(view.xMax-view.xMin)<.035;
+    const detail=view.heavy||(needLeft&&f.move>.8);
+    $('tail-window').hidden=!detail;
+    if(!detail)return;
+    $('tail-window').style.opacity=view.heavy?1:C.win(f.move,.8,1);
+    const span=view.xMax-view.xMin;
+    let min,max;
+    if(state.key==='t'){
+      const radius=Math.max(.4,Math.abs(q)*.6);
+      min=q-radius;max=q+radius;
+    }else if(q<span*.25){min=0;max=Math.max(q*3,1e-6);}
+    else{min=q*.4;max=q*1.6;}
+    const box={left:43,right:280,top:28,bottom:112};
+    const samples=Array.from({length:121},(_,i)=>{const x=min+(max-min)*i/120;return{x,y:M.pdf(state.key,x,params())};});
+    const yMax=Math.max(...samples.map(p=>p.y))*1.15;
+    const x=v=>box.left+(v-min)/(max-min)*(box.right-box.left),y=v=>box.bottom-v/yMax*(box.bottom-box.top);
+    grid('tail-grid',[min,max],yMax,box,2,1);
+    attr($('tail-curve'),'d',samples.map((p,i)=>`${i?'L':'M'}${x(p.x)},${y(p.y)}`).join(''));
+    // 两个区域分别用两条路径呈现，局部图不以屏幕面积比较主图。
+    const left=areaPath(min,q,x,y,samples,box.bottom,min,max),right=areaPath(q,max,x,y,samples,box.bottom,min,max);
+    let localLeft=$('tail-left-area');
+    if(!localLeft){localLeft=makeSvg('path',{id:'tail-left-area',class:'left-area'});$('tail-area').before(localLeft);}
+    attr(localLeft,'d',left);localLeft.style.opacity=.7*f.leftWeight;
+    attr($('tail-area'),'d',right);$('tail-area').style.opacity=.7*f.rightWeight;
+    for(const[k,v]of Object.entries({x1:x(q),x2:x(q),y1:box.top,y2:box.bottom}))attr($('tail-quantile'),k,v);
+    setText('tail-label',`${f.move===0?'qα':f.move===1?'q(1−α)':'q'} = ${fmt(q)}`);
+    $('tail-window').querySelector('strong').textContent=state.key!=='t'&&q<span*.25?'左尾窗口':'远尾窗口';
+    const outsideLeft=1-M.survival(state.key,min,params()),outsideRight=M.survival(state.key,max,params());
+    setText('tail-note',`窗外概率：左 ${pct(outsideLeft)} · 右 ${pct(outsideRight)}`);
+  }
+  function drawProbability(f,q,sourceX){
+    const left=1-f.tailLevel,right=f.tailLevel,split=P.left+PW*left;
+    attr($('mass-left'),'width',PW*left);attr($('mass-right'),'x',split);attr($('mass-right'),'width',PW*right);
+    $('mass-left').style.opacity=.3+.7*f.leftWeight;$('mass-right').style.opacity=.3+.7*f.rightWeight;
+    attr($('mass-marker'),'x1',split);attr($('mass-marker'),'x2',split);
+    attr($('mass-connector'),'d',`M${sourceX},-8 Q${sourceX},-1 ${split},7`);
+    setText('left-probability',left.toFixed(4));setText('right-probability',right.toFixed(4));
+    setText('left-probability-mobile',left.toFixed(4));setText('right-probability-mobile',right.toFixed(4));
+    setText('mass-point-label',f.move>0&&f.move<1?'边界移动，两侧概率同步变化':'在同一个点 q 处分开');
+    $('probability-bar').setAttribute('aria-label',`当前分位点${fmt(q)}；左侧概率${left.toFixed(4)}，右侧概率${right.toFixed(4)}，总和为1。`);
+  }
+  function equation(f,q){
+    const a=state.alpha.toFixed(4),b=(1-state.alpha).toFixed(4),v=state.key==='t'?'T':'X';
+    const qa='q<sub>α</sub>',ql='q<sub>1−α</sub>';
+    const formulas=[
+      `P(${v} &gt; ${qa}) = α`,
+      `P(${v} &gt; ${qa}) = α = <span class="result">${a}</span>`,
+      `P(${v} &lt; ${qa}) = 1 − α = <span class="result">${b}</span>`,
+      f.move===1?`P(${v} &lt; ${ql}) = α = <span class="result">${a}</span>`:`${qa} → ${ql} <span class="moving-value">（当前右尾 ${f.tailLevel.toFixed(4)}）</span>`,
+      `P(${v} &gt; ${ql}) = 1 − α = <span class="result">${b}</span>`,
+      `P(${v} &lt; ${ql}) = 1 − P(${v} &gt; ${ql}) = <span class="result">${a}</span>`
     ];
-    if (z < 0.5) return Math.log(Math.PI) - Math.log(Math.sin(Math.PI * z)) - logGamma(1 - z);
-    const shifted = z - 1;
-    let sum = 0.99999999999980993;
-    for (let i = 0; i < coefficients.length; i += 1) sum += coefficients[i] / (shifted + i + 1);
-    const t = shifted + coefficients.length - 0.5;
-    return 0.9189385332046727 + (shifted + 0.5) * Math.log(t) - t + Math.log(sum);
+    setHtml('equation',formulas[f.captionIndex]);
+    setText('equation-kicker',['定义','右尾','同点补集','换点','右侧补集','回到左尾'][f.captionIndex]);
+    $('equation').style.opacity=f.captionAlpha;
+    const pointName=f.move===0?'q<sub>α</sub>':f.move===1?'q<sub>1−α</sub>':'q';
+    setHtml('point-symbol',pointName);setText('point-value',fmt(q));
+    setText('point-kicker',f.move===0?'上分位点':f.move===1?'左侧临界点':'边界移动中');
   }
-
-  function logBeta(a, b) { return logGamma(a) + logGamma(b) - logGamma(a + b); }
-
-  function regularizedGammaQ(a, x) {
-    if (x <= 0) return 1;
-    if (x < a + 1) {
-      let term = 1 / a;
-      let sum = term;
-      let ap = a;
-      for (let n = 1; n <= 200; n += 1) {
-        ap += 1;
-        term *= x / ap;
-        sum += term;
-        if (Math.abs(term) <= Math.abs(sum) * 3e-14) break;
-      }
-      const p = sum * Math.exp(-x + a * Math.log(x) - logGamma(a));
-      return Math.max(0, Math.min(1, 1 - p));
-    }
-
-    const tiny = 1e-300;
-    let b = x + 1 - a;
-    let c = 1 / tiny;
-    let d = 1 / Math.max(Math.abs(b), tiny) * Math.sign(b || 1);
-    let h = d;
-    for (let i = 1; i <= 200; i += 1) {
-      const an = -i * (i - a);
-      b += 2;
-      d = an * d + b;
-      if (Math.abs(d) < tiny) d = tiny;
-      c = b + an / c;
-      if (Math.abs(c) < tiny) c = tiny;
-      d = 1 / d;
-      const delta = d * c;
-      h *= delta;
-      if (Math.abs(delta - 1) < 3e-14) break;
-    }
-    return Math.max(0, Math.min(1, Math.exp(-x + a * Math.log(x) - logGamma(a)) * h));
+  function controls(f,q){
+    setText('clock',state.t.toFixed(1).padStart(4,'0')+' s');setText('phase',f.name);setText('time-value',state.t.toFixed(1)+' s');$('progress').value=state.t;
+    setText('distribution-notation',notation());setText('caption',C.captions[f.captionIndex]);$('caption').style.opacity=f.captionAlpha;
+    setText('caption-index',`0${f.phase+1} / 06`);setText('region-status',f.move>0&&f.move<1?'边界正在移动':'边界固定');
+    $('single-df-control').hidden=state.key==='f';$('f-df-controls').hidden=state.key!=='f';$('shape-note').hidden=state.key==='f';
+    $('single-df').min=state.key==='chi'?2:1;$('single-df').value=state.key==='chi'?state.chiDf:state.tDf;
+    setText('single-df-output',String($('single-df').value));
+    for(const id of ['f-df1','f-df2']){const value=id==='f-df1'?state.df1:state.df2;$(id).value=value;setText(id+'-output',String(value));}
+    $('alpha-level').value=String(state.alpha);$('reduced-motion').checked=state.reduced;
+    document.body.dataset.motion=state.reduced?'reduced':'full';
+    setText('shape-note',state.key==='t'?'关于 0 对称 · 左右临界点互为相反数':'只取非负值 · 自由度决定曲线形状');
+    document.querySelectorAll('[data-distribution]').forEach(b=>attr(b,'aria-pressed',b.dataset.distribution===state.key));
+    document.querySelectorAll('[data-time]').forEach((b,i)=>attr(b,'aria-current',i===f.phase?'step':'false'));
+    $('previous').disabled=state.t<=0;$('next').disabled=state.t>=15;
+    setText('plot-title',notation()+'的概率密度曲线');
+    setText('plot-desc',`活动分位点${fmt(q)}，全域右尾概率${f.tailLevel.toFixed(4)}，左侧概率${(1-f.tailLevel).toFixed(4)}。`);
+    setText('footnote',view.heavy||!$('tail-window').hidden?'示意：主图与局部窗口各用独立线性坐标，屏幕面积不直接比较；概率条按全域概率计算。q 的下标始终表示右尾概率。':'示意：曲线仅绘有限区间，概率条与数值按全域计算；q 的下标始终表示右尾概率，连续分布的单点概率为 0。');
   }
-
-  function betaContinuedFraction(a, b, x) {
-    const tiny = 1e-300;
-    const maxIterations = 200;
-    const epsilon = 3e-14;
-    const qab = a + b;
-    const qap = a + 1;
-    const qam = a - 1;
-    let c = 1;
-    let d = 1 - qab * x / qap;
-    if (Math.abs(d) < tiny) d = tiny;
-    d = 1 / d;
-    let h = d;
-
-    for (let m = 1; m <= maxIterations; m += 1) {
-      const m2 = 2 * m;
-      let aa = m * (b - m) * x / ((qam + m2) * (a + m2));
-      d = 1 + aa * d;
-      if (Math.abs(d) < tiny) d = tiny;
-      c = 1 + aa / c;
-      if (Math.abs(c) < tiny) c = tiny;
-      d = 1 / d;
-      h *= d * c;
-
-      aa = -(a + m) * (qab + m) * x / ((a + m2) * (qap + m2));
-      d = 1 + aa * d;
-      if (Math.abs(d) < tiny) d = tiny;
-      c = 1 + aa / c;
-      if (Math.abs(c) < tiny) c = tiny;
-      d = 1 / d;
-      const delta = d * c;
-      h *= delta;
-      if (Math.abs(delta - 1) < epsilon) break;
-    }
-    return h;
+  function currentQuantile(f){return f.move===0?prepared.upper:f.move===1?prepared.lower:M.upperQuantile(state.key,f.tailLevel,params());}
+  function render(){
+    prepare();const f=currentFrame(),q=currentQuantile(f);
+    const boundary=drawMain(f,q);drawDetail(f,q);drawProbability(f,q,boundary);equation(f,q);controls(f,q);
   }
-
-  function regularizedBeta(x, a, b) {
-    if (x <= 0) return 0;
-    if (x >= 1) return 1;
-    const front = Math.exp(a * Math.log(x) + b * Math.log1p(-x) - logBeta(a, b));
-    if (x < (a + 1) / (a + b + 2)) {
-      return Math.max(0, Math.min(1, front * betaContinuedFraction(a, b, x) / a));
-    }
-    return Math.max(0, Math.min(1, 1 - front * betaContinuedFraction(b, a, 1 - x) / b));
-  }
-
-  function upperQuantile(alpha, distribution, parameters) {
-    let low = Number.isFinite(distribution.lowerBound) ? distribution.lowerBound : -1;
-    let high = 1;
-    while (distribution.survival(high, parameters) > alpha && high < 1e12) high *= 2;
-    while (distribution.survival(low, parameters) < alpha && low > -1e12) low = low * 2 - 1;
-    for (let i = 0; i < 90; i += 1) {
-      const mid = (low + high) / 2;
-      if (distribution.survival(mid, parameters) > alpha) low = mid;
-      else high = mid;
-    }
-    return (low + high) / 2;
-  }
-
-  function formatNumber(value) {
-    if (!Number.isFinite(value)) return '∞';
-    if (Math.abs(value) >= 1000) return numberFormat.format(value);
-    if (Math.abs(value) >= 100) return value.toFixed(1);
-    if (Math.abs(value) >= 10) return value.toFixed(2);
-    return value.toFixed(3);
-  }
-
-  function axisNumber(value) {
-    const abs = Math.abs(value);
-    if (abs >= 100) return String(Math.round(value));
-    if (abs >= 10) return value.toFixed(0);
-    if (abs >= 1) return value.toFixed(1).replace(/\.0$/, '');
-    return value.toFixed(2).replace(/0+$/, '').replace(/\.$/, '0');
-  }
-
-  function coordinatesFor(quantile, distribution, parameters, alpha) {
-    const [min, max] = distribution.range(quantile, parameters, alpha);
-    return {
-      min,
-      max,
-      x: value => plot.left + ((value - min) / (max - min)) * plotWidth,
-      y: (value, maxDensity) => plot.bottom - (value / maxDensity) * plotHeight
-    };
-  }
-
-  function sampleValues(start, end, quantile) {
-    const values = new Set([start, end, quantile, 0]);
-    const steps = 420;
-    for (let i = 0; i <= steps; i += 1) values.add(start + (end - start) * i / steps);
-    const focusRadius = Math.min(12, Math.max(2, Math.abs(quantile) * 0.22 + 1));
-    [0, quantile].forEach(center => {
-      const focusStart = Math.max(start, center - focusRadius);
-      const focusEnd = Math.min(end, center + focusRadius);
-      if (focusEnd <= focusStart) return;
-      for (let i = 0; i <= 280; i += 1) values.add(focusStart + (focusEnd - focusStart) * i / 280);
-    });
-    return [...values].filter(value => value >= start && value <= end).sort((a, b) => a - b);
-  }
-
-  function buildAreaPath(start, end, xScale, yScale, pdf, parameters, quantile) {
-    let path = `M ${xScale(start)} ${plot.bottom}`;
-    for (const x of sampleValues(start, end, quantile)) {
-      const density = Math.max(0, pdf(x, parameters));
-      path += ` L ${xScale(x)} ${yScale(density)}`;
-    }
-    path += ` L ${xScale(end)} ${plot.bottom} Z`;
-    return path;
-  }
-
-  function renderGrid(xScale, xMin, xMax, yMax) {
-    const group = document.getElementById('plot-grid');
-    const yTicks = 4;
-    const xTicks = 6;
-    const parts = [];
-    for (let i = 0; i <= yTicks; i += 1) {
-      const ratio = i / yTicks;
-      const y = plot.bottom - ratio * plotHeight;
-      const value = ratio * yMax;
-      parts.push(`<line class="grid-line" x1="${plot.left}" x2="${plot.right}" y1="${y}" y2="${y}"></line>`);
-      parts.push(`<text class="tick-label" x="${plot.left - 10}" y="${y + 3}" text-anchor="end">${axisNumber(value)}</text>`);
-    }
-    for (let i = 0; i <= xTicks; i += 1) {
-      const value = xMin + (xMax - xMin) * i / xTicks;
-      const x = xScale(value);
-      parts.push(`<line class="grid-line" x1="${x}" x2="${x}" y1="${plot.top}" y2="${plot.bottom}" opacity="0.5"></line>`);
-      parts.push(`<text class="tick-label" x="${x}" y="${plot.bottom + 17}" text-anchor="middle">${axisNumber(value)}</text>`);
-    }
-    parts.push(`<line class="axis-line" x1="${plot.left}" x2="${plot.right}" y1="${plot.bottom}" y2="${plot.bottom}"></line>`);
-    parts.push(`<line class="axis-line" x1="${plot.left}" x2="${plot.left}" y1="${plot.top}" y2="${plot.bottom}"></line>`);
-    group.innerHTML = parts.join('');
-  }
-
-  function formatLevel(value) { return value.toFixed(2); }
-
-  function probabilitySymbol(level, parameters, isLower = false, alpha = Number(alphaInput.value)) {
-    const levelText = formatLevel(level);
-    if (selected === 't') {
-      if (isLower) {
-        return `−t<sub>${formatLevel(alpha)},${parameters.df}</sub> = t<sub>${levelText},${parameters.df}</sub>`;
-      }
-      return `t<sub>${levelText},${parameters.df}</sub>`;
-    }
-    if (selected === 'chi') return `χ²<sub>${levelText},${parameters.df}</sub>`;
-    return `F<sub>${levelText};${parameters.df1},${parameters.df2}</sub>`;
-  }
-
-  function plainProbabilitySymbol(level, parameters, isLower = false, alpha = Number(alphaInput.value)) {
-    const levelText = formatLevel(level);
-    if (selected === 't') {
-      if (isLower) return `−t_${formatLevel(alpha)},${parameters.df} = t_${levelText},${parameters.df}`;
-      return `t_${levelText},${parameters.df}`;
-    }
-    if (selected === 'chi') return `χ²_${levelText},${parameters.df}`;
-    return `F_${levelText};${parameters.df1},${parameters.df2}`;
-  }
-
-  function setSvgQuantileLabel(level, parameters, quantile, isLower) {
-    const label = document.getElementById('quantile-label');
-    const svgNamespace = 'http://www.w3.org/2000/svg';
-    const addPart = (text, subscript = false) => {
-      const part = document.createElementNS(svgNamespace, 'tspan');
-      if (subscript) {
-        part.setAttribute('baseline-shift', 'sub');
-        part.setAttribute('font-size', '9');
-      }
-      part.textContent = text;
-      label.appendChild(part);
-    };
-
-    label.replaceChildren();
-    if (selected === 't') {
-      if (isLower) {
-        addPart('−t');
-        addPart(`${formatLevel(Number(alphaInput.value))},${parameters.df}`, true);
-        addPart(' = t');
-        addPart(`${formatLevel(level)},${parameters.df}`, true);
-      } else {
-        addPart('t');
-        addPart(`${formatLevel(level)},${parameters.df}`, true);
-      }
-    } else if (selected === 'chi') {
-      addPart('χ²');
-      addPart(`${formatLevel(level)},${parameters.df}`, true);
-    } else {
-      addPart('F');
-      addPart(`${formatLevel(level)};${parameters.df1},${parameters.df2}`, true);
-    }
-    addPart(` = ${formatNumber(quantile)}`);
-    label.setAttribute('aria-label', `${plainProbabilitySymbol(level, parameters, isLower)} = ${formatNumber(quantile)}`);
-  }
-
-  function renderPlot(quantile, distribution, parameters, alpha, level, isLower) {
-    const scale = coordinatesFor(quantile, distribution, parameters, alpha);
-    let maxDensity = 0;
-    const samples = sampleValues(scale.min, scale.max, quantile).map(x => {
-      const y = Math.max(0, distribution.pdf(x, parameters));
-      maxDensity = Math.max(maxDensity, y);
-      return [x, y];
-    });
-    maxDensity = Math.max(maxDensity * 1.15, 0.01);
-    const yScale = value => scale.y(value, maxDensity);
-    const curvePath = samples.map(([x, density], index) => `${index === 0 ? 'M' : 'L'} ${scale.x(x)} ${yScale(density)}`).join(' ');
-    document.getElementById('density-curve').setAttribute('d', curvePath);
-    document.getElementById('left-area').setAttribute('d', buildAreaPath(scale.min, quantile, scale.x, yScale, distribution.pdf, parameters, quantile));
-    document.getElementById('right-area').setAttribute('d', buildAreaPath(quantile, scale.max, scale.x, yScale, distribution.pdf, parameters, quantile));
-
-    const quantileX = scale.x(quantile);
-    const quantileY = yScale(distribution.pdf(quantile, parameters));
-    document.getElementById('quantile-line').setAttribute('x1', quantileX);
-    document.getElementById('quantile-line').setAttribute('x2', quantileX);
-    document.getElementById('quantile-line').setAttribute('y1', plot.top);
-    document.getElementById('quantile-line').setAttribute('y2', plot.bottom);
-    document.getElementById('quantile-point').setAttribute('cx', quantileX);
-    document.getElementById('quantile-point').setAttribute('cy', quantileY);
-    const quantileLabel = document.getElementById('quantile-label');
-    quantileLabel.setAttribute('x', quantileX > plot.right - 120 ? quantileX - 9 : quantileX + 9);
-    quantileLabel.setAttribute('y', plot.top + 16);
-    quantileLabel.setAttribute('text-anchor', quantileX > plot.right - 120 ? 'end' : 'start');
-    setSvgQuantileLabel(level, parameters, quantile, isLower);
-
-    renderGrid(scale.x, scale.min, scale.max, maxDensity);
-    const leftClip = document.getElementById('left-clip-rect');
-    const rightClip = document.getElementById('right-clip-rect');
-    leftClip.setAttribute('x', plot.left);
-    leftClip.setAttribute('y', plot.top);
-    leftClip.setAttribute('width', 0);
-    leftClip.setAttribute('height', plotHeight);
-    rightClip.setAttribute('x', quantileX);
-    rightClip.setAttribute('y', plot.top);
-    rightClip.setAttribute('width', 0);
-    rightClip.setAttribute('height', plotHeight);
-    if (step === 1 || step === 3) {
-      rightClip.setAttribute('width', Math.max(0, plot.right - quantileX));
-    }
-    if (step === 2 || step === 4) leftClip.setAttribute('width', Math.max(0, quantileX - plot.left));
-  }
-
-  function formatProbability(value) { return value.toFixed(4); }
-
-  function lowerEventHtml(parameters, alpha) {
-    if (selected === 't') return `P(T &lt; −t<sub>${formatLevel(alpha)},${parameters.df}</sub>)`;
-    if (selected === 'chi') return `P(X &lt; χ²<sub>${formatLevel(1 - alpha)},${parameters.df}</sub>)`;
-    return `P(X &lt; F<sub>${formatLevel(1 - alpha)};${parameters.df1},${parameters.df2}</sub>)`;
-  }
-
-  function lowerCutHtml(parameters, alpha) {
-    if (selected === 't') return `t<sub>${formatLevel(1 - alpha)},${parameters.df}</sub>`;
-    if (selected === 'chi') return `χ²<sub>${formatLevel(1 - alpha)},${parameters.df}</sub>`;
-    return `F<sub>${formatLevel(1 - alpha)};${parameters.df1},${parameters.df2}</sub>`;
-  }
-
-  function updateCopy(quantile, level, parameters, alpha, isLower) {
-    const dist = distributions[selected];
-    const label = selected === 'f' ? dist.notation(parameters.df1, parameters.df2) : dist.notation(parameters.df);
-    document.getElementById('distribution-context').textContent = dist.context;
-    document.getElementById('chart-heading').textContent = dist.title;
-    document.getElementById('distribution-notation').textContent = label;
-    document.getElementById('quantile-symbol').innerHTML = probabilitySymbol(level, parameters, isLower, alpha);
-    document.getElementById('quantile-value').textContent = formatNumber(quantile);
-    document.getElementById('quantile-chip-value').textContent = formatNumber(quantile);
-    document.getElementById('quantile-chip-label').textContent = isLower ? '下侧临界点' : '上分位点';
-    document.getElementById('right-key-label').textContent = isLower ? `右侧 ${formatProbability(1 - alpha)}` : `右侧 ${formatProbability(alpha)}`;
-    document.getElementById('left-key-label').textContent = isLower ? `左侧 ${formatProbability(alpha)}` : `左侧 ${formatProbability(1 - alpha)}`;
-    document.getElementById('quantile-definition').textContent = isLower
-      ? `左侧面积 α = ${formatProbability(alpha)}，对应上尾记号 ${plainProbabilitySymbol(level, parameters)}`
-      : `P(X > xα) = α = ${formatProbability(alpha)}`;
-    document.getElementById('plot-title').textContent = `${label} 的概率密度曲线与分位点`;
-    document.getElementById('plot-desc').textContent = `${isLower ? '左侧' : '右侧'}分位点为 ${formatNumber(quantile)}，当前讨论的尾部概率为 ${formatProbability(alpha)}。`;
-    updateStepContent(parameters, alpha);
-  }
-
-  function updateStepContent(parameters, alpha) {
-    const resultLabel = document.getElementById('result-label');
-    const resultFormula = document.getElementById('result-formula');
-    const note = document.querySelector('#teaching-note p');
-    const alphaText = formatProbability(alpha);
-    const rightComplementText = formatProbability(1 - alpha);
-    const upperSymbol = probabilitySymbol(alpha, parameters);
-    const lowerEvent = lowerEventHtml(parameters, alpha);
-    const lowerCut = lowerCutHtml(parameters, alpha);
-    const variable = selected === 't' ? 'T' : 'X';
-
-    document.body.dataset.step = ['idle', 'upper-right', 'lower-left', 'lower-right', 'lower-final'][step];
-    document.getElementById('step-count').textContent = `${step} / 4`;
-    document.getElementById('step-kicker').textContent = step === 0 ? '准备开始' : `第 ${step} 步`;
-    document.getElementById('step-title').textContent = [
-      '先看上分位点右侧',
-      '高亮上分位点右侧',
-      '圈出左侧所求区域',
-      '改看左侧点的右方区域',
-      '回到左侧所求区域'
-    ][step];
-    backButton.disabled = step === 0;
-    nextButton.textContent = step === 0 ? '开始演示' : step === 4 ? '重新演示' : '下一步';
-
-    if (step === 1) {
-      resultLabel.textContent = '右侧面积就是所求概率';
-      resultFormula.innerHTML = `P(${variable} &gt; ${upperSymbol}) = α = <span class="result-value">${alphaText}</span>`;
-      note.textContent = `虚线右侧面积就是 P(${variable} > ${plainProbabilitySymbol(alpha, parameters)}) = ${alphaText}。`;
-    } else if (step === 2) {
-      resultLabel.textContent = '所求区域';
-      resultFormula.innerHTML = lowerEvent;
-      note.textContent = '所求区域';
-    } else if (step === 3) {
-      resultLabel.textContent = '可转化为求补事件';
-      resultFormula.innerHTML = `${lowerEvent} = 1 − P(${variable} &gt; ${lowerCut})<br>= 1 − ${rightComplementText} = <span class="result-value">${alphaText}</span>`;
-      note.textContent = `可转化为求 1−P(${variable}>${plainProbabilitySymbol(1 - alpha, parameters)})。`;
-    } else if (step === 4) {
-      resultLabel.textContent = '再次回到所求区域';
-      resultFormula.innerHTML = `${lowerEvent} = 1 − P(${variable} &gt; ${lowerCut}) = <span class="result-value">${alphaText}</span>`;
-      note.textContent = `再次高亮左侧所求区域，面积为 ${alphaText}。`;
-    } else {
-      resultLabel.textContent = '等你选择一步';
-      resultFormula.innerHTML = `P(X &gt; ${upperSymbol}) = α`;
-      note.textContent = '点击“开始演示”，先看上分位点右侧面积，再逐步推出左侧概率。';
-    }
-  }
-
-  function animateClip(rect, kind, boundary, duration = 680) {
-    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    const leftWidth = Math.max(0, boundary - plot.left);
-    const rightWidth = Math.max(0, plot.right - boundary);
-    const total = kind === 'left' ? leftWidth : rightWidth;
-    const start = performance.now();
-    const token = transitionId;
-    rect.setAttribute('x', boundary);
-    rect.setAttribute('width', 0);
-    if (reducedMotion || total === 0) {
-      rect.setAttribute('x', kind === 'left' ? plot.left : boundary);
-      rect.setAttribute('width', total);
-      return;
-    }
-
-    const frame = now => {
-      if (token !== transitionId) return;
-      const progress = Math.min(1, (now - start) / duration);
-      const eased = 1 - Math.pow(1 - progress, 3);
-      if (kind === 'left') {
-        rect.setAttribute('x', boundary - leftWidth * eased);
-        rect.setAttribute('width', leftWidth * eased);
-      } else {
-        rect.setAttribute('x', boundary);
-        rect.setAttribute('width', rightWidth * eased);
-      }
-      if (progress < 1) requestAnimationFrame(frame);
-    };
-    requestAnimationFrame(frame);
-  }
-
-  function renderCurrentStep(animate = false) {
-    const dist = distributions[selected];
-    const parameters = dist.parameters();
-    const alpha = Number(alphaInput.value);
-    const isLower = step >= 2;
-    const level = isLower ? 1 - alpha : alpha;
-    const quantile = upperQuantile(level, dist, parameters);
-    updateCopy(quantile, level, parameters, alpha, isLower);
-    renderPlot(quantile, dist, parameters, alpha, level, isLower);
-    if (animate) {
-      const boundary = Number(document.getElementById('quantile-line').getAttribute('x1'));
-      if (step === 1 || step === 3) {
-        animateClip(document.getElementById('right-clip-rect'), 'right', boundary);
-      } else if (step === 2 || step === 4) {
-        animateClip(document.getElementById('left-clip-rect'), 'left', boundary, 820);
-      }
-    }
-  }
-
-  function refresh() {
-    transitionId += 1;
-    step = 0;
-    renderCurrentStep();
-  }
-
-  function goToStep(nextStep) {
-    transitionId += 1;
-    step = nextStep;
-    renderCurrentStep(true);
-  }
-
-  function chooseDistribution(key) {
-    selected = key;
-    document.querySelectorAll('.distribution-tab').forEach(button => {
-      const active = button.dataset.distribution === key;
-      button.classList.toggle('is-active', active);
-      button.setAttribute('aria-pressed', String(active));
-    });
-    const isF = key === 'f';
-    document.getElementById('single-df-control').hidden = isF;
-    document.getElementById('f-df-controls').hidden = !isF;
-    if (!isF) {
-      const input = document.getElementById('single-df');
-      const dist = distributions[key];
-      input.min = String(dist.minimumDf);
-      document.getElementById('single-df-min').textContent = String(dist.minimumDf);
-      document.getElementById('single-df-label').textContent = '自由度 ν';
-      if (Number(input.value) < dist.minimumDf) input.value = String(dist.minimumDf);
-    }
-    refresh();
-  }
-
-  document.querySelectorAll('.distribution-tab').forEach(button => {
-    button.addEventListener('click', () => chooseDistribution(button.dataset.distribution));
+  if(window.gsap){
+    timeline=gsap.timeline({paused:true,onUpdate:()=>{state.t=timeline.time();render();saveLink();},onComplete:stop});
+    timeline.to({},{duration:15,ease:'none'});timeline.time(state.t,true);
+  }else{$('play').disabled=true;$('engine-notice').hidden=false;}
+  $('play').addEventListener('click',play);$('reset').addEventListener('click',()=>seek(0));
+  $('previous').addEventListener('click',()=>step(-1));$('next').addEventListener('click',()=>step(1));
+  $('progress').addEventListener('input',e=>seek(Number(e.target.value)));
+  document.querySelectorAll('[data-time]').forEach(b=>b.addEventListener('click',()=>seek(Number(b.dataset.time))));
+  document.querySelectorAll('[data-distribution]').forEach(b=>b.addEventListener('click',()=>change(()=>{state.key=b.dataset.distribution;})));
+  $('single-df').addEventListener('input',e=>change(()=>{if(state.key==='chi')state.chiDf=Number(e.target.value);else state.tDf=Number(e.target.value);}));
+  $('f-df1').addEventListener('input',e=>change(()=>{state.df1=Number(e.target.value);}));
+  $('f-df2').addEventListener('input',e=>change(()=>{state.df2=Number(e.target.value);}));
+  $('alpha-level').addEventListener('change',e=>change(()=>{state.alpha=Number(e.target.value);}));
+  $('speed').value=String(state.speed);
+  $('speed').addEventListener('change',e=>{state.speed=Number(e.target.value);timeline?.timeScale(state.speed);if(state.playing&&state.reduced){reducedCall?.kill();reducedTick();}saveLink(true);});
+  $('reduced-motion').addEventListener('change',e=>{const resume=state.playing;stop();state.reduced=e.target.checked;render();if(resume)play();saveLink(true);});
+  document.addEventListener('keydown',e=>{
+    if(e.ctrlKey||e.metaKey||e.altKey||e.target.closest('input,select,textarea,button,a'))return;
+    if(e.code==='Space'){e.preventDefault();play();}
+    if(e.code==='ArrowLeft'){e.preventDefault();step(-1);}if(e.code==='ArrowRight'){e.preventDefault();step(1);}
+    if(e.code==='Home'){e.preventDefault();seek(0);}
   });
-  [singleDf, fDf1, fDf2].forEach(input => input.addEventListener('input', () => {
-    if (input === singleDf) document.getElementById('single-df-output').textContent = input.value;
-    if (input === fDf1) document.getElementById('f-df1-output').textContent = input.value;
-    if (input === fDf2) document.getElementById('f-df2-output').textContent = input.value;
-    refresh();
-  }));
-  alphaInput.addEventListener('change', () => refresh());
-  backButton.addEventListener('click', () => {
-    if (step > 0) goToStep(step - 1);
-  });
-  nextButton.addEventListener('click', () => {
-    goToStep(step === 4 ? 0 : step + 1);
-  });
-
-  refresh();
+  document.addEventListener('visibilitychange',()=>{if(document.hidden)stop();});
+  const resize=new ResizeObserver(()=>{cancelAnimationFrame(frameRequest);frameRequest=requestAnimationFrame(()=>render());});resize.observe($('distribution-plot'));
+  window.addEventListener('pagehide',()=>{stop();resize.disconnect();cancelAnimationFrame(frameRequest);clearTimeout(linkTimer);timeline?.kill();},{once:true});
+  window.addEventListener('pageshow',e=>{if(e.persisted)location.reload();});
+  render();
 })();

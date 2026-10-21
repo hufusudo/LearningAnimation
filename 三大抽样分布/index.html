@@ -2,160 +2,42 @@
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#faf9f5">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="用分位点、曲线阴影和概率条，看懂卡方、t、F分布的上分位点与两侧面积。">
   <title>三大抽样分布的上分位点 · 可视化实验室</title>
   <link rel="stylesheet" href="style.css">
-  <script src="app.js" defer></script>
+  <script defer src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+  <script defer src="model.js"></script>
+  <script defer src="choreo.js"></script>
+  <script defer src="app.js"></script>
 </head>
-<body data-step="idle">
-  <header class="topbar">
-    <div class="topbar-inner">
-      <a class="back-link" href="../index.html#prob" aria-label="返回概率统计展厅">
-        <span aria-hidden="true">←</span> 概率统计展厅
-      </a>
-      <div class="brand-mark" aria-hidden="true">∩</div>
-      <h1>三大抽样分布的上分位点</h1>
-      <span class="header-note">看见概率，就是曲线下面积</span>
+<body>
+  <header class="site-header"><a href="../index.html#prob">← 返回概率统计</a><span>可视化实验室 / 抽样分布</span></header>
+  <main>
+    <div class="title-row">
+      <div><p class="eyebrow">分位点 · 尾部 · 补事件</p><h1>三大抽样分布的上分位点</h1><p class="subtitle">下标记的是右尾面积；换一侧看，先确认竖线有没有动。</p></div>
+      <nav class="distribution-tabs" aria-label="选择抽样分布"><button data-distribution="chi" aria-pressed="true"><span>χ²</span>卡方分布</button><button data-distribution="t" aria-pressed="false"><span>t</span>t 分布</button><button data-distribution="f" aria-pressed="false"><span>F</span>F 分布</button></nav>
     </div>
-  </header>
-
-  <main class="lesson-shell">
-    <section class="intro" aria-labelledby="lesson-title">
-      <div class="intro-copy">
-        <p class="chapter-label">概率论与数理统计</p>
-        <h2 id="lesson-title">从一个分位点，看懂两侧面积</h2>
-        <p>先看上分位点右尾 α，再观察下侧目标区域如何通过补事件求出。选择分布与显著性水平，沿虚线一步步推导。</p>
-      </div>
-      <div class="tail-key" aria-label="图例">
-        <span><i class="key-dot key-right"></i><span id="right-key-label">右侧 α</span></span>
-        <span><i class="key-dot key-left"></i><span id="left-key-label">左侧 1 − α</span></span>
-      </div>
+    <section class="stage" aria-label="上分位点与两侧面积演示">
+      <div class="stage-heading"><div class="status"><i id="status-dot"></i><span id="clock">00.0 s</span><strong id="phase">定位上点</strong></div><span id="distribution-notation">X ∼ χ²(8)</span></div>
+      <div class="stage-summary"><p><span id="point-kicker">上分位点</span><strong id="point-symbol">q<sub>α</sub></strong><span class="equals">=</span><b id="point-value">15.5073</b></p><div class="legend"><span><i class="swatch left-swatch"></i>左侧区域</span><span><i class="swatch right-swatch"></i>右侧区域</span></div></div>
+      <div class="chart-scroll"><div class="chart-canvas">
+        <svg id="distribution-plot" viewBox="0 0 1060 363" role="img" aria-labelledby="plot-title plot-desc"><title id="plot-title">抽样分布密度与分位点</title><desc id="plot-desc">竖线分开左右两侧区域，阴影跟随教学阶段显影。下方概率条计算全域概率。</desc><defs><clipPath id="plot-clip"><rect x="72" y="45" width="930" height="247"/></clipPath><clipPath id="left-clip"><rect id="left-clip-rect"/></clipPath><clipPath id="right-clip"><rect id="right-clip-rect"/></clipPath></defs><g id="plot-grid"></g><g clip-path="url(#plot-clip)"><path id="left-area" class="left-area" clip-path="url(#left-clip)"/><path id="right-area" class="right-area" clip-path="url(#right-clip)"/><path id="density-curve" class="density-curve"/><line id="upper-reference" class="reference-line"/><line id="quantile-line" class="quantile-line"/><circle id="quantile-point" r="4.5" class="quantile-point"/><path id="direction-arrow" class="direction-arrow"/></g><text x="72" y="27" class="axis-title">概率密度 f(x)</text><text x="1020" y="315" class="axis-name">x</text><g id="quantile-label-group"><rect id="quantile-label-bg" width="160" height="28" rx="4"/><text id="quantile-label"></text></g><text id="region-tag" class="region-tag"></text><text id="offscreen-point" x="990" y="72" text-anchor="end" class="offscreen-point"></text><text id="window-note" x="72" y="348" class="window-note"></text></svg>
+        <section id="tail-window" class="tail-window" aria-label="极长尾的独立局部窗口" hidden><div><strong>远尾窗口</strong><span>独立线性坐标</span></div><svg id="tail-plot" viewBox="0 0 300 152" role="img" aria-label="上分位点附近的远尾密度，坐标尺度与主图不同"><g id="tail-grid"></g><path id="tail-area" class="right-area"/><path id="tail-curve" class="density-curve"/><line id="tail-quantile" class="quantile-line"/><text id="tail-label" x="147" y="18" text-anchor="middle"></text></svg><p id="tail-note"></p></section>
+      </div></div>
+      <p class="scroll-hint">窄窗口可横向查看完整曲线与坐标。</p>
+      <div class="mass-section"><div class="mass-heading"><span>整条实轴的概率</span><span>总长 = 1 · 含图外尾部</span></div><svg id="probability-bar" viewBox="0 0 1060 92" role="img" aria-label="按全域概率比例分割的左右概率条"><rect x="72" y="12" width="930" height="16" rx="3" class="mass-base"/><rect id="mass-left" x="72" y="12" height="16" class="mass-left"/><rect id="mass-right" y="12" height="16" class="mass-right"/><line id="mass-marker" y1="7" y2="33" class="mass-marker"/><path id="mass-connector" class="mass-connector"/><text x="72" y="57" class="mass-label">左侧 P(X &lt; q)</text><text id="left-probability" x="72" y="80" class="mass-value left-value">0.9500</text><text x="1002" y="57" text-anchor="end" class="mass-label">右侧 P(X &gt; q)</text><text id="right-probability" x="1002" y="80" text-anchor="end" class="mass-value right-value">0.0500</text><text id="mass-point-label" x="537" y="73" text-anchor="middle" class="mass-point-label">在同一个点 q 处分开</text></svg><div class="mobile-probabilities"><p>左侧概率<strong id="left-probability-mobile">0.9500</strong></p><p>右侧概率<strong id="right-probability-mobile">0.0500</strong></p></div></div>
+      <div class="equation-row"><span id="equation-kicker">定义</span><p id="equation">P(X &gt; q<sub>α</sub>) = α</p></div>
+      <div class="stage-foot"><span id="caption-index">01 / 06</span><p id="caption" aria-live="polite">上分位点的下标，记的是它右侧留下的面积。</p><span id="region-status">边界固定</span></div>
     </section>
-
-    <nav class="distribution-tabs" aria-label="选择抽样分布">
-      <button class="distribution-tab is-active" type="button" data-distribution="chi" aria-pressed="true">
-        <span class="tab-symbol">χ²</span><span>卡方分布</span>
-      </button>
-      <button class="distribution-tab" type="button" data-distribution="t" aria-pressed="false">
-        <span class="tab-symbol">t</span><span>t 分布</span>
-      </button>
-      <button class="distribution-tab" type="button" data-distribution="f" aria-pressed="false">
-        <span class="tab-symbol">F</span><span>F 分布</span>
-      </button>
-      <p class="tab-context" id="distribution-context">χ² 分布只取非负值，由一个自由度决定形状。</p>
-    </nav>
-
-    <section class="workspace" aria-label="分布图和概率演示">
-      <div class="visual-column">
-        <figure class="chart-panel">
-          <div class="chart-heading">
-            <div>
-              <h3 id="chart-heading">χ² 分布曲线</h3>
-              <p id="distribution-notation">X ~ χ²(8)</p>
-            </div>
-            <div class="quantile-chip">
-              <span id="quantile-chip-label">当前分位点</span>
-              <strong id="quantile-chip-value">—</strong>
-            </div>
-          </div>
-          <svg id="distribution-plot" viewBox="0 0 760 420" role="img" aria-labelledby="plot-title plot-desc" preserveAspectRatio="xMidYMid meet">
-            <title id="plot-title">抽样分布概率密度曲线</title>
-            <desc id="plot-desc">曲线下的右尾面积对应显著性水平。</desc>
-            <defs>
-              <clipPath id="left-area-clip" clipPathUnits="userSpaceOnUse"><rect id="left-clip-rect" x="0" y="0" width="0" height="0"></rect></clipPath>
-              <clipPath id="right-area-clip" clipPathUnits="userSpaceOnUse"><rect id="right-clip-rect" x="0" y="0" width="0" height="0"></rect></clipPath>
-            </defs>
-            <g id="plot-grid"></g>
-            <path id="left-area" class="area-fill area-left" clip-path="url(#left-area-clip)"></path>
-            <path id="right-area" class="area-fill area-right" clip-path="url(#right-area-clip)"></path>
-            <path id="density-curve" class="density-curve"></path>
-            <line id="quantile-line" class="quantile-line" x1="0" x2="0" y1="0" y2="0"></line>
-            <circle id="quantile-point" class="quantile-point" cx="0" cy="0" r="5"></circle>
-            <text id="quantile-label" class="quantile-label" x="0" y="0"></text>
-            <text class="axis-label axis-y-label" x="18" y="205" transform="rotate(-90 18 205)">概率密度  f(x)</text>
-            <text class="axis-label" x="728" y="405" text-anchor="end">取值  x</text>
-          </svg>
-          <figcaption id="plot-caption">虚线标注分位点的标准记号与数值；阴影表示当前讨论的区域。</figcaption>
-        </figure>
-
-        <div class="teaching-note" id="teaching-note" role="status" aria-live="polite">
-          <span class="note-mark" aria-hidden="true">i</span>
-          <p>先看曲线和分位点。点击“求右尾概率”后，右侧阴影会从分位点向外展开。</p>
-        </div>
-      </div>
-
-      <aside class="control-panel" aria-label="分布参数与概率计算">
-        <div class="panel-section parameter-section">
-          <div class="section-heading">
-            <h3>分布参数</h3>
-            <span class="section-rule"></span>
-          </div>
-          <div id="single-df-control" class="range-control">
-            <div class="control-label-row">
-              <label for="single-df" id="single-df-label">自由度 ν</label>
-              <output for="single-df" id="single-df-output">8</output>
-            </div>
-            <input id="single-df" type="range" min="2" max="30" step="1" value="8">
-            <div class="range-ends"><span id="single-df-min">2</span><span id="single-df-max">30</span></div>
-          </div>
-          <div id="f-df-controls" class="f-df-controls" hidden>
-            <div class="range-control">
-              <div class="control-label-row"><label for="f-df1">分子自由度 ν₁</label><output for="f-df1" id="f-df1-output">5</output></div>
-              <input id="f-df1" type="range" min="2" max="20" step="1" value="5">
-              <div class="range-ends"><span>2</span><span>20</span></div>
-            </div>
-            <div class="range-control">
-              <div class="control-label-row"><label for="f-df2">分母自由度 ν₂</label><output for="f-df2" id="f-df2-output">10</output></div>
-              <input id="f-df2" type="range" min="1" max="30" step="1" value="10">
-              <div class="range-ends"><span>1</span><span>30</span></div>
-            </div>
-          </div>
-
-          <div class="alpha-control">
-            <label for="alpha-level">右尾面积 α</label>
-            <select id="alpha-level">
-              <option value="0.10">0.10</option>
-              <option value="0.05" selected>0.05</option>
-              <option value="0.01">0.01</option>
-            </select>
-          </div>
-        </div>
-
-        <div class="quantile-readout" aria-live="polite">
-          <span id="quantile-definition">满足右侧面积为 α 的点</span>
-          <div><span id="quantile-symbol">q<sub>α</sub></span><b>=</b><strong id="quantile-value">—</strong></div>
-        </div>
-
-        <div class="panel-section probability-section">
-          <div class="section-heading">
-            <h3>按步骤演示</h3>
-            <span class="section-rule"></span>
-          </div>
-          <div class="step-overview">
-            <div>
-              <span id="step-kicker">准备开始</span>
-              <strong id="step-title">先看上分位点右侧</strong>
-            </div>
-            <span class="step-count" id="step-count">0 / 4</span>
-          </div>
-          <div class="step-controls">
-            <button id="step-back" class="step-back" type="button" disabled>上一步</button>
-            <button id="step-next" class="step-next" type="button">开始演示</button>
-          </div>
-          <div class="probability-result" id="probability-result" aria-live="polite" aria-atomic="true">
-            <span class="result-label" id="result-label">等你选择一步</span>
-            <strong class="result-formula" id="result-formula">P(X &gt; q<sub>α</sub>) = α</strong>
-          </div>
-          <p class="continuous-note">这三种分布都是连续型分布，单个点的概率为 0，因此小于与小于等于的概率相同。</p>
-        </div>
-      </aside>
+    <section class="controls" aria-label="参数和播放控制">
+      <nav class="steps" aria-label="教学阶段"><button data-time="1.8">01 定位上点</button><button data-time="4.3">02 右尾 α</button><button data-time="6.8">03 同点互补</button><button data-time="9.8">04 换到下点</button><button data-time="12.3">05 右侧补集</button><button data-time="15">06 补回左尾</button></nav>
+      <div class="transport"><div class="transport-buttons"><button id="reset" title="Home">重播</button><button id="previous" title="←">上一步</button><button id="play" class="primary" title="空格">播放演示</button><button id="next" title="→">下一步</button></div><label class="speed-label">速度<select id="speed" aria-label="播放速度"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="1.5">1.5×</option><option value="2">2×</option></select></label><label class="check"><input id="reduced-motion" type="checkbox">减少动效</label></div>
+      <div class="progress-row"><span id="time-value">0.0 s</span><input id="progress" type="range" min="0" max="15" step="0.01" value="0" aria-label="演示进度"><span>15 s</span></div>
+      <div class="parameters"><label class="alpha-control">右尾面积 α<select id="alpha-level"><option value="0.1">0.10</option><option value="0.05" selected>0.05</option><option value="0.01">0.01</option></select></label><label id="single-df-control" class="range-control"><span>自由度 ν<output id="single-df-output">8</output></span><input id="single-df" type="range" min="2" max="30" step="1" value="8"></label><div id="f-df-controls" hidden><label class="range-control"><span>分子自由度 ν₁<output id="f-df1-output">5</output></span><input id="f-df1" type="range" min="2" max="20" step="1" value="5"></label><label class="range-control"><span>分母自由度 ν₂<output id="f-df2-output">10</output></span><input id="f-df2" type="range" min="1" max="30" step="1" value="10"></label></div><p id="shape-note">只取非负值 · 自由度决定曲线形状</p></div>
+      <p id="engine-notice" class="notice" hidden>动画引擎未加载，播放不可用；阶段、进度和参数仍可操作。</p>
     </section>
-
-    <footer class="lesson-footer">
-      <span>卡方 · t · F</span>
-      <span>上侧临界值 · 下侧区域 · 补事件</span>
-    </footer>
+    <footer id="footnote">示意：曲线仅绘有限区间，概率条与数值按全域计算；q 的下标始终表示右尾概率，连续分布的单点概率为 0。</footer>
   </main>
 </body>
 </html>
