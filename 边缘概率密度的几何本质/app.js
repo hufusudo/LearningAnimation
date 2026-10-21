@@ -1,1092 +1,407 @@
-/**
- * 边缘概率密度的几何本质 · 交互式三维可视化引擎
- * 核心几何看点：
- * 1. 截面面积 = 边缘概率密度 (Cavalieri 原理)
- * 2. 侧向投影 = 边缘分布曲线的形成
- * 3. 截面形状归一化 = 条件概率密度
- */
-
-// --- Global State ---
-const state = {
-  model: 'normal',   // 'normal' | 'triangle' | 'ramp'
-  cutDir: 'x',       // 'x' (cut by x = x0) | 'y' (cut by y = y0)
-  slicePos: 0.50,    // current cut coordinate
-  param2: 0.40,      // correlation rho for normal
-  isPlaying: false,
-  layers: {
-    jointSurf: true,
-    slicePlane: true,
-    sliceArea: true,
-    marginalWall: true,
-    conditional: false
-  }
-};
-
-// --- Three.js Variables ---
-let scene, camera, renderer, controls;
-let container;
-
-const dynamicGroup = new THREE.Group();
-
-// Display height scaling factor so probabilities (e.g. 0.16 ~ 0.5) look prominent in 3D
-const Z_SCALE = 5.0;
-
-// Materials Palette
-const materials = {
-  jointSurf: new THREE.MeshStandardMaterial({
-    color: 0x4F46E5,
-    transparent: true,
-    opacity: 0.42,
-    side: THREE.DoubleSide,
-    roughness: 0.3,
-    metalness: 0.15,
-    depthWrite: false
-  }),
-  jointWire: new THREE.MeshBasicMaterial({
-    color: 0x3730A3,
-    wireframe: true,
-    transparent: true,
-    opacity: 0.14
-  }),
-  slicePlane: new THREE.MeshStandardMaterial({
-    color: 0x0D9488,
-    transparent: true,
-    opacity: 0.22,
-    side: THREE.DoubleSide,
-    depthWrite: false
-  }),
-  slicePlaneEdge: new THREE.LineBasicMaterial({ color: 0x0D9488, linewidth: 2 }),
-  sliceArea: new THREE.MeshStandardMaterial({
-    color: 0xF59E0B,
-    emissive: 0xD97706,
-    emissiveIntensity: 0.25,
-    transparent: true,
-    opacity: 0.72,
-    side: THREE.DoubleSide
-  }),
-  sliceRidge: new THREE.LineBasicMaterial({ color: 0xB45309, linewidth: 3 }),
-  marginalCurve: new THREE.LineBasicMaterial({ color: 0xE11D48, linewidth: 3 }),
-  wallPlane: new THREE.MeshBasicMaterial({
-    color: 0xF4F3EE,
-    transparent: true,
-    opacity: 0.65,
-    side: THREE.DoubleSide
-  }),
-  wallFrame: new THREE.LineBasicMaterial({ color: 0xD6D3CD }),
-  postLine: new THREE.LineDashedMaterial({ color: 0xE11D48, dashSize: 0.15, gapSize: 0.08, linewidth: 2 }),
-  postPoint: new THREE.MeshStandardMaterial({ color: 0xE11D48, emissive: 0xBE123C, emissiveIntensity: 0.5 }),
-  condCurve: new THREE.LineBasicMaterial({ color: 0x2563EB, linewidth: 3 }),
-  connectorLine: new THREE.LineDashedMaterial({ color: 0x6366F1, dashSize: 0.12, gapSize: 0.08, linewidth: 1 })
-};
-
-// --- Initialization ---
-window.addEventListener('DOMContentLoaded', () => {
-  initThree();
-  initUI();
-  updateModel();
-  animate();
-  initKaTeX();
-});
-
-function initKaTeX() {
-  const tryRender = () => {
-    if (window.renderMathInElement) {
-      window.renderMathInElement(document.body, {
-        delimiters: [
-          { left: '$$', right: '$$', display: true },
-          { left: '$', right: '$', display: false }
-        ],
-        throwOnError: false
-      });
-    } else {
-      setTimeout(tryRender, 100);
-    }
+/* 三维几何使用 Canvas 正交投影；二维图用真实密度坐标，屏幕缩放不参与积分。 */
+(function () {
+  'use strict';
+  const M = DensityModel, C = DensityChoreo;
+  const $ = id => document.getElementById(id);
+  const clamp = C.clamp;
+  const fmt = (v, n = 2) => (Math.abs(v) < .5 * 10 ** -n ? 0 : v).toFixed(n);
+  const text = (id, value) => { if ($(id).textContent !== value) $(id).textContent = value; };
+  const attr = (el, key, value) => { if (el.getAttribute(key) !== String(value)) el.setAttribute(key, value); };
+  const finite = (value, fallback, a, b) => Number.isFinite(Number(value)) && value !== null ? clamp(Number(value), a, b) : fallback;
+  const hash = new URLSearchParams(location.hash.slice(1));
+  const modelKey = Object.hasOwn(M.models, hash.get('m')) ? hash.get('m') : 'normal';
+  const range = M.models[modelKey].range;
+  const state = {
+    model: modelKey, dir: hash.get('d') === 'y' ? 'y' : 'x',
+    anchor: finite(hash.get('u'), .5, ...range), rho: finite(hash.get('r'), .4, -.8, .8),
+    t: finite(hash.get('t'), 0, 0, 16), speed: finite(hash.get('s'), 1, .5, 2),
+    surface: hash.get('surf') !== '0', conditional: hash.get('c') === '1',
+    reduced: hash.has('rm') ? hash.get('rm') === '1' : matchMedia('(prefers-reduced-motion: reduce)').matches,
+    yaw: finite(hash.get('yaw'), -.65, -Math.PI, Math.PI), pitch: finite(hash.get('pitch'), .6, .2, 1.48),
+    explore: hash.get('e') === '1', playing: false
   };
-  tryRender();
-}
+  if (![.5,1,1.5,2].includes(state.speed)) state.speed=1;
+  const canvas = $('joint-canvas'), ctx = canvas.getContext('2d');
+  let width = 600, height = 350, mesh = [], timeline, reducedCall, linkTimer, resizeFrame;
+  let bridgeSource, bridgeTarget;
+  let currentFrame, currentSlice, lastAxes = '', lastMesh = '', drag;
+  const svgNS = 'http://www.w3.org/2000/svg';
+  const plot = { x: 48, y: 23, w: 326, h: 120, base: 143 };
 
-function initThree() {
-  container = document.getElementById('canvas-container');
-  THREE.Object3D.DefaultUp.set(0, 0, 1);
-
-  scene = new THREE.Scene();
-  scene.background = new THREE.Color(0xFAF9F5);
-
-  const aspect = container.clientWidth / container.clientHeight;
-  camera = new THREE.PerspectiveCamera(45, aspect, 0.1, 100);
-  camera.position.set(7.8, -8.6, 6.2);
-  camera.lookAt(0, 0, 0.6);
-
-  renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-  renderer.setSize(container.clientWidth, container.clientHeight);
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-  renderer.shadowMap.enabled = false;
-  container.appendChild(renderer.domElement);
-
-  controls = new THREE.OrbitControls(camera, renderer.domElement);
-  controls.enableDamping = true;
-  controls.dampingFactor = 0.06;
-  controls.target.set(0, 0, 0.6);
-  controls.maxDistance = 28;
-  controls.minDistance = 2;
-
-  // Lights
-  const ambientLight = new THREE.AmbientLight(0xffffff, 0.80);
-  scene.add(ambientLight);
-
-  const dirLight1 = new THREE.DirectionalLight(0xffffff, 0.85);
-  dirLight1.position.set(10, 10, 14);
-  scene.add(dirLight1);
-
-  const dirLight2 = new THREE.DirectionalLight(0xE2E8F0, 0.5);
-  dirLight2.position.set(-10, -10, -4);
-  scene.add(dirLight2);
-
-  // Ground Grid (XY Plane)
-  const gridHelper = new THREE.GridHelper(12, 24, 0xD6D3CD, 0xE7E5DF);
-  gridHelper.rotation.x = Math.PI / 2;
-  gridHelper.position.set(0, 0, -0.01);
-  scene.add(gridHelper);
-
-  buildReferenceAxes();
-  scene.add(dynamicGroup);
-
-  window.addEventListener('resize', onWindowResize);
-}
-
-function buildReferenceAxes() {
-  const axesGroup = new THREE.Group();
-  const axisLen = 4.8;
-  const radius = 0.016;
-
-  function createAxisLine(p1, p2, color) {
-    const dir = new THREE.Vector3().subVectors(p2, p1);
-    const len = dir.length();
-    const geom = new THREE.CylinderGeometry(radius, radius, len, 16);
-    geom.translate(0, len / 2, 0);
-    geom.rotateX(Math.PI / 2);
-    const mat = new THREE.MeshBasicMaterial({ color });
-    const mesh = new THREE.Mesh(geom, mat);
-    mesh.position.copy(p1);
-    mesh.lookAt(p2);
-    axesGroup.add(mesh);
-
-    const coneGeom = new THREE.ConeGeometry(radius * 3.0, radius * 6.0, 16);
-    coneGeom.translate(0, radius * 3.0, 0);
-    coneGeom.rotateX(Math.PI / 2);
-    const coneMesh = new THREE.Mesh(coneGeom, mat);
-    coneMesh.position.copy(p2);
-    coneMesh.lookAt(p2.clone().add(dir.clone().normalize()));
-    axesGroup.add(coneMesh);
+  function saveLink(immediate = false) {
+    clearTimeout(linkTimer);
+    const save = () => {
+      const params = new URLSearchParams({ m: state.model, d: state.dir, u: fmt(state.anchor, 3), r: fmt(state.rho),
+        t: fmt(state.t), s: String(state.speed), surf: state.surface ? '1' : '0', c: state.conditional ? '1' : '0',
+        rm: state.reduced ? '1' : '0', yaw: fmt(state.yaw, 3), pitch: fmt(state.pitch, 3), e: state.explore ? '1' : '0' });
+      history.replaceState(null, '', '#' + params);
+    };
+    if (immediate) save(); else linkTimer = setTimeout(save, 250);
   }
-
-  createAxisLine(new THREE.Vector3(-axisLen * 0.7, 0, 0), new THREE.Vector3(axisLen, 0, 0), 0xDC2626);
-  createAxisLine(new THREE.Vector3(0, -axisLen * 0.7, 0), new THREE.Vector3(0, axisLen, 0), 0x16A34A);
-  createAxisLine(new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, axisLen * 0.8), 0x4F46E5);
-
-  axesGroup.add(createAxisLabel('+X', new THREE.Vector3(axisLen + 0.35, 0, 0), '#DC2626', true));
-  axesGroup.add(createAxisLabel('+Y', new THREE.Vector3(0, axisLen + 0.35, 0), '#16A34A', true));
-  axesGroup.add(createAxisLabel('z=f(x,y)', new THREE.Vector3(0, 0, axisLen * 0.8 + 0.35), '#4F46E5', true));
-
-  scene.add(axesGroup);
-}
-
-function createAxisLabel(text, position, colorStr, isSmall = false) {
-  const canvas = document.createElement('canvas');
-  const ctx = canvas.getContext('2d');
-  const fontSize = isSmall ? 28 : 34;
-  ctx.font = `600 ${fontSize}px "JetBrains Mono", -apple-system, sans-serif`;
-  const textMetrics = ctx.measureText(text);
-  const textWidth = Math.ceil(textMetrics.width);
-  const paddingX = 16;
-  const paddingY = 8;
-  const canvasWidth = Math.max(70, textWidth + paddingX * 2);
-  const canvasHeight = fontSize + paddingY * 2;
-
-  canvas.width = canvasWidth;
-  canvas.height = canvasHeight;
-
-  ctx.font = `600 ${fontSize}px "JetBrains Mono", -apple-system, sans-serif`;
-  ctx.fillStyle = 'rgba(255, 255, 255, 0.94)';
-  ctx.strokeStyle = '#E5E4DC';
-  ctx.lineWidth = 2;
-
-  const r = 8;
-  ctx.beginPath();
-  if (ctx.roundRect) {
-    ctx.roundRect(2, 2, canvasWidth - 4, canvasHeight - 4, r);
-  } else {
-    ctx.rect(2, 2, canvasWidth - 4, canvasHeight - 4);
+  function sampleTime() {
+    // 减少动效时，直接展示当前步骤终态；时钟仍停在用户选定边界。
+    if (!state.reduced || state.t >= 16) return state.t;
+    const next = C.boundaries.find(t => t > state.t + 1e-7);
+    return next === undefined ? 16 : next;
   }
-  ctx.fill();
-  ctx.stroke();
-
-  ctx.fillStyle = colorStr;
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillText(text, canvasWidth / 2, canvasHeight / 2);
-
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.minFilter = THREE.LinearFilter;
-  const spriteMat = new THREE.SpriteMaterial({ map: texture, transparent: true, depthTest: false });
-  const sprite = new THREE.Sprite(spriteMat);
-  sprite.position.copy(position);
-
-  const worldHeight = isSmall ? 0.22 : 0.30;
-  const worldWidth = worldHeight * (canvasWidth / canvasHeight);
-  sprite.scale.set(worldWidth, worldHeight, 1);
-  return sprite;
-}
-
-function onWindowResize() {
-  if (!container || !renderer || !camera) return;
-  camera.aspect = container.clientWidth / container.clientHeight;
-  camera.updateProjectionMatrix();
-  renderer.setSize(container.clientWidth, container.clientHeight);
-}
-
-function animate() {
-  requestAnimationFrame(animate);
-
-  if (state.isPlaying) {
-    let minVal, maxVal;
-    if (state.model === 'normal') {
-      minVal = -2.4; maxVal = 2.4;
-    } else if (state.model === 'triangle') {
-      minVal = 0.05; maxVal = 1.95;
-    } else {
-      minVal = 0.05; maxVal = 1.95;
+  function frame() {
+    const result = C.sample(sampleTime(), state.anchor, M.models[state.model].range, state.explore);
+    const phase = C.sample(state.t, state.anchor, M.models[state.model].range, state.explore);
+    result.phase = phase.phase; result.name = phase.name;
+    result.captionIndex = state.reduced ? phase.phase : result.captionIndex;
+    result.captionAlpha = state.reduced ? 1 : result.captionAlpha;
+    return result;
+  }
+  function stop() {
+    state.playing = false;
+    timeline?.pause(); reducedCall?.kill(); reducedCall = undefined;
+    text('play', '播放演示'); $('status-dot').classList.remove('playing');
+    saveLink(true);
+  }
+  function seek(t, user = true) {
+    if (user) stop();
+    state.t = clamp(t, 0, 16);
+    timeline?.time(state.t, true);
+    render(); saveLink(user);
+  }
+  function step(direction) {
+    const target = direction > 0 ? C.boundaries.find(t => t > state.t + .001)
+      : [...C.boundaries].reverse().find(t => t < state.t - .001);
+    state.explore = false;
+    seek(target === undefined ? (direction > 0 ? 16 : 0) : target);
+  }
+  function reducedTick() {
+    reducedCall = gsap.delayedCall(.9 / state.speed, () => {
+      if (!state.playing) return;
+      const target = C.boundaries.find(t => t > state.t + .001);
+      if (target === undefined) { stop(); return; }
+      seek(target, false);
+      if (target >= 16) stop(); else reducedTick();
+    });
+  }
+  function togglePlay() {
+    if (!timeline) return;
+    if (state.playing) { stop(); return; }
+    if (state.explore) {
+      state.anchor = currentFrame.u; state.explore = false;
+      // 探索后继续前面的教学，或从扫描起点重新扫描当前截面。
+      if (state.t >= 10) seek(10, false);
     }
-
-    state.slicePos += 0.016;
-    if (state.slicePos > maxVal) state.slicePos = minVal;
-
-    const slider = document.getElementById('slider-slice');
-    if (slider) slider.value = state.slicePos.toFixed(2);
-    const valSlice = document.getElementById('val-slice');
-    if (valSlice) valSlice.innerText = state.slicePos.toFixed(2);
-
-    updateGeometryOnly();
+    if (state.t >= 16) seek(0, false);
+    state.playing = true; text('play', '暂停演示'); $('status-dot').classList.add('playing');
+    if (state.reduced) reducedTick(); else timeline.timeScale(state.speed).play(state.t);
+  }
+  function parameterChange(fn, geometry = false) {
+    stop(); fn();
+    if (geometry) lastMesh = '';
+    render(); saveLink(true);
   }
 
-  controls.update();
-  renderer.render(scene, camera);
-}
-
-// ==========================================
-// --- Mathematical Evaluation Functions ---
-// ==========================================
-
-const MathModels = {
-  normal: {
-    name: '二维正态分布',
-    xRange: [-3.0, 3.0],
-    yRange: [-3.0, 3.0],
-    zMax: 0.35,
-    joint(x, y, rho) {
-      const denom = 2 * Math.PI * Math.sqrt(1 - rho * rho);
-      const expo = -(x * x - 2 * rho * x * y + y * y) / (2 * (1 - rho * rho));
-      return (1 / denom) * Math.exp(expo);
-    },
-    marginalX(x) {
-      return (1 / Math.sqrt(2 * Math.PI)) * Math.exp(-0.5 * x * x);
-    },
-    marginalY(y) {
-      return (1 / Math.sqrt(2 * Math.PI)) * Math.exp(-0.5 * y * y);
-    },
-    condYgivenX(y, x, rho) {
-      const mu = rho * x;
-      const sigma = Math.sqrt(1 - rho * rho);
-      return (1 / (Math.sqrt(2 * Math.PI) * sigma)) * Math.exp(-0.5 * Math.pow((y - mu) / sigma, 2));
-    }
-  },
-
-  triangle: {
-    name: '三角形域二维均匀分布',
-    xRange: [0, 2.0],
-    yRange: [0, 2.0],
-    zMax: 0.55,
-    joint(x, y) {
-      // Domain: 0 <= x <= 2, 0 <= y <= 2 - x. Area = 2. Height = 0.5.
-      if (x >= 0 && x <= 2.0 && y >= 0 && y <= (2.0 - x)) {
-        return 0.5;
+  function buildMesh() {
+    const cacheKey = `${state.model}/${state.rho}`;
+    if (cacheKey === lastMesh) return;
+    lastMesh = cacheKey; mesh = [];
+    const model = M.models[state.model], [a, b] = model.range, n = 30;
+    const make = (x, y) => [2 * (x - a) / (b - a) - 1, 2 * (y - a) / (b - a) - 1, model.joint(x, y, state.rho)];
+    for (let i = 0; i < n; i++) {
+      for (let j = 0; j < n; j++) {
+        const x = a + (b - a) * i / n, y = a + (b - a) * j / n, dx = (b - a) / n;
+        if (state.model === 'triangle') {
+          if (i + j >= n) continue;
+          mesh.push([make(x, y), make(x + dx, y), make(x, y + dx)]);
+          if (i + j < n - 1) mesh.push([make(x + dx, y), make(x + dx, y + dx), make(x, y + dx)]);
+          // 三角形顶面恒高，不用浮点边界比较产生零高度顶点。
+          for (const tri of mesh.slice(-((i + j < n - 1) ? 2 : 1))) for (const v of tri) v[2] = .5;
+        } else {
+          mesh.push([make(x, y), make(x + dx, y), make(x + dx, y + dx), make(x, y + dx)]);
+        }
       }
-      return 0.0;
-    },
-    marginalX(x) {
-      if (x >= 0 && x <= 2.0) {
-        return 0.5 * (2.0 - x); // = 1.0 - 0.5 * x
-      }
-      return 0.0;
-    },
-    marginalY(y) {
-      if (y >= 0 && y <= 2.0) {
-        return 0.5 * (2.0 - y); // = 1.0 - 0.5 * y
-      }
-      return 0.0;
-    },
-    condYgivenX(y, x) {
-      if (x >= 0 && x < 2.0 && y >= 0 && y <= (2.0 - x)) {
-        return 1 / (2.0 - x); // Uniform on [0, 2 - x]
-      }
-      return 0;
-    }
-  },
-
-  ramp: {
-    name: '斜坡分布 f(x,y)=(x+y)/8',
-    xRange: [0, 2.0],
-    yRange: [0, 2.0],
-    zMax: 0.55,
-    joint(x, y) {
-      if (x >= 0 && x <= 2.0 && y >= 0 && y <= 2.0) {
-        return (x + y) / 8.0;
-      }
-      return 0.0;
-    },
-    marginalX(x) {
-      if (x >= 0 && x <= 2.0) {
-        return (x + 1.0) / 4.0;
-      }
-      return 0.0;
-    },
-    marginalY(y) {
-      if (y >= 0 && y <= 2.0) {
-        return (y + 1.0) / 4.0;
-      }
-      return 0.0;
-    },
-    condYgivenX(y, x) {
-      if (x >= 0 && x <= 2.0 && y >= 0 && y <= 2.0) {
-        return ((x + y) / 8.0) / ((x + 1.0) / 4.0);
-      }
-      return 0.0;
     }
   }
-};
-
-// ==========================================
-// --- 3D Scene Geometry Generation ---
-// ==========================================
-
-function updateModel() {
-  while (dynamicGroup.children.length > 0) {
-    const obj = dynamicGroup.children[0];
-    dynamicGroup.remove(obj);
-    if (obj.geometry) obj.geometry.dispose();
-  }
-
-  buildJointSurface();
-  buildSliceAndProjection();
-  updateHUD();
-  updateExplanationText();
-}
-
-function updateGeometryOnly() {
-  // Remove temporary dynamic meshes (slice plane, area, post) while keeping base static if needed
-  while (dynamicGroup.children.length > 0) {
-    const obj = dynamicGroup.children[0];
-    dynamicGroup.remove(obj);
-    if (obj.geometry) obj.geometry.dispose();
-  }
-
-  buildJointSurface();
-  buildSliceAndProjection();
-  updateHUDValues();
-  updateExplanationText();
-}
-
-/**
- * Build Joint Probability Density Surface z = f(x, y)
- */
-function buildJointSurface() {
-  if (!state.layers.jointSurf) return;
-
-  const m = MathModels[state.model];
-  const rho = state.param2;
-
-  const [xMin, xMax] = m.xRange;
-  const [yMin, yMax] = m.yRange;
-
-  const gridX = 50;
-  const gridY = 50;
-  const vertices = [];
-  const indices = [];
-
-  for (let i = 0; i <= gridX; i++) {
-    const x = xMin + (xMax - xMin) * (i / gridX);
-    for (let j = 0; j <= gridY; j++) {
-      const y = yMin + (yMax - yMin) * (j / gridY);
-      const density = m.joint(x, y, rho);
-      const z = density * Z_SCALE;
-      vertices.push(x, y, z);
+  function draw3D(f, slice) {
+    if (!ctx) return;
+    buildMesh();
+    ctx.clearRect(0, 0, width, height);
+    const model = M.models[state.model], [a, b] = model.range;
+    const norm = v => 2 * (v - a) / (b - a) - 1;
+    // 所有模型使用固定密度纵向比例；数值标尺与形状不随 rho 自动拉伸。
+    const zScale = state.model === 'normal' ? 4.6 : 2.6;
+    const planeTop = state.model === 'normal' ? .32 : .58;
+    const c = Math.cos(state.yaw), s = Math.sin(state.yaw), cp = Math.cos(state.pitch), sp = Math.sin(state.pitch);
+    const rawProject = ([x,y,z]) => {
+      const depth=s*x+c*y;
+      return [c*x-s*y,sp*depth-cp*z*zScale,cp*depth+sp*z*zScale];
+    };
+    // 包含所有切片位置的固定包围盒，扫描时不自动缩放；任意视角都留出轴标签空间。
+    const corners=[];
+    for(const x of [-1,1]) for(const y of [-1,1]) for(const z of [0,planeTop]) corners.push(rawProject([x,y,z]));
+    const minX=Math.min(...corners.map(v=>v[0])),maxX=Math.max(...corners.map(v=>v[0]));
+    const minY=Math.min(...corners.map(v=>v[1])),maxY=Math.max(...corners.map(v=>v[1]));
+    const scale=Math.min((width-86)/(maxX-minX),(height-77)/(maxY-minY));
+    const cx=width/2-scale*(minX+maxX)/2,cy=(height-31)/2-scale*(minY+maxY)/2;
+    const project = v => {
+      const raw=rawProject(v);
+      return [cx+scale*raw[0],cy+scale*raw[1],raw[2]];
+    };
+    function path(points, fill, stroke, lineWidth = 1, alpha = 1) {
+      ctx.globalAlpha = alpha; ctx.beginPath();
+      points.forEach((v, i) => { const p = project(v); if (!i) ctx.moveTo(p[0], p[1]); else ctx.lineTo(p[0], p[1]); });
+      if (fill) { ctx.closePath(); ctx.fillStyle = fill; ctx.fill(); }
+      if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = lineWidth; ctx.stroke(); }
+      ctx.globalAlpha = 1;
     }
-  }
-
-  for (let i = 0; i < gridX; i++) {
-    for (let j = 0; j < gridY; j++) {
-      const a = i * (gridY + 1) + j;
-      const b = (i + 1) * (gridY + 1) + j;
-      const c = (i + 1) * (gridY + 1) + (j + 1);
-      const d = i * (gridY + 1) + (j + 1);
-
-      indices.push(a, b, d);
-      indices.push(b, c, d);
+    function label(value, v, color = '#6b7066', dx = 0, dy = 0) {
+      const p = project(v); ctx.font = '11px -apple-system, "Microsoft YaHei", sans-serif'; ctx.fillStyle = color;
+      ctx.textAlign = 'center'; ctx.fillText(value, p[0] + dx, p[1] + dy);
     }
-  }
-
-  const geom = new THREE.BufferGeometry();
-  geom.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
-  geom.setIndex(indices);
-  geom.computeVertexNormals();
-
-  const surfMesh = new THREE.Mesh(geom, materials.jointSurf);
-  const wireMesh = new THREE.Mesh(geom, materials.jointWire);
-  dynamicGroup.add(surfMesh);
-  dynamicGroup.add(wireMesh);
-
-  // Label for Joint Density Surface
-  const topZ = (state.model === 'normal' ? 0.28 : 0.5) * Z_SCALE;
-  const peakPos = new THREE.Vector3(0, 0, topZ + 0.35);
-  dynamicGroup.add(createAxisLabel('联合密度曲面 z = f(x, y)', peakPos, '#4F46E5'));
-}
-
-/**
- * Build Slicing Plane, Cross-sectional Area Ribbon, and Marginal Projection Wall
- */
-function buildSliceAndProjection() {
-  const m = MathModels[state.model];
-  const rho = state.param2;
-  const isCutX = state.cutDir === 'x';
-  const cPos = state.slicePos;
-
-  const [xMin, xMax] = m.xRange;
-  const [yMin, yMax] = m.yRange;
-  const zMaxDisplay = 0.65 * Z_SCALE;
-
-  // ----------------------------------------------------
-  // 1. Slicing Plane π
-  // ----------------------------------------------------
-  if (state.layers.slicePlane) {
-    const planeGeom = new THREE.PlaneGeometry(
-      isCutX ? (yMax - yMin + 0.4) : (xMax - xMin + 0.4),
-      zMaxDisplay + 0.2
-    );
-    const planeMesh = new THREE.Mesh(planeGeom, materials.slicePlane);
-
-    if (isCutX) {
-      planeMesh.rotation.y = Math.PI / 2;
-      planeMesh.position.set(cPos, (yMin + yMax) / 2, (zMaxDisplay + 0.2) / 2);
-    } else {
-      planeMesh.rotation.x = Math.PI / 2;
-      planeMesh.position.set((xMin + xMax) / 2, cPos, (zMaxDisplay + 0.2) / 2);
-    }
-    dynamicGroup.add(planeMesh);
-
-    // Outline Frame for Slicing Plane
-    const edgeGeom = new THREE.EdgesGeometry(planeGeom);
-    const edgeLine = new THREE.LineSegments(edgeGeom, materials.slicePlaneEdge);
-    edgeLine.position.copy(planeMesh.position);
-    edgeLine.rotation.copy(planeMesh.rotation);
-    dynamicGroup.add(edgeLine);
-
-    // Label on Slice Plane
-    const labelPos = isCutX
-      ? new THREE.Vector3(cPos, yMax + 0.3, zMaxDisplay * 0.7)
-      : new THREE.Vector3(xMax + 0.3, cPos, zMaxDisplay * 0.7);
-    dynamicGroup.add(createAxisLabel(isCutX ? `切片平面 x = ${cPos.toFixed(2)}` : `切片平面 y = ${cPos.toFixed(2)}`, labelPos, '#0D9488'));
-  }
-
-  // ----------------------------------------------------
-  // 2. Cross-Sectional Area (Ribbon & Ridge)
-  // ----------------------------------------------------
-  const slicePoints = [];
-  const numSteps = 70;
-  const varMin = isCutX ? yMin : xMin;
-  const varMax = isCutX ? yMax : xMax;
-
-  let computedArea = 0;
-  let prevV = varMin;
-  let prevD = isCutX ? m.joint(cPos, varMin, rho) : m.joint(varMin, cPos, rho);
-
-  for (let i = 0; i <= numSteps; i++) {
-    const v = varMin + (varMax - varMin) * (i / numSteps);
-    const density = isCutX ? m.joint(cPos, v, rho) : m.joint(v, cPos, rho);
-    const z = density * Z_SCALE;
-
-    if (isCutX) {
-      slicePoints.push(new THREE.Vector3(cPos, v, z));
-    } else {
-      slicePoints.push(new THREE.Vector3(v, cPos, z));
-    }
-
-    // Trapezoidal numerical integration for live display
-    if (i > 0) {
-      computedArea += 0.5 * (prevD + density) * (v - prevV);
-    }
-    prevV = v;
-    prevD = density;
-  }
-
-  // Cross-section Ribbon Mesh (filled area under the curve)
-  if (state.layers.sliceArea) {
-    const ribbonVerts = [];
-    const ribbonIndices = [];
-
-    for (let i = 0; i <= numSteps; i++) {
-      const pt = slicePoints[i];
-      // Bottom vertex on ground
-      ribbonVerts.push(pt.x, pt.y, 0);
-      // Top vertex on curve
-      ribbonVerts.push(pt.x, pt.y, pt.z);
-    }
-
-    for (let i = 0; i < numSteps; i++) {
-      const b1 = i * 2;
-      const t1 = i * 2 + 1;
-      const b2 = (i + 1) * 2;
-      const t2 = (i + 1) * 2 + 1;
-
-      ribbonIndices.push(b1, b2, t2);
-      ribbonIndices.push(b1, t2, t1);
-    }
-
-    const ribbonGeom = new THREE.BufferGeometry();
-    ribbonVerts.forEach((v, idx) => { ribbonVerts[idx] = v; });
-    ribbonGeom.setAttribute('position', new THREE.Float32BufferAttribute(ribbonVerts, 3));
-    ribbonGeom.setIndex(ribbonIndices);
-    ribbonGeom.computeVertexNormals();
-
-    const ribbonMesh = new THREE.Mesh(ribbonGeom, materials.sliceArea);
-    dynamicGroup.add(ribbonMesh);
-
-    // Top Ridge Outline
-    const ridgeGeom = new THREE.BufferGeometry().setFromPoints(slicePoints);
-    const ridgeLine = new THREE.Line(ridgeGeom, materials.sliceRidge);
-    dynamicGroup.add(ridgeLine);
-
-    // Area Label in center of slice
-    const midIdx = Math.floor(numSteps / 2);
-    const midPt = slicePoints[midIdx];
-    const areaLabelPos = new THREE.Vector3(midPt.x, midPt.y, Math.max(0.2, midPt.z * 0.45));
-    dynamicGroup.add(createAxisLabel(`截面面积 A = ${computedArea.toFixed(4)}`, areaLabelPos, '#D97706', true));
-  }
-
-  // ----------------------------------------------------
-  // 3. Conditional Density Curve Overlay (Optional)
-  // ----------------------------------------------------
-  if (state.layers.conditional && computedArea > 0.005) {
-    const condPoints = [];
-    for (let i = 0; i <= numSteps; i++) {
-      const v = varMin + (varMax - varMin) * (i / numSteps);
-      const condVal = isCutX ? m.condYgivenX(v, cPos, rho) : m.condYgivenX(cPos, v, rho);
-      const z = condVal * (Z_SCALE * 0.6); // scaled for clear view
-      if (isCutX) {
-        condPoints.push(new THREE.Vector3(cPos + 0.02, v, z));
+    const domain = state.model === 'triangle' ? [[-1,-1,0],[1,-1,0],[-1,1,0]] : [[-1,-1,0],[1,-1,0],[1,1,0],[-1,1,0]];
+    path(domain, '#edf1e7', '#c5cec0');
+    for (let i = 0; i <= 6; i++) {
+      const v = -1 + 2 * i / 6;
+      if (state.model === 'triangle') {
+        path([[v,-1,0],[v,-v,0]], null, '#d8dfd1');
+        path([[-1,v,0],[-v,v,0]], null, '#d8dfd1');
       } else {
-        condPoints.push(new THREE.Vector3(v, cPos + 0.02, z));
+        path([[v,-1,0],[v,1,0]], null, '#d8dfd1');
+        path([[-1,v,0],[1,v,0]], null, '#d8dfd1');
       }
     }
-    const condGeom = new THREE.BufferGeometry().setFromPoints(condPoints);
-    const condLine = new THREE.Line(condGeom, materials.condCurve);
-    dynamicGroup.add(condLine);
-
-    const midCondPt = condPoints[Math.floor(numSteps / 2)];
-    dynamicGroup.add(createAxisLabel(isCutX ? `条件分布 f_{Y|X}(y|x₀)` : `条件分布 f_{X|Y}(x|y₀)`, midCondPt.clone().add(new THREE.Vector3(0, 0, 0.25)), '#2563EB', true));
-  }
-
-  // ----------------------------------------------------
-  // 4. Marginal Projection Wall & Theoretical Curve
-  // ----------------------------------------------------
-  if (state.layers.marginalWall) {
-    const wallDist = isCutX ? (yMin - 0.7) : (xMax + 0.7);
-
-    // Projection Wall Board
-    const wallWidth = isCutX ? (xMax - xMin + 0.6) : (yMax - yMin + 0.6);
-    const wallHeight = zMaxDisplay + 0.4;
-    const wallGeom = new THREE.PlaneGeometry(wallWidth, wallHeight);
-    const wallMesh = new THREE.Mesh(wallGeom, materials.wallPlane);
-
-    if (isCutX) {
-      // Wall parallel to xOz
-      wallMesh.position.set((xMin + xMax) / 2, wallDist, wallHeight / 2);
-    } else {
-      // Wall parallel to yOz
-      wallMesh.rotation.y = Math.PI / 2;
-      wallMesh.position.set(wallDist, (yMin + yMax) / 2, wallHeight / 2);
-    }
-    dynamicGroup.add(wallMesh);
-
-    // Wall frame
-    const wallEdgeGeom = new THREE.EdgesGeometry(wallGeom);
-    const wallEdge = new THREE.LineSegments(wallEdgeGeom, materials.wallFrame);
-    wallEdge.position.copy(wallMesh.position);
-    wallEdge.rotation.copy(wallMesh.rotation);
-    dynamicGroup.add(wallEdge);
-
-    // Wall Title
-    const wallTitlePos = isCutX
-      ? new THREE.Vector3((xMin + xMax) / 2, wallDist - 0.05, wallHeight - 0.15)
-      : new THREE.Vector3(wallDist + 0.05, (yMin + yMax) / 2, wallHeight - 0.15);
-    dynamicGroup.add(createAxisLabel(isCutX ? '侧壁投影面: 边缘概率密度 f_X(x)' : '侧壁投影面: 边缘概率密度 f_Y(y)', wallTitlePos, '#E11D48'));
-
-    // 1D Marginal Curve on Wall
-    const margPoints = [];
-    const margSteps = 80;
-    for (let i = 0; i <= margSteps; i++) {
-      const u = (isCutX ? xMin : yMin) + ((isCutX ? xMax - xMin : yMax - yMin)) * (i / margSteps);
-      const mVal = isCutX ? m.marginalX(u) : m.marginalY(u);
-      const z = mVal * Z_SCALE;
-      if (isCutX) {
-        margPoints.push(new THREE.Vector3(u, wallDist + 0.02, z));
-      } else {
-        margPoints.push(new THREE.Vector3(wallDist - 0.02, u, z));
+    // 底座、边界竖壁表达有限域支持，三角形斜边保持真正竖直。
+    const faces = [];
+    const edges = state.model === 'triangle' ? [[ [a,a], [b,a] ],[ [b,a], [a,b] ],[ [a,b], [a,a] ]]
+      : [[[a,a],[b,a]],[[b,a],[b,b]],[[b,b],[a,b]],[[a,b],[a,a]]];
+    if (state.surface && state.model !== 'normal') {
+      for (const [p, q] of edges) {
+        const h1 = state.model === 'triangle' ? .5 : model.joint(...p), h2 = state.model === 'triangle' ? .5 : model.joint(...q);
+        faces.push({ points: [[norm(p[0]),norm(p[1]),0],[norm(q[0]),norm(q[1]),0],[norm(q[0]),norm(q[1]),h2],[norm(p[0]),norm(p[1]),h1]], side: true });
       }
     }
-    const margGeom = new THREE.BufferGeometry().setFromPoints(margPoints);
-    const margLine = new THREE.Line(margGeom, materials.marginalCurve);
-    dynamicGroup.add(margLine);
-
-    // Indicator Post at current slice coordinate
-    const theoreticalMarg = isCutX ? m.marginalX(cPos) : m.marginalY(cPos);
-    const postHeight = theoreticalMarg * Z_SCALE;
-
-    const postBase = isCutX ? new THREE.Vector3(cPos, wallDist + 0.02, 0) : new THREE.Vector3(wallDist - 0.02, cPos, 0);
-    const postTop = isCutX ? new THREE.Vector3(cPos, wallDist + 0.02, postHeight) : new THREE.Vector3(wallDist - 0.02, cPos, postHeight);
-
-    const postGeom = new THREE.BufferGeometry().setFromPoints([postBase, postTop]);
-    const postLine = new THREE.Line(postGeom, materials.postLine);
-    postLine.computeLineDistances();
-    dynamicGroup.add(postLine);
-
-    const pointTop = new THREE.Mesh(new THREE.SphereGeometry(0.09, 16, 16), materials.postPoint);
-    pointTop.position.copy(postTop);
-    dynamicGroup.add(pointTop);
-
-    // Connecting Ray between Slice Area centroid and Wall Post Point
-    const sliceMidPt = isCutX
-      ? new THREE.Vector3(cPos, (yMin + yMax) / 2, postHeight * 0.5)
-      : new THREE.Vector3((xMin + xMax) / 2, cPos, postHeight * 0.5);
-    const connGeom = new THREE.BufferGeometry().setFromPoints([sliceMidPt, postTop]);
-    const connLine = new THREE.Line(connGeom, materials.connectorLine);
-    connLine.computeLineDistances();
-    dynamicGroup.add(connLine);
-
-    dynamicGroup.add(createAxisLabel(
-      isCutX ? `f_X(${cPos.toFixed(2)}) = ${theoreticalMarg.toFixed(4)}` : `f_Y(${cPos.toFixed(2)}) = ${theoreticalMarg.toFixed(4)}`,
-      postTop.clone().add(new THREE.Vector3(0, 0, 0.28)),
-      '#E11D48',
-      true
-    ));
-  }
-}
-
-// ==========================================
-// --- HUD & Dynamic Math Text Generators ---
-// ==========================================
-
-function updateHUD() {
-  const m = MathModels[state.model];
-  const isCutX = state.cutDir === 'x';
-  const cPos = state.slicePos;
-  const rho = state.param2;
-
-  const modelBadge = document.getElementById('hud-model-badge');
-  const jointFormula = document.getElementById('hud-joint-formula');
-  const sliceFormula = document.getElementById('hud-slice-formula');
-
-  if (state.model === 'normal') {
-    modelBadge.innerText = `二维正态分布 N(0, 0, 1, 1, ρ=${rho.toFixed(2)})`;
-    modelBadge.className = 'subtle-badge bg-blue-50 text-blue-700 border-blue-200';
-    jointFormula.innerText = 'f(x, y) = 1/(2π√(1-ρ²)) exp(-q/2)';
-    sliceFormula.innerText = isCutX ? `平面 x = ${cPos.toFixed(2)}` : `平面 y = ${cPos.toFixed(2)}`;
-  } else if (state.model === 'triangle') {
-    modelBadge.innerText = '三角形域均匀分布 U(D)';
-    modelBadge.className = 'subtle-badge bg-amber-50 text-amber-800 border-amber-200';
-    jointFormula.innerText = 'f(x, y) = 0.5 在直角三角形 D 内';
-    sliceFormula.innerText = isCutX ? `平面 x = ${cPos.toFixed(2)} (y∈[0, 2-x])` : `平面 y = ${cPos.toFixed(2)} (x∈[0, 2-y])`;
-  } else {
-    modelBadge.innerText = '斜坡多项式分布 f(x,y)=(x+y)/8';
-    modelBadge.className = 'subtle-badge bg-indigo-50 text-indigo-700 border-indigo-200';
-    jointFormula.innerText = 'f(x, y) = (x + y)/8 在 [0, 2]² 内';
-    sliceFormula.innerText = isCutX ? `平面 x = ${cPos.toFixed(2)}` : `平面 y = ${cPos.toFixed(2)}`;
-  }
-
-  updateHUDValues();
-}
-
-function updateHUDValues() {
-  const m = MathModels[state.model];
-  const isCutX = state.cutDir === 'x';
-  const cPos = state.slicePos;
-
-  const areaVal = isCutX ? m.marginalX(cPos) : m.marginalY(cPos);
-  const hudArea = document.getElementById('hud-area-val');
-  const hudMarginal = document.getElementById('hud-marginal-val');
-  const valSlice = document.getElementById('val-slice');
-  const valParam2 = document.getElementById('val-param2');
-
-  if (hudArea) hudArea.innerText = `A(${isCutX ? 'x₀' : 'y₀'}) = ${areaVal.toFixed(4)}`;
-  if (hudMarginal) hudMarginal.innerText = `${isCutX ? 'f_X' : 'f_Y'}(${isCutX ? 'x₀' : 'y₀'}) = ${areaVal.toFixed(4)}`;
-  if (valSlice) valSlice.innerText = cPos.toFixed(2);
-  if (valParam2) valParam2.innerText = Number(state.param2).toFixed(2);
-}
-
-function updateExplanationText() {
-  const container = document.getElementById('dynamic-derivation-content');
-  if (!container) return;
-
-  const isCutX = state.cutDir === 'x';
-  const cPos = Number(state.slicePos);
-  const rho = Number(state.param2);
-  const m = MathModels[state.model];
-  const margVal = isCutX ? m.marginalX(cPos) : m.marginalY(cPos);
-
-  let html = '';
-
-  // ----------------------------------------------------
-  // Section 1: Universal Geometric Essence (Cavalieri)
-  // ----------------------------------------------------
-  html += `
-    <div class="space-y-3">
-      <div class="callout-box callout-tip">
-        <strong>[!tip] 核心几何本质速记</strong><br>
-        <strong>“联合密度是山峰，截面面积即边缘；侧向投影成曲线，切片归一出条件”</strong>
-      </div>
-
-      <div class="space-y-1.5">
-        <h3 class="font-bold text-stone-900 text-xs flex items-center gap-1.5">
-          <span class="w-1.5 h-3 bg-emerald-600 rounded-full"></span>
-          §1 几何本质：从三维概率山峰到横截面面积
-        </h3>
-        <p class="text-stone-600 text-[11px]">
-          在空间直角坐标系中，连续型随机变量 $(X, Y)$ 的联合概率密度函数 $z = f(x, y)$ 构成了一张<strong>三维曲面（概率山峰）</strong>。
-          由全概率归一化性质，曲面下方与 $xOy$ 基底平面所围成的<strong>总体积恒等于 1</strong>：
-        </p>
-        <div class="formula-box text-center py-1">
-          $$\\iint_{\\mathbb{R}^2} f(x, y) \\, dx \\, dy = \\text{空间立体总体积} = 1$$
-        </div>
-      </div>
-
-      <!-- Cavalieri's Principle Box -->
-      <div class="p-3 rounded-xl bg-amber-50/70 border border-amber-200 space-y-1.5">
-        <div class="font-semibold text-amber-950 text-[11px] flex items-center gap-1.5">
-          <span class="w-2 h-2 rounded-full bg-amber-600"></span>
-          <span>祖暅原理 (Cavalieri 原理) 与切片面积对应：</span>
-        </div>
-        <p class="text-stone-700 text-[11px]">
-          若我们用垂直于 $x$ 轴的活动平面 $x = x_0$ 去截该概率立体，截出的纵向薄片在几何上具有截面面积 $A(x_0)$：
-        </p>
-        <div class="formula-box text-center py-1 bg-white border-amber-200 font-semibold text-amber-900">
-          $$A(x_0) = \\int_{-\\infty}^{+\\infty} f(x_0, y) \\, dy = f_X(x_0)$$
-        </div>
-        <p class="text-[10px] text-amber-800">
-          <strong>核心结论：</strong>边缘概率密度 $f_X(x_0)$ 在几何数值上，<strong>恰好精确等于截面平面 $x = x_0$ 处的截面面积 (Cross-sectional Area)！</strong>
-        </p>
-      </div>
-  `;
-
-  // ----------------------------------------------------
-  // Section 2: Model-specific Live Derivation
-  // ----------------------------------------------------
-  html += `
-      <div class="p-3.5 rounded-xl bg-white border border-[#E5E4DC] space-y-2">
-        <div class="flex items-center justify-between">
-          <span class="font-bold text-stone-900 text-[11px]">§2 当前模型实时解析推导 (${m.name})</span>
-          <span class="text-[10px] font-mono text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">动态联动中</span>
-        </div>
-  `;
-
-  if (state.model === 'normal') {
-    html += `
-        <p class="text-stone-600 text-[11px]">
-          设 $(X, Y) \\sim N(0, 0, 1, 1, \\rho=${rho.toFixed(2)})$。当前截面位置为 $x_0 = ${cPos.toFixed(2)}$。
-        </p>
-        <div class="space-y-1.5 pt-1 text-[11px]">
-          <div class="font-semibold text-stone-800">步骤拆解：</div>
-          <ol class="list-decimal list-inside space-y-1 text-stone-600 pl-1">
-            <li>
-              <strong>写出截面截线方程：</strong>固定 $x = ${cPos.toFixed(2)}$，关于 $y$ 的单变量截线曲线为：
-              <div class="formula-box py-1 text-[10px]">
-                $$z(y) = f(${cPos.toFixed(2)}, y) = \\frac{1}{2\\pi\\sqrt{1-\\rho^2}} \\exp\\left( -\\frac{${cPos.toFixed(2)}^2 - 2\\rho(${cPos.toFixed(2)})y + y^2}{2(1-\\rho^2)} \\right)$$
-              </div>
-            </li>
-            <li>
-              <strong>因式分解与条件概率剥离：</strong>
-              配方整理指数项，截线可严格分解为<strong>“常数项 $\\times$ 条件正态密度”</strong>：
-              <div class="formula-box py-1 text-[10px]">
-                $$f(x_0, y) = \\underbrace{\\frac{1}{\\sqrt{2\\pi}} e^{-\\frac{x_0^2}{2}}}_{\\text{截面总面积 } f_X(x_0)} \\times \\underbrace{\\frac{1}{\\sqrt{2\\pi(1-\\rho^2)}} \\exp\\left(-\\frac{(y - \\rho x_0)^2}{2(1-\\rho^2)}\\right)}_{\\text{条件密度 } f_{Y|X}(y|x_0) \\text{，积分恒为 1}}$$
-              </div>
-            </li>
-            <li>
-              <strong>积分求面积：</strong>因为条件正态密度对 $y$ 从 $-\\infty$ 到 $+\\infty$ 积分为 1，所以截面面积直接等于前置项：
-              <div class="formula-box py-1 text-[11px] font-bold text-rose-800 bg-rose-50/50 border-rose-200">
-                $$A(${cPos.toFixed(2)}) = f_X(${cPos.toFixed(2)}) = \\frac{1}{\\sqrt{2\\pi}} e^{-\\frac{(${cPos.toFixed(2)})^2}{2}} \\approx ${margVal.toFixed(4)}$$
-              </div>
-            </li>
-          </ol>
-        </div>
-    `;
-  } else if (state.model === 'triangle') {
-    const boundY = Math.max(0, 2.0 - cPos).toFixed(2);
-    html += `
-        <p class="text-stone-600 text-[11px]">
-          区域 $D$ 为直角三角形 $0 \\le x \\le 2, 0 \\le y \\le 2 - x$，高为 $0.5$（总体积为 $2 \\times 0.5 = 1$）。
-        </p>
-        <div class="space-y-1.5 pt-1 text-[11px]">
-          <div class="font-semibold text-stone-800">考研典型步骤拆解：</div>
-          <ol class="list-decimal list-inside space-y-1 text-stone-600 pl-1">
-            <li>
-              <strong>确定截面区间：</strong>在 $x_0 = ${cPos.toFixed(2)}$ 处，平行于 $y$ 轴画穿线，底端入点 $y=0$，顶端出点 $y = 2 - ${cPos.toFixed(2)} = ${boundY}$。
-            </li>
-            <li>
-              <strong>截面几何形状：</strong>由于联合密度在三角形内恒为常数 $0.5$，截面是一个<strong>矩形</strong>！
-              <ul class="list-disc list-inside pl-3 pt-0.5 text-stone-500">
-                <li>矩形高度：$h = 0.5$</li>
-                <li>矩形底宽：$w = 2 - x_0 = ${boundY}$</li>
-              </ul>
-            </li>
-            <li>
-              <strong>矩形底乘以高求面积：</strong>
-              <div class="formula-box py-1 text-[11px] font-bold text-amber-900 bg-amber-50/60 border-amber-200">
-                $$A(x_0) = w \\times h = (2 - x_0) \\times 0.5 = 1 - \\frac{x_0}{2} = ${margVal.toFixed(4)}$$
-              </div>
-              积分计算 $\\int_0^{2-x_0} 0.5 \\, dy = 0.5(2 - x_0)$ 与初等矩形面积毫无二致！
-            </li>
-          </ol>
-        </div>
-    `;
-  } else {
-    // Ramp
-    const leftZ = (cPos / 8.0).toFixed(4);
-    const rightZ = ((cPos + 2.0) / 8.0).toFixed(4);
-    html += `
-        <p class="text-stone-600 text-[11px]">
-          区域为正方形 $[0, 2]^2$，联合密度 $f(x, y) = \\frac{x + y}{8}$。当前截面 $x_0 = ${cPos.toFixed(2)}$。
-        </p>
-        <div class="space-y-1.5 pt-1 text-[11px]">
-          <div class="font-semibold text-stone-800">梯形截面面积解析：</div>
-          <ol class="list-decimal list-inside space-y-1 text-stone-600 pl-1">
-            <li>
-              截线在 $y \\in [0, 2]$ 上是一条倾斜直线，围成一个标准<strong>直角梯形</strong>：
-              <ul class="list-disc list-inside pl-3 text-stone-500">
-                <li>左底高：$z(0) = \\frac{${cPos.toFixed(2)}}{8} = ${leftZ}$</li>
-                <li>右底高：$z(2) = \\frac{${cPos.toFixed(2)} + 2}{8} = ${rightZ}$</li>
-                <li>梯形高（底宽）：$2.0$</li>
-              </ul>
-            </li>
-            <li>
-              根据初中梯形面积公式：
-              <div class="formula-box py-1 text-[11px] font-bold text-indigo-900 bg-indigo-50/60 border-indigo-200">
-                $$A(x_0) = \\frac{\\text{左高} + \\text{右高}}{2} \\times \\text{底宽} = \\frac{\\frac{x_0}{8} + \\frac{x_0+2}{8}}{2} \\times 2 = \\frac{x_0 + 1}{4} = ${margVal.toFixed(4)}$$
-              </div>
-              定积分 $\\int_0^2 \\frac{x_0+y}{8} \\, dy = \\frac{x_0+1}{4}$ 与几何梯形面积严格同一！
-            </li>
-          </ol>
-        </div>
-    `;
-  }
-
-  html += `
-      </div>
-
-      <!-- Section 3: Marginal origin -->
-      <div class="p-3 rounded-xl bg-stone-50 border border-stone-200 space-y-1.5">
-        <h4 class="font-bold text-stone-900 text-xs flex items-center gap-1.5">
-          <span class="w-1.5 h-3 bg-rose-600 rounded-full"></span>
-          §3 为什么叫“边缘 (Marginal)”？——从表格边框到三维侧面投影
-        </h4>
-        <p class="text-stone-600 text-[11px]">
-          <strong>离散起源：</strong>在二维列联表（Contingency Table）中，若将每一行的联合概率求和，结果写在表格的最右侧边缘空白处（Margin）；每一列求和写在最下方边缘。因此得名“边缘分布”。<br>
-          <strong>连续跃迁：</strong>在三维连续空间中，对 $y$ 方向积分，就相当于从侧面正视整个概率山峰，将山峰沿 $y$ 方向“压缩 / 压扁 / 投影”到侧壁 $xOz$ 坐标面上。每个截面面积的高度在侧壁连成一条连续曲线，即为一维边缘密度 $f_X(x)$！
-        </p>
-      </div>
-
-      <!-- Section 4: Conditional vs Marginal -->
-      <div class="callout-box callout-note">
-        <strong>§4 条件分布与边缘分布的“一体两面”</strong><br>
-        由概率乘法公式：$f(x, y) = f_X(x) \\cdot f_{Y|X}(y \\mid x)$<br>
-        - **截面自身的几何形态**（归一化为面积 1） $\\implies$ <strong>条件概率密度 $f_{Y|X}(y \\mid x)$</strong>；<br>
-        - **截面的总体积/缩放系数** $\\implies$ <strong>边缘概率密度 $f_X(x)$</strong>。<br>
-        勾选右上角【条件分布归一化】，即可直观看到切片被“拉伸”归一化为 1 的形状！
-      </div>
-
-      <!-- Section 5: Exam tips -->
-      <div class="p-3 rounded-xl bg-white border border-[#E5E4DC] space-y-1.5">
-        <div class="font-semibold text-stone-900 text-xs flex items-center gap-1.5">
-          <span class="px-1.5 py-0.5 rounded bg-stone-100 font-mono text-[10px]">考研通法</span>
-          求边缘密度的两步“穿线法”几何本质
-        </div>
-        <ol class="list-decimal list-inside space-y-1 text-[11px] text-stone-600 pl-1">
-          <li><strong>确定外层 $x$ 的范围：</strong>观察曲面在底面 $xOy$ 的全域投影区间（截面能够切到曲面的 $x$ 区间）。</li>
-          <li><strong>在截面内画穿线求上下限：</strong>作平行于 $y$ 轴的射线，穿入底面边界为下限 $y_1(x)$，穿出边界为上限 $y_2(x)$。此积分区间即为该切片在 $y$ 轴上的实际跨度！</li>
-        </ol>
-      </div>
-    </div>
-  `;
-
-  container.innerHTML = html;
-
-  if (window.renderMathInElement) {
-    window.renderMathInElement(container, {
-      delimiters: [
-        { left: '$$', right: '$$', display: true },
-        { left: '$', right: '$', display: false }
-      ],
-      throwOnError: false
-    });
-  }
-}
-
-// ==========================================
-// --- User Interface & Interaction Setup ---
-// ==========================================
-
-function initUI() {
-  const tabNormal = document.getElementById('tab-preset-normal');
-  const tabTriangle = document.getElementById('tab-preset-triangle');
-  const tabRamp = document.getElementById('tab-preset-ramp');
-
-  const containerParam2 = document.getElementById('container-param2');
-  const sliderSlice = document.getElementById('slider-slice');
-
-  function setModel(modelKey) {
-    state.model = modelKey;
-    [tabNormal, tabTriangle, tabRamp].forEach(t => {
-      t.classList.remove('active');
-      t.classList.add('text-stone-600');
-    });
-
-    if (modelKey === 'normal') {
-      tabNormal.classList.add('active');
-      tabNormal.classList.remove('text-stone-600');
-      containerParam2.style.display = 'flex';
-      sliderSlice.min = "-2.5";
-      sliderSlice.max = "2.5";
-      state.slicePos = 0.50;
-      sliderSlice.value = "0.50";
-    } else if (modelKey === 'triangle') {
-      tabTriangle.classList.add('active');
-      tabTriangle.classList.remove('text-stone-600');
-      containerParam2.style.display = 'none';
-      sliderSlice.min = "0.05";
-      sliderSlice.max = "1.95";
-      state.slicePos = 0.60;
-      sliderSlice.value = "0.60";
-    } else {
-      tabRamp.classList.add('active');
-      tabRamp.classList.remove('text-stone-600');
-      containerParam2.style.display = 'none';
-      sliderSlice.min = "0.05";
-      sliderSlice.max = "1.95";
-      state.slicePos = 0.80;
-      sliderSlice.value = "0.80";
+    if (state.surface) mesh.forEach(points => faces.push({ points, side: false }));
+    const u = norm(f.u), [v0, v1] = slice.bounds;
+    // 切面、截面网格一起进行深度排序，前侧曲面降低透明度让截面可读。
+    const cross = v => state.dir === 'x' ? [u, norm(v), 0] : [norm(v), u, 0];
+    const plane = [cross(a),cross(b),cross(b),cross(a)].map((v,i) => [v[0],v[1],i >= 2 ? planeTop : 0]);
+    faces.push({ points: plane, plane: true });
+    for (let i = 1; i < slice.points.length; i++) {
+      const p = slice.points[i-1], q = slice.points[i], b1 = cross(p.v), b2 = cross(q.v);
+      faces.push({ points: [b1,b2,[b2[0],b2[1],q.density],[b1[0],b1[1],p.density]], slice: true });
     }
-
-    updateModel();
-  }
-
-  tabNormal.addEventListener('click', () => setModel('normal'));
-  tabTriangle.addEventListener('click', () => setModel('triangle'));
-  tabRamp.addEventListener('click', () => setModel('ramp'));
-
-  // Direction Cut Toggle
-  const btnCutX = document.getElementById('btn-cut-x');
-  const btnCutY = document.getElementById('btn-cut-y');
-  const labelSliderSlice = document.getElementById('label-slider-slice');
-
-  btnCutX.addEventListener('click', () => {
-    if (state.cutDir === 'x') return;
-    state.cutDir = 'x';
-    btnCutX.classList.add('active');
-    btnCutX.classList.remove('text-stone-600');
-    btnCutY.classList.remove('active');
-    btnCutY.classList.add('text-stone-600');
-    labelSliderSlice.innerHTML = '<span class="w-2 h-2 rounded-full bg-teal-600"></span>切片位置 $x_0$ (截面截线)';
-    updateModel();
-  });
-
-  btnCutY.addEventListener('click', () => {
-    if (state.cutDir === 'y') return;
-    state.cutDir = 'y';
-    btnCutY.classList.add('active');
-    btnCutY.classList.remove('text-stone-600');
-    btnCutX.classList.remove('active');
-    btnCutX.classList.add('text-stone-600');
-    labelSliderSlice.innerHTML = '<span class="w-2 h-2 rounded-full bg-teal-600"></span>切片位置 $y_0$ (截面截线)';
-    updateModel();
-  });
-
-  // Sliders
-  sliderSlice.addEventListener('input', (e) => {
-    state.slicePos = parseFloat(e.target.value);
-    updateGeometryOnly();
-  });
-
-  const sliderParam2 = document.getElementById('slider-param2');
-  sliderParam2.addEventListener('input', (e) => {
-    state.param2 = parseFloat(e.target.value);
-    updateModel();
-  });
-
-  // Play / Pause Scan
-  const btnPlay = document.getElementById('btn-play-scan');
-  const playText = document.getElementById('play-text');
-  btnPlay.addEventListener('click', () => {
-    state.isPlaying = !state.isPlaying;
-    if (state.isPlaying) {
-      playText.innerText = '暂停扫描';
-      btnPlay.classList.add('bg-amber-600');
-      btnPlay.classList.remove('bg-stone-900');
-    } else {
-      playText.innerText = '自动扫描切片';
-      btnPlay.classList.remove('bg-amber-600');
-      btnPlay.classList.add('bg-stone-900');
+    faces.sort((f1, f2) => {
+      const avg = face => face.points.reduce((sum, v) => sum + project(v)[2], 0) / face.points.length;
+      return avg(f1) - avg(f2);
+    });
+    for (const face of faces) {
+      if (face.plane) { path(face.points, '#c99a4d', '#b67b2d', .8, .08 + .08*f.focus); continue; }
+      if (face.slice) { path(face.points, '#d2a14e', null, 1, .94); continue; }
+      const h = face.points.reduce((sum, v) => sum + v[2], 0) / face.points.length;
+      const tone = Math.min(1, h / model.peak(state.rho));
+      const color = `rgb(${Math.round(188-70*tone)},${Math.round(209-50*tone)},${Math.round(189-49*tone)})`;
+      path(face.points, face.side ? '#b8cbbb' : color, face.side ? '#a2bca8' : '#6f9b832e', .45, face.side ? .4 : .65);
     }
-  });
-
-  // Layer Toggles
-  setupLayerToggle('layer-joint-surf', 'jointSurf');
-  setupLayerToggle('layer-slice-plane', 'slicePlane');
-  setupLayerToggle('layer-slice-area', 'sliceArea');
-  setupLayerToggle('layer-marginal-wall', 'marginalWall');
-  setupLayerToggle('layer-conditional', 'conditional');
-
-  // Reset Camera View
-  const btnResetCam = document.getElementById('btn-reset-cam');
-  btnResetCam.addEventListener('click', () => {
-    gsap.to(camera.position, {
-      x: 7.8,
-      y: -8.6,
-      z: 6.2,
-      duration: 1.0,
-      ease: 'power2.out',
-      onUpdate: () => controls.update()
-    });
-    gsap.to(controls.target, {
-      x: 0,
-      y: 0,
-      z: 0.6,
-      duration: 1.0,
-      ease: 'power2.out'
-    });
-  });
-
-  // Mobile Drawer Toggle
-  const btnToggleExplain = document.getElementById('btn-toggle-explain');
-  const explainPanel = document.getElementById('explain-panel');
-  if (btnToggleExplain && explainPanel) {
-    btnToggleExplain.addEventListener('click', () => {
-      explainPanel.classList.toggle('hidden');
-    });
+    path(plane.concat([plane[0]]), null, '#b47a2c', 1, .6);
+    const ridge = slice.points.map(p => { const v = cross(p.v); return [v[0], v[1], p.density]; });
+    if (ridge.length) {
+      path(ridge, null, '#9b601c', 2.3);
+      bridgeSource = project(ridge.reduce((best, v) => v[2] > best[2] ? v : best));
+    } else bridgeSource = project(cross(a));
+    path([cross(v0),cross(v1)], null, '#ac762b', 2);
+    // 坐标标尺显示原始密度，绝不显示归一化的视觉高度。
+    path([[-1,-1,0],[1.15,-1,0]], null, '#8b988c');
+    path([[-1,-1,0],[-1,1.15,0]], null, '#8b988c');
+    const axisHeight = state.model === 'normal' ? .3 : .5;
+    path([[-1,-1,0],[-1,-1,axisHeight]], null, '#8b988c');
+    label('x', [1.15,-1,0], '#343c38', 7, 0); label('y', [-1,1.15,0], '#343c38', -6, 12);
+    label('f(x,y)', [-1,-1,axisHeight], '#343c38', 2, -12);
+    label(String(a), [-1,-1,0], '#6b7066', -8, 15);
+    label(String(b), [1,-1,0], '#6b7066', 0, 16); label(String(b), [-1,1,0], '#6b7066', 0, 16);
+    label(fmt(axisHeight,1), [-1,-1,axisHeight], '#6b7066', -25, 2);
+    const loc = cross(a), p = project(loc);
+    ctx.fillStyle='#faf9f5'; ctx.strokeStyle='#b47a2c'; ctx.lineWidth=1.5;
+    ctx.beginPath(); ctx.arc(p[0],p[1],4,0,Math.PI*2); ctx.fill();ctx.stroke();
+    canvas.setAttribute('aria-label', `${model.name}；固定 ${state.dir}=${fmt(f.u)}，截面全域积分 ${fmt(slice.area,4)}。拖拽旋转或使用下方视角按钮。`);
   }
-}
 
-function setupLayerToggle(elementId, layerKey) {
-  const el = document.getElementById(elementId);
-  if (!el) return;
-  el.addEventListener('change', (e) => {
-    state.layers[layerKey] = e.target.checked;
-    updateModel();
+  function axes(id, xRange, yMax) {
+    const group = $(id); group.replaceChildren();
+    function el(tag, attrs, label) {
+      const node = document.createElementNS(svgNS, tag);
+      for (const [key,value] of Object.entries(attrs)) node.setAttribute(key,value);
+      if (label !== undefined) node.textContent = label;
+      group.append(node);
+    }
+    for (let i = 0; i <= 2; i++) {
+      const y = plot.base - i/2*plot.h;
+      el('line',{x1:plot.x,y1:y,x2:plot.x+plot.w,y2:y,class:'grid'});
+      el('text',{x:plot.x-9,y:y+4,'text-anchor':'end'},fmt(yMax*i/2,yMax>=2?1:2));
+    }
+    el('path',{d:`M${plot.x} ${plot.y-3}V${plot.base}H${plot.x+plot.w+8}`,class:'axis'});
+    const count = xRange[0] < 0 ? 6 : 4;
+    for (let i = 0; i <= count; i++) {
+      const x = plot.x + i/count*plot.w;
+      el('line',{x1:x,y1:plot.base,x2:x,y2:plot.base+4,class:'axis'});
+      el('text',{x,y:plot.base+18,'text-anchor':'middle'},fmt(xRange[0]+(xRange[1]-xRange[0])*i/count,1));
+    }
+  }
+  function drawPlots(f, slice) {
+    const model = M.models[state.model], r = model.range;
+    const x = v => plot.x + (v-r[0])/(r[1]-r[0])*plot.w;
+    const sectionMax = state.model === 'normal' ? .3 : .6;
+    const condMax = slice.points.reduce((max,p)=>Math.max(max,p.conditional||0),0);
+    const sectionYMax = state.conditional && slice.conditionalDefined ? Math.max(sectionMax, condMax*1.1) : sectionMax;
+    const marginalMax = state.model === 'normal' ? .45 : (state.model === 'triangle' ? 1.1 : .85);
+    const sy = v => plot.base - v/sectionYMax*plot.h, my = v => plot.base-v/marginalMax*plot.h;
+    const key = `${state.model}/${sectionYMax}`;
+    if (key !== lastAxes) { axes('section-axes',r,sectionYMax); axes('marginal-axes',r,marginalMax); lastAxes=key; }
+    const pathFor = (points, value, y) => points.map((p,i)=>`${i?'L':'M'}${fmt(x(p.v),2)},${fmt(y(p[value]),2)}`).join('');
+    const points = slice.points;
+    const line = pathFor(points,'density',sy);
+    attr($('section-line'),'d',line);attr($('section-reference'),'d',line);
+    attr($('section-line'),'stroke-dashoffset',1-f.unfold);
+    const fill = points.length ? `${line}L${x(points.at(-1).v)},${plot.base}L${x(points[0].v)},${plot.base}Z` : '';
+    attr($('section-area-reference'),'d',fill);
+    const upto=slice.bounds[0]+(slice.bounds[1]-slice.bounds[0])*f.integration;
+    const accumulated=points.filter(p=>p.v<=upto);
+    if(points.length && f.fill > 0 && f.fill < 1) {
+      accumulated.push({v:upto,density:state.dir==='x'?model.joint(f.u,upto,state.rho):model.joint(upto,f.u,state.rho)});
+    }
+    const partial=accumulated.length>1 ? `${pathFor(accumulated,'density',sy)}L${x(accumulated.at(-1).v)},${plot.base}L${x(accumulated[0].v)},${plot.base}Z` : '';
+    attr($('section-fill'),'d',f.fill>=1?fill:partial);
+    $('section-line').style.opacity = .55 + .45*f.unfold;
+    const stripValue = slice.bounds[0]+(slice.bounds[1]-slice.bounds[0])*f.integration;
+    const stripDensity = state.dir === 'x' ? model.joint(f.u,stripValue,state.rho) : model.joint(stripValue,f.u,state.rho);
+    attr($('integration-strip'),'x',x(stripValue)-3);
+    attr($('integration-strip'),'y',sy(stripDensity)); attr($('integration-strip'),'height',plot.base-sy(stripDensity));
+    $('integration-strip').style.opacity = state.t >= 4.2 && state.t < 6.5 && !state.reduced ? .6 : 0;
+    attr($('conditional-line'),'d',state.conditional && slice.conditionalDefined ? pathFor(points,'conditional',sy) : '');
+    $('conditional-readout').hidden = !state.conditional;
+    text('conditional-readout',!slice.conditionalDefined ? 'A = 0：该截面不能由密度比定义条件密度。'
+      : `蓝虚线：${state.dir === 'x' ? 'f(y | x₀)' : 'f(x | y₀)'} = f / A；全域积分 = 1${state.model === 'normal' ? '（图中省略尾部）' : ''}`);
+    const peak = points.reduce((best,p) => !best || p.density > best.density ? p : best, null);
+    bridgeTarget = peak ? [x(peak.v),sy(peak.density)] : [x(r[0]),plot.base];
+    text('section-y-label',state.conditional ? '联合密度 / 条件密度（同数值标尺）' : (state.dir==='x'?'f(x₀,y)':'f(x,y₀)'));
+    const samples = Array.from({length:161},(_,i)=>({v:r[0]+(r[1]-r[0])*i/160}));
+    const marginalPath = arr => arr.map((p,i)=>`${i?'L':'M'}${fmt(x(p.v))},${fmt(my(model.marginal(p.v)))}`).join('');
+    attr($('marginal-reference'),'d',marginalPath(samples));
+    const traced = samples.filter(p=>p.v>f.traceMin && p.v<f.traceMax);
+    if (f.traceVisible) traced.unshift({v:f.traceMin}),traced.push({v:f.traceMax});
+    attr($('marginal-trace'),'d',f.traceVisible ? marginalPath(traced) : '');
+    const postX=x(f.u),postY=my(slice.area*f.transfer);
+    for(const [key,value] of Object.entries({x1:postX,x2:postX,y1:plot.base,y2:postY})) attr($('marginal-post'),key,value);
+    attr($('marginal-point'),'cx',postX);attr($('marginal-point'),'cy',postY);
+    $('marginal-point').style.opacity=f.receipt;
+    $('marginal-post').style.opacity=.2+.8*f.transfer;
+    attr($('point-label'),'x',clamp(postX+10,75,332));attr($('point-label'),'y',Math.max(24,postY-9));
+    text('point-label', f.transfer > .99 ? `${state.dir}₀=${fmt(f.u)}` : '');
+    text('visible-area',`可见积分 ≈ ${fmt(slice.visibleArea,4)}`);
+    text('section-note',slice.area===0 ? '零面积截面' : state.model==='normal' ? 'A 还计入图外尾部' : `积分区间 [${fmt(slice.bounds[0],1)}, ${fmt(slice.bounds[1],2)}]`);
+    text('area-value',fmt(slice.area,4));text('marginal-value',fmt(slice.area,4));
+    $('transfer').style.setProperty('--transfer',f.transfer);
+    $('transfer').querySelector('svg').style.opacity=.2+.8*f.transfer;
+    $('transfer-tag').style.opacity=f.receipt;
+    $('transfer-tag').style.transform=`translateY(${(1-f.receipt)*4}px)`;
+    // 相关系数改变后，截面变形而全域边缘曲线保持不变。
+    $('section-svg').setAttribute('aria-label',`${state.dir}=${fmt(f.u)}的截面；全域面积${fmt(slice.area,4)}，可见积分${fmt(slice.visibleArea,4)}`);
+  }
+  function drawBridge(f) {
+    if (!bridgeSource || !bridgeTarget) return;
+    const box=$('workspace').getBoundingClientRect(), cbox=canvas.getBoundingClientRect(), sbox=$('section-svg').getBoundingClientRect();
+    const ratio=Math.min(sbox.width/420,sbox.height/184), dx=(sbox.width-420*ratio)/2, dy=(sbox.height-184*ratio)/2;
+    const start=[cbox.x-box.x+bridgeSource[0],cbox.y-box.y+bridgeSource[1]];
+    const end=[sbox.x-box.x+dx+bridgeTarget[0]*ratio,sbox.y-box.y+dy+bridgeTarget[1]*ratio];
+    attr($('section-bridge'),'viewBox',`0 0 ${box.width} ${box.height}`);
+    const d=`M${start[0]},${start[1]} C${start[0]+70},${start[1]-35} ${end[0]-70},${end[1]-35} ${end[0]},${end[1]}`;
+    attr($('bridge-line'),'d',d);attr($('bridge-line'),'stroke-dashoffset',1-f.unfold);
+    $('section-bridge').style.opacity=f.unfold*.48;
+  }
+  function render() {
+    const f = frame();
+    const slice = M.slice(state.model,state.dir,f.u,state.rho);
+    currentFrame=f;currentSlice=slice;
+    draw3D(f,slice);drawPlots(f,slice);drawBridge(f);
+    const fixed=state.dir, other=fixed==='x'?'y':'x', sub=fixed==='x'?'ₓ':'ᵧ';
+    text('clock',`${fmt(state.t,1).padStart(4,'0')} s`);text('phase',f.name);
+    text('time-value',`${fmt(state.t,1)} s`);$('progress').value=state.t;
+    text('cut-label',`${fixed}₀ = ${fmt(f.u)}`);text('slice-tag',`固定 ${fixed}₀ · 沿 ${other} 积分`);
+    text('integral-formula',`A(${fixed}₀) = ∫ f(${fixed==='x'?'x₀,y':'x,y₀'}) d${other}`);
+    text('transfer-symbol',`f${sub}(${fixed}₀)`);text('marginal-symbol',`f${sub}(${fixed}₀)`);
+    text('marginal-y-label',`f${sub}(${fixed})`);text('section-axis-label',other);text('marginal-axis-label',fixed);
+    text('slice-label',`切片位置 ${fixed}₀`);text('slice-output',fmt(f.u));
+    const r=M.models[state.model].range;$('slice').min=r[0];$('slice').max=r[1];$('slice').value=f.u;
+    text('rho-output',fmt(state.rho));$('rho').value=state.rho;
+    $('rho-control').hidden=state.model!=='normal';
+    $('conditional').checked=state.conditional;$('surface').checked=state.surface;$('reduced-motion').checked=state.reduced;
+    document.body.dataset.motion=state.reduced?'reduced':'full';
+    $('explore-note').hidden=!state.explore;
+    text('caption',C.captions[f.captionIndex]);$('caption').style.opacity=f.captionAlpha;
+    text('caption-index',`0${f.phase+1} / 05`);
+    document.querySelectorAll('[data-model]').forEach(b=>attr(b,'aria-pressed',b.dataset.model===state.model));
+    document.querySelectorAll('[data-dir]').forEach(b=>attr(b,'aria-pressed',b.dataset.dir===state.dir));
+    document.querySelectorAll('[data-time]').forEach((b,i)=>attr(b,'aria-current',i===f.phase?'step':'false'));
+    $('previous').disabled=state.t<=0;$('next').disabled=state.t>=16;
+    text('model-formula',state.model==='normal'?`标准二元正态 · ρ = ${fmt(state.rho)}`:state.model==='triangle'?'f(x,y) = ½ · 0 ≤ x,y, x+y ≤ 2':'f(x,y) = (x+y)/8 · 0 ≤ x,y ≤ 2');
+    text('domain-note',state.model==='normal'?'绘图区 [−3,3]²':state.model==='triangle'?'支撑域 x+y ≤ 2':'支撑域 [0,2]²');
+    text('footnote',state.model==='normal'?'示意：正态曲面仅绘出 [−3,3]²；A 为全域解析积分。坐标显示比例经调整，截面面积表示密度积分而非概率。':'示意：曲面外密度为 0；坐标显示比例经调整。截面面积是边缘密度，区间下的面积才表示概率。');
+  }
+
+  if (window.gsap) {
+    timeline=gsap.timeline({paused:true,onUpdate:()=>{state.t=timeline.time();render();saveLink();},onComplete:()=>stop()});
+    timeline.to({}, {duration:16,ease:'none'});timeline.time(state.t,true);
+  } else { $('play').disabled=true;$('engine-notice').hidden=false; }
+  $('play').addEventListener('click',togglePlay);
+  $('reset').addEventListener('click',()=>{state.explore=false;seek(0);});
+  $('previous').addEventListener('click',()=>step(-1));$('next').addEventListener('click',()=>step(1));
+  $('progress').addEventListener('input',e=>{state.explore=false;seek(Number(e.target.value));});
+  document.querySelectorAll('[data-time]').forEach(button=>button.addEventListener('click',()=>{state.explore=false;seek(Number(button.dataset.time));}));
+  document.querySelectorAll('[data-model]').forEach(button=>button.addEventListener('click',()=>parameterChange(()=>{
+    const old=M.models[state.model].range, ratio=(currentFrame.u-old[0])/(old[1]-old[0]);
+    state.model=button.dataset.model;const r=M.models[state.model].range;state.anchor=r[0]+ratio*(r[1]-r[0]);state.explore=true;
+  },true)));
+  document.querySelectorAll('[data-dir]').forEach(button=>button.addEventListener('click',()=>parameterChange(()=>{state.anchor=currentFrame.u;state.dir=button.dataset.dir;state.explore=true;})));
+  $('slice').addEventListener('input',e=>parameterChange(()=>{state.anchor=Number(e.target.value);state.explore=true;}));
+  $('rho').addEventListener('input',e=>parameterChange(()=>{state.rho=Number(e.target.value);},true));
+  $('surface').addEventListener('change',e=>parameterChange(()=>{state.surface=e.target.checked;}));
+  $('conditional').addEventListener('change',e=>parameterChange(()=>{state.conditional=e.target.checked;}));
+  $('speed').value=String(state.speed);
+  $('speed').addEventListener('change',e=>{
+    state.speed=Number(e.target.value);timeline?.timeScale(state.speed);
+    if(state.playing&&state.reduced){reducedCall?.kill();reducedTick();}saveLink(true);
   });
-}
+  $('reduced-motion').addEventListener('change',e=>{
+    const resume=state.playing;stop();state.reduced=e.target.checked;render();if(resume)togglePlay();saveLink(true);
+  });
+  function setView(yaw,pitch,id) {
+    parameterChange(()=>{state.yaw=yaw;state.pitch=pitch;});
+    ['view-default','view-front','view-top'].forEach(v=>attr($(v),'aria-pressed',v===id));
+  }
+  $('view-default').addEventListener('click',()=>setView(-.65,.6,'view-default'));
+  $('view-front').addEventListener('click',()=>setView(state.dir==='x'?-Math.PI/2:0,.22,'view-front'));
+  $('view-top').addEventListener('click',()=>setView(-.65,1.48,'view-top'));
+  canvas.addEventListener('pointerdown',e=>{stop();drag={x:e.clientX,y:e.clientY,yaw:state.yaw,pitch:state.pitch};canvas.setPointerCapture(e.pointerId);});
+  canvas.addEventListener('pointermove',e=>{
+    if(!drag)return;state.yaw=((drag.yaw+(e.clientX-drag.x)*.008+Math.PI*3)%(Math.PI*2))-Math.PI;
+    state.pitch=clamp(drag.pitch+(e.clientY-drag.y)*.006,.2,1.48);
+    ['view-default','view-front','view-top'].forEach(v=>attr($(v),'aria-pressed','false'));
+    draw3D(currentFrame,currentSlice);drawBridge(currentFrame);saveLink();
+  });
+  const endDrag=()=>{if(drag){drag=null;saveLink(true);}};
+  canvas.addEventListener('pointerup',endDrag);canvas.addEventListener('pointercancel',endDrag);canvas.addEventListener('lostpointercapture',endDrag);
+  document.addEventListener('keydown',e=>{
+    if(e.ctrlKey||e.metaKey||e.altKey||e.target.closest('input,select,textarea,button,a'))return;
+    if(e.code==='Space'){e.preventDefault();togglePlay();}
+    if(e.code==='ArrowLeft'){e.preventDefault();step(-1);}
+    if(e.code==='ArrowRight'){e.preventDefault();step(1);}
+    if(e.code==='Home'){e.preventDefault();state.explore=false;seek(0);}
+  });
+  document.addEventListener('visibilitychange',()=>{if(document.hidden)stop();});
+  const observer=new ResizeObserver(()=>{
+    cancelAnimationFrame(resizeFrame);resizeFrame=requestAnimationFrame(()=>{
+      const box=$('canvas-wrap').getBoundingClientRect(),dpr=Math.min(devicePixelRatio||1,2);
+      width=box.width;height=box.height;canvas.width=Math.round(width*dpr);canvas.height=Math.round(height*dpr);
+      ctx?.setTransform(dpr,0,0,dpr,0,0);render();
+    });
+  });observer.observe($('canvas-wrap'));
+  window.addEventListener('pagehide',()=>{stop();observer.disconnect();cancelAnimationFrame(resizeFrame);clearTimeout(linkTimer);timeline?.kill();},{once:true});
+  // bfcache 恢复后重新观察容器与重建本模块时钟。
+  window.addEventListener('pageshow',e=>{if(e.persisted)location.reload();});
+  render();
+})();
