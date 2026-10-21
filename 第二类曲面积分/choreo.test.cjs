@@ -81,4 +81,3 @@ test('the 64-piece accumulation is linear for eight seconds and remains complete
   close(Choreo.sample(Choreo.DURATION).V.sum, 1);
   close(Choreo.frame(14, 0.5).V.sum, 1);
 });
-

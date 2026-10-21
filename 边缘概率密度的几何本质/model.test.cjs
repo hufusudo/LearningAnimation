@@ -111,4 +111,3 @@ test('visible normal slice is explicitly truncated while area remains the full m
   assert.ok(result.visibleArea < result.area);
   assert.equal(result.points.length, 120);
 });
-
