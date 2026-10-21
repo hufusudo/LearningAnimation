@@ -5,6 +5,11 @@
   const ease = t => t < .5 ? 4 * t ** 3 : 1 - (-2 * t + 2) ** 3 / 2;
   const rotationStages = new Set(['anticipate', 'rotation-detach', 'rotate', 'rotation-attach']);
   const rgb = (a, b, t) => `rgb(${a.map((v, i) => Math.round(mix(v, b[i], t))).join(',')})`;
+  // 复数记作 [实部, 虚部]：旋转时用来求圆心与螺旋系数
+  const cmul = (p, q) => [p[0] * q[0] - p[1] * q[1], p[0] * q[1] + p[1] * q[0]];
+  const cdiv = (p, q) => { const n = q[0] * q[0] + q[1] * q[1]; return [(p[0] * q[0] + p[1] * q[1]) / n, (p[1] * q[0] - p[0] * q[1]) / n]; };
+  const csub = (p, q) => [p[0] - q[0], p[1] - q[1]];
+  const xy = p => [p.x, p.y];
 
   function layout(tree) {
     const nodes = new Map(tree.nodes.map(n => [n.id, n]));
@@ -83,6 +88,7 @@
       this.rotationStage = !!frame.rotation && rotationStages.has(frame.type);
       this.edgesBefore = this.edgeList(this.rotationStage ? frame.rotation.beforeTree : this.oldFrame?.tree || frame.tree);
       this.edgesAfter = this.edgeList(this.rotationStage ? frame.rotation.afterTree : frame.tree);
+      this.rotationPlan = null;
       if (this.rotationStage) {
         this.rotationBefore = layout(frame.rotation.beforeTree);
         this.rotationAfter = layout(frame.rotation.afterTree);
@@ -90,6 +96,7 @@
         this.rotationSubtree = [];
         const collect = id => { if (!id) return; const n = beforeNodes.get(id); this.rotationSubtree.push(id); collect(n.left); collect(n.right); };
         collect(frame.rotation.pivot);
+        this.planRotation(frame);
       }
       const newKeys = new Set(this.edgesAfter.map(e => e.key)), oldKeys = new Set(this.edgesBefore.map(e => e.key));
       this.detachedEdges = this.edgesBefore.filter(e => !newKeys.has(e.key));
@@ -132,6 +139,35 @@
       return list;
     }
 
+    // 旋转只围绕一个圆心：支点与上升节点绕它转过同一个角度并伸缩到新位置（螺旋相似）。
+    // 子树不随之转动，只跟着所挂的节点平移；被改挂的子树在转前挂在一个节点下，转后挂在另一个节点下，两段线性过渡。
+    planRotation(frame) {
+      const meta = frame.rotation, before = this.rotationBefore, after = this.rotationAfter;
+      const P0 = xy(before.points.get(meta.pivot)), Q0 = xy(before.points.get(meta.up));
+      const P1 = xy(after.points.get(meta.pivot)), Q1 = xy(after.points.get(meta.up));
+      const a = cdiv(csub(P1, Q1), csub(P0, Q0));
+      const c = cdiv(csub(P1, cmul(a, P0)), csub([1, 0], a));
+      this.spiral = { c, scale: Math.hypot(a[0], a[1]), angle: Math.atan2(a[1], a[0]) };
+      if (frame.type !== 'rotate') return;   // 预告与断线阶段节点不动，只借用螺旋画出将要走的弧
+      const owner = (view, id) => { let cur = id; while (cur && cur !== meta.pivot && cur !== meta.up) cur = view.points.get(cur)?.parent; return cur; };
+      const region = new Set(this.rotationSubtree);
+      this.rotationPlan = new Map();
+      for (const [id, point] of after.points) {
+        if (!(point.nil ? region.has(point.parent) : region.has(id))) continue;
+        const from = before.points.has(id) ? id : point.parent;   // 转后新出现的 NIL 从父节点长出来
+        const start = owner(before, from), end = owner(after, id);
+        this.rotationPlan.set(id, { start: xy(before.points.get(start)), end: xy(before.points.get(end)),
+          offset0: csub(xy(before.points.get(from)), xy(before.points.get(start))),
+          offset1: csub(xy(after.points.get(id)), xy(after.points.get(end))) });
+      }
+    }
+
+    orbit(z, t) {
+      const { c, scale, angle } = this.spiral, k = scale ** t;
+      const [x, y] = cmul([k * Math.cos(angle * t), k * Math.sin(angle * t)], csub(z, c));
+      return { x: c[0] + x, y: c[1] + y };
+    }
+
     baseScale() {
       if (!this.target) return 1;
       const stageBottom = this.w <= 620 ? this.h - 225 : this.h - 180;
@@ -166,6 +202,7 @@
       if (this.message && this.clock >= this.message.until) this.message = null;
       const positionProgress = ['rotation-detach', 'rotation-attach'].includes(this.frame.type) ? 1 : progress;
       const t = ease(clamp(positionProgress * (['compare', 'spawn'].includes(this.frame.type) ? 1.45 : 1.1)));
+      this.rotationT = t;
       const f = this.frame;
       const focus = this.focus;
       const active = !['ready', 'settle', 'reject'].includes(f.type);
@@ -179,10 +216,11 @@
           else start = this.starts.get(target.parent) || target;
         }
         let x = mix(start.x, target.x, t), y = mix(start.y, target.y, t);
-        if (f.type === 'rotate' && !this.reduced && [f.rotation.pivot, f.rotation.up].includes(id)) {
-          const dir = f.rotation.direction === 'left' ? 1 : -1;
-          x += Math.sin(t * Math.PI) * 30 * (id === f.rotation.up ? -dir : dir);
-          y -= Math.sin(t * Math.PI) * 22;
+        const plan = this.rotationPlan?.get(id);
+        if (plan) {
+          const a = this.orbit(plan.start, t), b = this.orbit(plan.end, t);
+          x = mix(a.x + plan.offset0[0], b.x + plan.offset1[0], t);
+          y = mix(a.y + plan.offset0[1], b.y + plan.offset1[1], t);
         }
         if (f.type === 'attach' && id === f.inserted && !this.reduced) y += Math.sin(progress * Math.PI * 3) * (1 - progress) * 5;
         const colorT = f.type === 'replace' ? 0 : t;
@@ -245,7 +283,7 @@
         if (point.nil) {
           const debt = f.debt?.id === id;
           const nearFocus = f.focus.includes(point.parent) || point.parent === selected;
-          if (debt || this.load || nearFocus) this.nil(point, debt ? .8 : this.load ? .35 : .14);
+          if (debt || this.load || nearFocus || f.showNil) this.nil(point, debt ? .8 : this.load ? .35 : f.showNil ? .8 * this.progress : .14);
           continue;
         }
         if (point.dying) {
@@ -394,7 +432,7 @@
       const focused = mode || f.focus.includes(e.a) && (f.focus.includes(e.b) || route);
       const quiet = ['ready', 'settle', 'reject'].includes(f.type);
       ctx.save();
-      ctx.globalAlpha = alpha * (e.nil ? (this.load || f.debt?.id === e.b ? .32 : .025) : quiet || focused ? .8 : .25);
+      ctx.globalAlpha = alpha * (e.nil ? (this.load || f.debt?.id === e.b ? .32 : f.showNil ? .5 * this.progress : .025) : quiet || focused ? .8 : .25);
       if (conflict) {
         ctx.strokeStyle = '#ff3b3033'; ctx.lineWidth = 6;
         ctx.beginPath();
@@ -427,26 +465,26 @@
       ctx.restore();
     }
 
+    // 预告箭头画的就是节点将走的螺旋弧；转动中只画还没走完的那一段
     rotationGuides() {
       const ctx = this.ctx, meta = this.frame.rotation, radius = 25 * this.camera.scale;
+      const from = this.frame.type === 'rotate' ? this.rotationT : 0;
       for (const [id, rising] of [[meta.up, true], [meta.pivot, false]]) {
-        const a = this.frame.type === 'rotate' ? this.screen.get(id) : this.toScreen(this.rotationBefore.points.get(id));
+        const z = xy(this.rotationBefore.points.get(id)), a = this.screen.get(id);
         const b = this.toScreen(this.rotationAfter.points.get(id));
-        const length = Math.hypot(b.x - a.x, b.y - a.y);
-        if (length < (radius + 8) * 2 + 8) continue;
-        const ux = (b.x - a.x) / length, uy = (b.y - a.y) / length;
-        const start = { x: a.x + ux * (radius + 8), y: a.y + uy * (radius + 8) };
-        const end = { x: b.x - ux * (radius + 8), y: b.y - uy * (radius + 8) };
-        const bend = (rising ? -1 : 1) * (meta.direction === 'left' ? 1 : -1);
-        const control = { x: (start.x + end.x) / 2 + bend * 34 * this.camera.scale, y: (start.y + end.y) / 2 - 15 * this.camera.scale };
+        const arc = [];
+        for (let i = 0; i <= 24; i++) arc.push(this.toScreen(this.orbit(z, from + (1 - from) * i / 24)));
+        const trail = arc.filter(p => Math.hypot(p.x - a.x, p.y - a.y) > radius + 8 && Math.hypot(p.x - b.x, p.y - b.y) > radius + 8);
+        if (trail.length < 2) continue;
         ctx.save(); ctx.globalAlpha = this.frame.type === 'rotate' ? .65 * (1 - this.progress) : .85;
         ctx.strokeStyle = rising ? '#b9d7f4' : '#92a3ba'; ctx.fillStyle = ctx.strokeStyle; ctx.lineWidth = 1.15;
-        ctx.setLineDash([4, 5]); ctx.beginPath(); ctx.moveTo(start.x, start.y);
-        ctx.quadraticCurveTo(control.x, control.y, end.x, end.y); ctx.stroke(); ctx.setLineDash([]);
-        const angle = Math.atan2(end.y - control.y, end.x - control.x), size = 7;
-        ctx.beginPath(); ctx.moveTo(end.x, end.y);
-        ctx.lineTo(end.x - Math.cos(angle - .48) * size, end.y - Math.sin(angle - .48) * size);
-        ctx.lineTo(end.x - Math.cos(angle + .48) * size, end.y - Math.sin(angle + .48) * size);
+        ctx.setLineDash([4, 5]); ctx.beginPath();
+        trail.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
+        ctx.stroke(); ctx.setLineDash([]);
+        const tip = trail.at(-1), prev = trail.at(-2), angle = Math.atan2(tip.y - prev.y, tip.x - prev.x), size = 7;
+        ctx.beginPath(); ctx.moveTo(tip.x, tip.y);
+        ctx.lineTo(tip.x - Math.cos(angle - .48) * size, tip.y - Math.sin(angle - .48) * size);
+        ctx.lineTo(tip.x - Math.cos(angle + .48) * size, tip.y - Math.sin(angle + .48) * size);
         ctx.closePath(); ctx.fill(); ctx.restore();
       }
     }
@@ -488,7 +526,7 @@
     effectsBehind() {
       const ctx = this.ctx, f = this.frame, p = this.progress;
       if (this.rotationStage && f.type !== 'rotation-attach') this.rotationGuides();
-      if (f.flow) for (const flow of f.flow) this.flow(flow, f.type === 'push-black' ? 'black' : 'red');
+      if (f.flow) for (const flow of f.flow) this.flow(flow, ['push-black', 'check'].includes(f.type) ? 'black' : 'red');
     }
 
     effectsFront() {
@@ -505,7 +543,7 @@
           ctx.beginPath(); ctx.arc(point.x, point.y, r, 0, Math.PI * 2); ctx.stroke(); ctx.restore();
         });
       }
-      if (f.type === 'settle' || f.type === 'root-cool') {
+      if (f.type === 'settle' || f.type === 'root-cool' || f.ripple) {
         const root = this.screen.get(f.tree.root);
         if (root && !this.reduced) {
           ctx.save(); ctx.globalAlpha = (1 - p) * .16; ctx.strokeStyle = '#a8bdda'; ctx.lineWidth = 1;
@@ -672,7 +710,7 @@
       }
       if (this.note.dataset.title !== title || this.note.dataset.text !== text) {
         this.note.replaceChildren();
-        const a = document.createElement('span'); a.className = `note-title${f.type === 'conflict' ? ' is-danger' : f.type === 'settle' ? ' is-balanced' : ''}`; a.textContent = title;
+        const a = document.createElement('span'); a.className = `note-title${f.type === 'conflict' ? ' is-danger' : f.type === 'settle' || f.verdict ? ' is-balanced' : ''}`; a.textContent = title;
         const b = document.createElement('span'); b.className = 'note-text'; b.textContent = text;
         this.note.append(a, b); this.note.dataset.title = title; this.note.dataset.text = text;
       }

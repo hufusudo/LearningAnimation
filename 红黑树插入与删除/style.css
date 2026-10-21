@@ -30,7 +30,7 @@ button:not(:disabled):active { transform: translateY(1px); }
 .note-text { display: block; margin-top: 7px; font-size: 10px; color: #8d95a3; line-height: 1.7; }
 .note-title.is-danger { color: #ff817a; }
 .note-title.is-balanced { color: #c5d4e7; }
-.welcome { position: absolute; bottom: 183px; left: 50%; transform: translateX(-50%); display: flex; gap: 9px; align-items: center; opacity: 1; pointer-events: none; transition: opacity .5s; }
+.welcome { position: absolute; bottom: 194px; left: 50%; transform: translateX(-50%); display: flex; gap: 9px; align-items: center; opacity: 1; pointer-events: none; transition: opacity .5s; }
 .welcome p { color: #687180; font-size: 11px; white-space: nowrap; margin: 0; letter-spacing: .06em; }
 .welcome-line { width: 16px; height: 1px; background: #5b6370; }
 .welcome.dismissed { opacity: 0; }
@@ -49,6 +49,7 @@ body.delete-mode .action-button { color: #c1cbdc; background: #9bb0d813; border-
 .control-divider { width: 1px; height: 19px; background: #ffffff12; flex-shrink: 0; }
 #scenario { min-width: 0; max-width: 151px; font-size: 11px; color: #aab2be; border: 0; background: transparent; padding: 6px 1px; cursor: pointer; }
 #scenario option, #scenario optgroup { background: #171c24; color: #d7dce4; }
+.scenario-hint { margin: 9px 0 0; min-height: 1.6em; font-size: 11px; line-height: 1.6; color: #8d95a3; letter-spacing: .02em; text-wrap: pretty; }
 .playback-row { display: flex; align-items: center; gap: 19px; padding-top: 11px; margin-top: 12px; border-top: 1px solid #ffffff0b; }
 .transport { display: flex; gap: 6px; align-items: center; }
 .play-button { width: 36px; height: 36px; border-radius: 50%; background: #d6e0f114; color: #e5ebf4; border: 1px solid #d6e0f11f; font-size: 12px; display: flex; align-items: center; justify-content: center; }
@@ -79,7 +80,7 @@ body.immersed .masthead a, body.immersed .view-actions button { pointer-events: 
   .control-divider { display: none; }
   #scenario { max-width: none; width: 100%; border-top: 1px solid #ffffff0b; padding-top: 9px; margin-top: 3px; }
   .playback-row { gap: 14px; margin-top: 8px; padding-top: 8px; }
-  .welcome { bottom: 205px; }
+  .welcome { bottom: 232px; }
   .node-note { max-width: 230px; }
   .note-text { font-size: 9px; }
   .transport { gap: 3px; }
@@ -90,6 +91,6 @@ body.immersed .masthead a, body.immersed .view-actions button { pointer-events: 
   .view-actions { top: 17px; }
   .controls { bottom: 12px; padding: 9px 16px; }
   .playback-row { padding-top: 5px; margin-top: 6px; }
-  .welcome { bottom: 130px; }
+  .welcome { bottom: 152px; }
 }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition-duration: .01ms !important; } }

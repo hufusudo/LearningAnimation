@@ -1,7 +1,7 @@
 (function () {
   'use strict';
   const $ = id => document.getElementById(id);
-  const { RBTree } = window.RedBlack;
+  const { RBTree, propertyFrames } = window.RedBlack;
   const renderer = new window.RedBlackVisual.TreeRenderer($('tree-canvas'), $('node-note'));
   const scenarios = {
     rotate: { values: [60, 30, 80, 20, 45, 70, 90, 10], mode: 'insert', value: 5 },
@@ -13,6 +13,23 @@
     push: { values: [40, 20, 60, 10, 30, 50, 70, 5, 25, 45, 65], prune: [5, 25, 45, 65], mode: 'delete', value: 10 },
     successor: { values: [60, 30, 80, 20, 45, 70, 90, 65, 75], mode: 'delete', value: 60 },
     empty: { values: [], mode: 'insert', value: 40 }
+  };
+  const hints = {
+    rotate: '父与新节点都是红，且排成一条直线：旋转一次，父升为黑，祖父转红。',
+    zigzag: '父与新节点都是红，但排成折线：先旋转父节点把折线拉直，再旋转祖父。',
+    recolor: '父与叔叔都是红：两者变黑，祖父变红，问题上推到祖父继续检查。',
+    borrow: '被删的是黑节点，兄弟的远侧孩子是红：借出一份黑，旋转后补上缺口。',
+    near: '兄弟的近侧孩子是红：先旋转兄弟，让红色孩子转到远侧，再借。',
+    sibling: '兄弟是红：先旋转父节点，换成黑兄弟，再按黑兄弟的情形处理。',
+    push: '兄弟与它的两个孩子都是黑：兄弟变红，缺口上移到父节点继续处理。',
+    successor: '被删节点有两个孩子：用右子树里最小的节点（后继）顶替它的位置。',
+    empty: '从空树开始，逐个插入或删除，观察平衡如何维持。',
+    'check-root': '根节点必须是黑色。插入或删除后，根总会被染回黑色。',
+    'check-redred': '每个红节点的两个孩子都必须是黑色，逐个红节点检查。',
+    'check-blackpath': '从根到每个 NIL 的路径上，黑节点数都相同（计入根与 NIL）。',
+    'check-nil': '空叶子 NIL 都计为黑色，它们也参与黑节点的计数。',
+    'check-height': '最长路径（边数）不超过最短路径的两倍，由不红红与黑路同推出。',
+    'check-order': '二叉搜索树：中序遍历（左、根、右）得到的序列严格递增。',
   };
   const state = { frames: [], cursor: 0, progress: 1, playing: false, animating: false,
     speed: 1, mode: 'insert', lastTime: 0, selected: null, immersive: false, raf: 0 };
@@ -92,6 +109,22 @@
     visit(0, false);
   }
 
+  function showHint(key) { $('scenario-hint').textContent = hints[key] ?? ''; }
+
+  // 性质检查只读当前舞台上的树；树还没平衡（修复进行中）时先不查
+  function inspect(key) {
+    cancelPlayback();
+    const snapshot = state.frames[state.cursor].tree;
+    try { RBTree.fromSnapshot(snapshot); }
+    catch { renderer.say('先让当前操作完成', '播放到「平衡复原」后再检查性质', state.frames[state.cursor].anchor); return; }
+    state.frames = propertyFrames(snapshot, key.slice('check-'.length));
+    visit(0, false);
+    state.playing = state.frames.length > 1;
+    if (state.playing) visit(1, true);
+    schedule();
+    ui();
+  }
+
   function execute(event) {
     event?.preventDefault();
     const raw = $('value-input').value.trim();
@@ -159,7 +192,11 @@
   $('operation-form').addEventListener('submit', execute);
   $('mode-insert').addEventListener('click', () => setMode('insert'));
   $('mode-delete').addEventListener('click', () => setMode('delete'));
-  $('scenario').addEventListener('change', event => loadScenario(event.target.value));
+  $('scenario').addEventListener('change', event => {
+    const key = event.target.value;
+    showHint(key);
+    if (key.startsWith('check-')) inspect(key); else loadScenario(key);
+  });
   $('play').addEventListener('click', togglePlay);
   $('next').addEventListener('click', () => step(1));
   $('previous').addEventListener('click', () => step(-1));
@@ -242,5 +279,6 @@
   }
 
   loadScenario('rotate');
+  showHint('rotate');
   schedule();
 })();

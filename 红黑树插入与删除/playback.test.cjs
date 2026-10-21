@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const vm = require('node:vm');
 const fs = require('node:fs');
-const { RBTree } = require('./model.js');
+const { RBTree, propertyFrames } = require('./model.js');
 
 // Run the actual controller against a small DOM adapter and a deterministic frame clock.
 function setup() {
@@ -33,7 +33,7 @@ function setup() {
     hit() { return null; }
   }
   doc.body = new Element(); doc.getElementById = el; doc.createElement = () => new Element(); doc.querySelector = el;
-  win.RedBlack = { RBTree }; win.RedBlackVisual = { TreeRenderer: Renderer };
+  win.RedBlack = { RBTree, propertyFrames }; win.RedBlackVisual = { TreeRenderer: Renderer };
   const context = { window: win, document: doc, performance: { now: () => clock },
     requestAnimationFrame(fn) { const id = nextRaf++; callbacks.set(id, fn); maxPending = Math.max(maxPending, callbacks.size); return id; },
     cancelAnimationFrame(id) { callbacks.delete(id); } };
@@ -138,6 +138,40 @@ test('idle and paused scenes stop requesting and painting frames, then resume on
   const paused = app.counts(); app.advance(10000); assert.deepEqual(app.counts(), paused);
   app.click('play'); app.advance(18000); assert.equal(app.current().type, 'settle');
   const done = app.counts(); app.advance(10000); assert.deepEqual(app.counts(), done);
+});
+
+test('property checks replay on the stable tree, refuse to run mid-repair, and leave the tree unchanged', () => {
+  const frames = RBTree.from([60, 30, 80, 20, 45, 70, 90, 10]).insert(5), app = setup();
+  app.jump(frames.findIndex(f => f.type === 'conflict'));
+  app.choose('check-redred');
+  assert.equal(app.renderer.message.title, '先让当前操作完成');
+  assert.equal(app.current().type, 'conflict');
+  app.jump(0); app.advance(100);
+  const before = app.values();
+  app.choose('check-blackpath'); app.advance(60000);
+  assert.equal(app.current().type, 'check');
+  assert.equal(app.current().verdict, true);
+  assert.deepEqual(app.values(), before);
+});
+
+test('checking the empty tree shows one verdict and never starts a playback loop', () => {
+  const app = setup();
+  app.choose('empty'); app.choose('check-height');
+  assert.equal(app.current().type, 'check');
+  assert.equal(app.current().verdict, true);
+  assert.equal(app.el('play').attributes['aria-label'], '播放演示');
+  app.advance(1000);
+  const settled = app.counts(); app.advance(5000);
+  assert.deepEqual(app.counts(), settled, 'a single verdict frame kept the loop painting');
+});
+
+test('each selection explains itself in one line that follows the choice', () => {
+  const app = setup();
+  assert.match(app.el('scenario-hint').textContent, /父与新节点都是红/);
+  app.choose('borrow');
+  assert.match(app.el('scenario-hint').textContent, /借出一份黑/);
+  app.choose('check-order');
+  assert.match(app.el('scenario-hint').textContent, /中序遍历/);
 });
 
 test('transitions and repeated control input never fork the animation loop', () => {

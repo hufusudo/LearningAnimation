@@ -40,23 +40,32 @@
           <button id="run-operation" class="action-button" type="submit"><span id="run-label">插入节点</span><span aria-hidden="true">↵</span></button>
         </form>
         <span class="control-divider" aria-hidden="true"></span>
-        <label class="sr-only" for="scenario">精选案例</label>
-        <select id="scenario" title="选择一个典型修复案例" aria-label="精选案例">
-          <optgroup label="插入 · 释放红色应力">
-            <option value="rotate">双红与单旋</option>
-            <option value="zigzag">折线与双旋</option>
-            <option value="recolor">叔红与颜色上推</option>
+        <label class="sr-only" for="scenario">精选案例与性质检查</label>
+        <select id="scenario" title="选择一个修复案例，或检查当前树的一条性质" aria-label="精选案例与性质检查">
+          <optgroup label="插入 · 修复红红冲突">
+            <option value="rotate">一直线：旋转一次</option>
+            <option value="zigzag">折线：旋转两次</option>
+            <option value="recolor">叔叔也红：变色上推</option>
           </optgroup>
-          <optgroup label="删除 · 补足黑色承重">
-            <option value="borrow">外侧红借位</option>
-            <option value="near">近侧红转向</option>
-            <option value="sibling">红兄弟换位</option>
-            <option value="push">双黑向上传递</option>
-            <option value="successor">后继虚影代偿</option>
+          <optgroup label="删除 · 补回缺少的黑">
+            <option value="borrow">远侧有红：借一份黑</option>
+            <option value="near">近侧有红：先转兄弟</option>
+            <option value="sibling">兄弟是红：先换位</option>
+            <option value="push">兄弟全黑：负担上移</option>
+            <option value="successor">两个孩子：后继顶替</option>
+          </optgroup>
+          <optgroup label="性质检查 · 对当前平衡的树">
+            <option value="check-root">根为黑</option>
+            <option value="check-redred">不红红</option>
+            <option value="check-blackpath">黑路同</option>
+            <option value="check-nil">NIL 为黑</option>
+            <option value="check-height">最长 ≤ 两倍最短</option>
+            <option value="check-order">中序有序</option>
           </optgroup>
           <optgroup label="自由探索"><option value="empty">从空树开始</option></optgroup>
         </select>
       </div>
+      <p class="scenario-hint" id="scenario-hint" aria-live="polite"></p>
       <div class="playback-row">
         <div class="transport">
           <button class="icon-button" id="restart" aria-label="从头重播" title="从头重播 · R"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9a8 8 0 1 1 1 9M4 4v5h5"/></svg></button>

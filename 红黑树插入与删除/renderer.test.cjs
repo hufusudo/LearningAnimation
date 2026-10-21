@@ -145,3 +145,34 @@ test('resizing a locked rotation view keeps both moving nodes on the smaller scr
     assert.ok(point.x >= margin && point.x <= r.w - margin, `${id} clipped during resize`);
   }
 });
+
+test('a rotation turns the pivot and the rising node about one shared center and never lets them pass through each other', () => {
+  const frames = RBTree.from([60, 30, 80, 20, 45, 70, 90, 10]).insert(5), i = frames.findIndex(f => f.type === 'rotate');
+  const { pivot, up } = frames[i].rotation, { r } = renderHarness();
+  r.setFrame(frames[i - 1], true); r.update(1 / 60, 1, false);
+  r.setFrame(frames[i]);
+  const c = r.spiral.c, at = id => { const p = r.rotationBefore.points.get(id); return [p.x, p.y]; };
+  const P0 = at(pivot), Q0 = at(up);
+  // ratio of (point − center) to its starting offset: a rigid turn gives the same ratio for every point on it
+  const ratio = (p, o) => {
+    const zr = p.x - c[0], zi = p.y - c[1], wr = o[0] - c[0], wi = o[1] - c[1], n = wr * wr + wi * wi;
+    return [(zr * wr + zi * wi) / n, (zi * wr - zr * wi) / n];
+  };
+  let gap = Infinity;
+  for (const progress of [0, .2, .4, .6, .8, 1]) {
+    r.update(1 / 60, progress, false);
+    const P = r.display.get(pivot), Q = r.display.get(up);
+    if (progress > 0 && progress < 1) {
+      const a = ratio(P, P0), b = ratio(Q, Q0);
+      assert.ok(Math.hypot(a[0] - b[0], a[1] - b[1]) < 1e-9, `pivot and rising node do not turn together at ${progress}`);
+    }
+    gap = Math.min(gap, Math.hypot(P.x - Q.x, P.y - Q.y));
+  }
+  assert.ok(gap > 60, `the two nodes came within ${gap} of each other`);
+  r.update(1 / 60, 1, false);
+  for (const [id, point] of r.rotationAfter.points) {
+    if (point.nil) continue;
+    const shown = r.display.get(id);
+    assert.ok(Math.hypot(shown.x - point.x, shown.y - point.y) < 1e-6, `${id} did not arrive at its new place`);
+  }
+});
