@@ -3,20 +3,22 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="从水流穿网理解通量、定向与三个有向投影，以可暂停回拖的三维演示走向曲面积分。">
 <title>第二类曲面积分 · 看懂水怎样穿过曲面</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
 <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
-<link rel="stylesheet" href="style.css?v=animation-2">
-<script defer src="model.js?v=animation-2"></script>
-<script defer src="app.js?v=animation-7"></script>
+<link rel="stylesheet" href="style.css?v=flux-refactor">
+<script defer src="model.js?v=flux-refactor"></script>
+<script defer src="choreo.js?v=flux-refactor"></script>
+<script defer src="app.js?v=flux-refactor"></script>
 </head>
 <body>
 <header class="page-header">
   <a class="back-link" href="../index.html#math">← 返回高等数学</a>
-  <h1>第二类曲面积分</h1><p>先看水怎样穿过，再看公式怎样写</p>
+  <h1>第二类曲面积分</h1><p>定向决定正负，投影连接空间与平面</p>
 </header>
 <main>
   <nav class="chapter-nav" aria-label="讲解章节">
@@ -27,19 +29,24 @@
   </nav>
   <section class="stage-shell" aria-label="曲面积分动画">
     <div id="stage" role="img" aria-label="蓝色水流从下向上穿过薄网"></div>
+    <svg id="staticStage" viewBox="0 0 900 480" role="img" aria-labelledby="fallbackTitle fallbackDesc" hidden><title id="fallbackTitle">曲面通量静态示意</title><desc id="fallbackDesc">同一曲面片及其在三个坐标面上的投影。</desc><g id="staticDrawing"></g></svg>
     <div class="scene-caption">
+      <div class="stage-status"><span id="statusDot"></span><output id="stageTime">t = 0.0 s</output></div>
       <p id="sceneCount">第 1 / 15 步 · 水怎样穿过</p>
       <h2 id="sceneTitle">通量，到底在数什么？</h2>
       <p id="sceneDescription">想象一张薄网。我们只数单位时间内穿过它的水。</p>
     </div>
     <svg id="labelLines" class="label-lines" aria-hidden="true"></svg>
     <div id="labels" class="annotation-layer" aria-hidden="true"></div>
-    <div id="quantityChip" class="quantity-chip"><span id="quantityLabel">穿过的水量</span><strong id="quantityValue">100%</strong></div>
+    <div id="quantityChip" class="quantity-chip"><span id="quantityLabel">穿过的水量</span><strong id="quantityValue">100%</strong><small id="quantityActual">Φ = +2.352</small><small>水平网通量为 100%</small></div>
     <div id="sumChip" class="sum-chip" hidden><span id="sumCount">0 / 64 块</span><strong id="sumValue">0.000</strong><span>近似净通量</span></div>
+    <div id="componentStrip" class="component-strip" hidden><span data-component="p"></span><span data-component="q"></span><span data-component="r"></span></div>
     <div class="lesson-cue" aria-live="polite" aria-atomic="true"><span class="cue-dot"></span><p id="lessonCue">先看蓝色水流穿过网，再按“播放讲解”跟着看。</p></div>
-    <p class="orbit-hint">拖动画面可换个角度看</p>
-    <div id="loadError" class="load-error" role="alert" hidden>动画暂时加载失败，请刷新页面重试。</div>
+    <p class="orbit-hint">拖动换视角 · 播放或选步骤回到讲解</p>
   </section>
+  <p id="engineNotice" class="engine-notice" role="status" hidden></p>
+  <section class="controls" aria-label="演示控制">
+  <div class="time-control"><label for="timeSlider">演示进度</label><input id="timeSlider" type="range" min="0" max="1" step="0.01" value="0" aria-label="演示进度"><output id="timeValue">0.0 / 0.0 s</output></div>
   <div id="lessonProgress" class="lesson-progress" aria-label="选择讲解步骤"></div>
   <div class="playback-bar">
     <div class="transport">
@@ -49,11 +56,13 @@
       <button id="btnReset" class="tactile-btn">从头看</button>
     </div>
     <label class="speed-control">讲解速度 <select id="speedSelect" aria-label="讲解速度"><option value="0.5">慢一点 · 0.5×</option><option value="1" selected>正常 · 1×</option><option value="2">快一点 · 2×</option></select></label>
+    <label class="motion-control"><input id="reducedMotion" type="checkbox"> 减少动态效果</label>
   </div>
+  </section>
   <div id="flatExperiment" class="experiment-strip">
     <label for="angleSlider">自己转一下网 <output id="angleValue">0°</output></label>
     <input id="angleSlider" type="range" min="0" max="180" value="0" aria-label="网的倾斜角度">
-    <button id="btnFlip" class="tactile-btn">翻转金箭头的方向</button>
+    <button id="btnFlip" class="tactile-btn">翻转正方向</button>
   </div>
   <div class="details-row">
     <details id="mathDetails">
@@ -61,7 +70,7 @@
       <div class="details-body">
         <p id="formulaExplanation">水速 × 垂直于水流的有效面积；沿金箭头穿过记正，反向记负。</p>
         <div id="formula" class="formula"></div><div id="componentValues" class="component-values"></div>
-        <p class="math-note">F 是流速向量，n 是单位法向量（金箭头），dS 是小片面积。数值示例取 F = (1, 1, 1.2)；第一章只开启竖直分量。</p>
+        <p class="math-note">F 为流速，n 为金色单位法向。有限小片用切平面近似，数值标作 ΔΦ；极限中写 dΦ。F = (1, 1, 1.2)，第一章只开启竖直分量。</p>
       </div>
     </details>
     <details id="exploreDetails">
@@ -74,11 +83,12 @@
           <button class="tactile-btn" data-view="top">从上面看</button>
           <button class="tactile-btn" data-view="side">从侧面看</button>
         </div>
-        <button id="btnFlipSurface" class="tactile-btn">翻转曲面的正方向</button>
-        <p>自由调整会暂停讲解。点“从头看”可恢复初始设置。</p>
+        <button id="btnFlipSurface" class="tactile-btn">翻转曲面正方向</button>
+        <p>自由调整会暂停讲解；播放或选步骤恢复讲解状态，换曲面保留当前时刻。</p>
       </div>
     </details>
   </div>
+<footer>示意：均匀流场、单值图形曲面，64 块为中点近似；一般曲面需分片并考虑定向与投影重叠。</footer>
 </main>
 </body>
 </html>
