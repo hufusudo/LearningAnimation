@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { RBTree } = require('./model.js');
+const { RBTree, propertyFrames } = require('./model.js');
 
 function check(tree, expected) {
   const report = tree.validate();
@@ -147,5 +147,63 @@ test('nonempty middle subtrees are detached from the rising node and reattached 
     assert.equal(afterPivot[meta.direction === 'left' ? 'right' : 'left'], meta.transfer);
     assert.equal(afterTransfer.parent, meta.pivot);
     check(tree, values.filter(v => v !== removed));
+  }
+});
+
+const PROPERTIES = ['root', 'redred', 'blackpath', 'nil', 'height', 'order'];
+
+test('property checks read the stable tree, never change it, and pass on a balanced tree', () => {
+  const tree = RBTree.from([60, 30, 80, 20, 45, 70, 90, 10]), snapshot = tree.snapshot(), before = JSON.stringify(snapshot);
+  for (const key of PROPERTIES) {
+    const frames = propertyFrames(snapshot, key);
+    assert.ok(frames.length >= 1, key);
+    assert.ok(frames.every(f => f.type === 'check' && f.tree === snapshot), key);
+    assert.equal(frames.at(-1).verdict, true, `${key} did not pass`);
+  }
+  assert.equal(JSON.stringify(snapshot), before);
+});
+
+test('black-path frames count each root-to-NIL path exactly as the validator does', () => {
+  const tree = RBTree.from([60, 30, 80, 20, 45, 70, 90, 10, 5]), snapshot = tree.snapshot();
+  const byId = new Map(snapshot.nodes.map(n => [n.id, n]));
+  const steps = propertyFrames(snapshot, 'blackpath').filter(f => f.flow.length === 1);
+  assert.equal(steps.length, snapshot.nodes.length + 1, 'one step per NIL leaf');
+  for (const step of steps) {
+    const blacks = step.flow[0].filter(id => byId.get(id)?.color === 'black').length + 1;
+    assert.equal(blacks, tree.validate().blackHeight);
+  }
+});
+
+test('property checks reject broken trees instead of approving every snapshot', () => {
+  const node = (id, value, color, left, right, parent) => ({ id, value, color, left, right, parent });
+  const redRed = { root: 'a', nodes: [node('a', 5, 'black', 'b', null, null), node('b', 3, 'red', 'c', null, 'a'), node('c', 1, 'red', null, null, 'b')] };
+  assert.equal(propertyFrames(redRed, 'redred').at(-1).verdict, false);
+  const redRoot = { root: 'a', nodes: [node('a', 5, 'red', null, null, null)] };
+  assert.equal(propertyFrames(redRoot, 'root').at(-1).verdict, false);
+  const unequal = { root: 'a', nodes: [node('a', 5, 'black', 'b', 'c', null), node('b', 3, 'black', null, null, 'a'),
+    node('c', 8, 'black', 'd', null, 'a'), node('d', 9, 'black', null, null, 'c')] };
+  assert.equal(propertyFrames(unequal, 'blackpath').at(-1).verdict, false);
+  const disordered = { root: 'a', nodes: [node('a', 5, 'black', 'b', null, null), node('b', 9, 'black', null, null, 'a')] };
+  assert.equal(propertyFrames(disordered, 'order').at(-1).verdict, false);
+});
+
+test('random balanced trees pass every property check', () => {
+  let seed = 90210;
+  const random = () => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed / 4294967296; };
+  for (let run = 0; run < 20; run++) {
+    const tree = new RBTree();
+    for (let step = 0; step < 60; step++) {
+      const value = Math.floor(random() * 99) - 49;
+      if (random() < 0.6) tree.insert(value); else tree.delete(value);
+    }
+    for (const key of PROPERTIES) assert.equal(propertyFrames(tree.snapshot(), key).at(-1).verdict, true, key);
+  }
+});
+
+test('the empty tree satisfies every property trivially', () => {
+  for (const key of PROPERTIES) {
+    const frames = propertyFrames(new RBTree().snapshot(), key);
+    assert.equal(frames.length, 1);
+    assert.equal(frames[0].verdict, true);
   }
 });

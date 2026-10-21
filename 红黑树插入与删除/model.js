@@ -297,7 +297,77 @@
     }
   }
 
-  const api = { RBTree };
+  // 性质检查：只读快照，逐步给出证据，结论由快照现算，不修改树。黑数含根与 NIL；长度为根到 NIL 的边数。
+  function propertyFrames(snapshot, key) {
+    const byId = new Map(snapshot.nodes.map(n => [n.id, n]));
+    const root = byId.get(snapshot.root);
+    const frame = (title, text, extra = {}) => ({ type: 'check', title, text, tree: snapshot, focus: [],
+      anchor: root ? root.id : null, debt: null, duration: 900, ...extra });
+    if (!root) return [frame('空树', '没有节点，各项性质平凡成立', { verdict: true, duration: 1200 })];
+    const paths = [], inorder = [];
+    const walk = (n, trail) => {
+      const here = [...trail, n.id];
+      for (const side of ['left', 'right']) {
+        const child = byId.get(n[side]);
+        if (child) walk(child, here); else paths.push([...here, `nil-${n.id}-${side}`]);
+      }
+    };
+    const visit = n => { if (!n) return; visit(byId.get(n.left)); inorder.push(n); visit(byId.get(n.right)); };
+    walk(root, []); visit(root);
+    const realIds = inorder.map(n => n.id);
+    const label = path => path.map(id => (byId.has(id) ? byId.get(id).value : 'NIL')).join(' → ');
+    const blacks = path => path.filter(id => byId.has(id) && byId.get(id).color === 'black').length + 1;
+    const verdict = ok => (ok ? '通过' : '不满足');
+    const lastReal = path => path[path.length - 2];
+    if (key === 'root') {
+      const ok = root.color === 'black';
+      return [frame('根为黑', `根节点 ${root.value} 为${ok ? '黑色' : '红色'}，${verdict(ok)}`, { focus: [root.id], verdict: ok, ripple: true, duration: 1400 })];
+    }
+    if (key === 'redred') {
+      const reds = inorder.filter(n => n.color === 'red');
+      if (!reds.length) return [frame('不红红', '树中没有红节点，性质自然成立', { focus: realIds, verdict: true, duration: 1200 })];
+      const steps = reds.map(r => {
+        const kids = ['left', 'right'].map(side => ({ id: byId.has(r[side]) ? r[side] : `nil-${r.id}-${side}`, node: byId.get(r[side]) }));
+        const bad = kids.find(k => k.node && k.node.color === 'red');
+        const names = kids.map(k => (k.node ? k.node.value : 'NIL')).join('、');
+        return frame(`不红红 · 红节点 ${r.value}`, bad ? `孩子 ${bad.node.value} 也是红色，不满足` : `孩子 ${names} 都是黑色`,
+          { focus: [r.id, ...kids.map(k => k.id)], anchor: r.id });
+      });
+      const ok = reds.every(r => ![r.left, r.right].some(id => byId.get(id)?.color === 'red'));
+      return [...steps, frame('不红红', `${reds.length} 个红节点的孩子都是黑色，${verdict(ok)}`, { focus: realIds, verdict: ok, duration: 1200 })];
+    }
+    if (key === 'blackpath') {
+      const counts = paths.map(blacks), ok = counts.every(c => c === counts[0]);
+      const steps = paths.map((p, i) => frame(`黑路同 · 路径 ${i + 1}`, `${label(p)}：黑 ${counts[i]} 份`,
+        { flow: [p], focus: p.slice(0, -1), anchor: lastReal(p), duration: 950 }));
+      return [...steps, frame('黑路同', ok ? `每条路径都是 ${counts[0]} 份黑，${verdict(ok)}` : `黑数不一致，${verdict(ok)}`,
+        { focus: realIds, flow: paths, verdict: ok, duration: 1300 })];
+    }
+    if (key === 'nil') {
+      return [frame('NIL 为黑', `共 ${paths.length} 个空叶子，都计为黑色，通过`, { focus: realIds, showNil: true, verdict: true, duration: 1300 })];
+    }
+    if (key === 'height') {
+      const len = p => p.length - 1;
+      const short = Math.min(...paths.map(len)), long = Math.max(...paths.map(len));
+      const shortPath = paths.find(p => len(p) === short), longPath = paths.find(p => len(p) === long);
+      const ok = long <= 2 * short;
+      return [
+        frame(`最短路径 · 长 ${short}`, label(shortPath), { flow: [shortPath], focus: shortPath.slice(0, -1), anchor: lastReal(shortPath) }),
+        frame(`最长路径 · 长 ${long}`, label(longPath), { flow: [longPath], focus: longPath.slice(0, -1), anchor: lastReal(longPath) }),
+        frame('最长不超两倍最短', `${long} ≤ 2 × ${short}，${verdict(ok)}`, { focus: realIds, verdict: ok, duration: 1300 }),
+      ];
+    }
+    if (key === 'order') {
+      const steps = inorder.map((n, i) => frame(`中序 · 第 ${i + 1} 个`,
+        i ? `前一个 ${inorder[i - 1].value}，${n.value > inorder[i - 1].value ? '递增' : '不满足'}` : `最小值 ${n.value}`,
+        { focus: [n.id], anchor: n.id, duration: 700 }));
+      const ok = inorder.every((n, i) => !i || inorder[i - 1].value < n.value);
+      return [...steps, frame('中序有序', `${inorder.length} 个节点依次递增，${verdict(ok)}`, { focus: realIds, verdict: ok, duration: 1200 })];
+    }
+    throw new Error(`未知性质：${key}`);
+  }
+
+  const api = { RBTree, propertyFrames };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else global.RedBlack = api;
 })(typeof window !== 'undefined' ? window : globalThis);
