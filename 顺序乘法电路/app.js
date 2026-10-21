@@ -1,554 +1,605 @@
 /**
- * Sequential Multiplier Circuit Simulation Engine
- * Author: Antigravity Lab
- * Complies with the reference circuit layout & 60fps continuous GSAP tweens.
+ * 顺序乘法电路：界面与控件。画面只由 (步, 进度) 经 choreo.js 算出，这里只负责写 DOM 与控件。
+ * 时间以步为单位：当前步 i 与步内进度 p。播放时 GSAP 补间推进 p；减少动效时画面直接跳到步末终态。
  */
+(function () {
+  'use strict';
 
-// ==========================================================================
-// 1. STATE & DATA STRUCTURES
-// ==========================================================================
+  const M = window.SeqMulModel;
+  const C = window.SeqMulChoreo;
+  const G = C.GEOM;
+  const NS = 'http://www.w3.org/2000/svg';
+  const STEP_SEC = 1.0;        // 1× 速下一步约 1 秒
+  const LINK_DELAY = 300;      // 播放中节流写回地址栏（毫秒）
+  const PRESETS = [[13, 11], [5, 3], [7, 6], [9, 13], [15, 15]];
+  const hasGsap = typeof window.gsap !== 'undefined';
+  const motionQuery = window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)') : null;
 
-const State = {
-  X: 13, // Multiplicand (0~15)
-  Y: 11, // Multiplier (0~15)
-  n: 4,  // Bit width (4 bits)
+  const INK = '#343C38';
+  const INK2 = '#5D655F';
+  const MUTED = '#6B7066';
+  const BLUE = '#2563EB';
+  const GREEN = '#399B7B';
+  const GOLD_DEEP = '#8F6619';
+  const WAIT = '#9AA096';
+  const WHITE = '#FFFFFF';
+  const PAPER2 = '#F5F4EE';
 
-  currentStepIndex: 0,
-  steps: [],
-  isPlaying: false,
-  playbackSpeed: 1.0,
-  playTimer: null,
-  activeTimeline: null
-};
+  // 焦点环与浮标的目标位置（舞台坐标）
+  const RING_BOX = {
+    mq0: { x: 772, y: 159, width: 74, height: 74 },
+    alu: { x: 281, y: 281, width: 242, height: 80 },
+    counter: { x: 632, y: 292, width: 276, height: 126 }
+  };
+  const TAG_POS = {
+    probe: { x: 729, y: 260 },
+    carry: { x: 566, y: 258 },
+    shift: { x: 560, y: 100 },
+    count: { x: 710, y: 432 }
+  };
 
-// Helper: convert number to array of binary bits
-function toBinArr(val, len) {
-  const s = (val >>> 0).toString(2).padStart(len, '0');
-  return s.split('').slice(-len).map(Number);
-}
+  const $ = (id) => document.getElementById(id);
+  const els = {
+    layer: $('layer'),
+    caption: $('caption'),
+    notice: $('notice'),
+    play: $('play'),
+    prev: $('prev'),
+    next: $('next'),
+    replay: $('replay'),
+    speed: $('speed'),
+    speedOut: $('speed-out'),
+    reduce: $('reduce'),
+    scrub: $('scrub'),
+    timeOut: $('time-out'),
+    bar: $('stage-bar'),
+    form: $('custom'),
+    inX: $('in-x'),
+    inY: $('in-y')
+  };
 
-// Generate the micro-phase steps for multiplication
-function generateMultiplicationTrace(X, Y, n = 4) {
-  const steps = [];
-  let cout = 0;
-  let acc = [0, 0, 0, 0];
-  let mq = toBinArr(Y, 4);
-  let xArr = toBinArr(X, 4);
-  let counter = n;
+  const S = {
+    X: 13,
+    Y: 11,
+    run: null,
+    i: 0,
+    p: 0,
+    speed: 1,
+    reduce: false,
+    playing: false,
+    tween: null,
+    linkTimer: null
+  };
 
-  // Step 0: Initial State
-  steps.push({
-    stepId: 'S0',
-    cycle: 0,
-    phase: 'INIT',
-    title: '初始状态 (Init)',
-    actionDesc: `ACC 初始化清零 (0000)，Cout 清零 (0)，乘数 Y 载入 MQ (${mq.join('')})，被乘数 X 载入 X (${xArr.join('')})，计数器 Cn = 4`,
-    cout: cout,
-    acc: [...acc],
-    mq: [...mq],
-    x: [...xArr],
-    counter: counter,
-    isDone: false,
-    activeWires: [],
-    activeAlu: false,
-    activeCtrl: false,
-    activeShift: false,
-    probeMq0: false,
-    addActive: false,
-    clkPulse: false
-  });
+  // 画面元素的引用，构建后不再查找
+  const V = {};
 
-  for (let i = 1; i <= n; i++) {
-    const mq0 = mq[3]; // lowest bit
+  // ───── 工具 ─────
 
-    // Phase 1: Probe MQ0
-    steps.push({
-      stepId: `S${i}-P1`,
-      cycle: i,
-      phase: 'PROBE',
-      title: `第 ${i} 拍 · ① 探测乘数最低位 MQ₀`,
-      actionDesc: `控制逻辑探针检测 MQ₀ = ${mq0}。${mq0 === 1 ? 'MQ₀=1 → 控制逻辑将发出加法命令 (+)' : 'MQ₀=0 → 控制逻辑将跳过加法 (+0)'}`,
-      cout: cout,
-      acc: [...acc],
-      mq: [...mq],
-      x: [...xArr],
-      counter: counter,
-      isDone: false,
-      activeWires: ['wire-mq0-probe'],
-      activeAlu: false,
-      activeCtrl: true,
-      activeShift: false,
-      probeMq0: true,
-      addActive: false,
-      clkPulse: false
+  const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+
+  function clampInt(v) {
+    const n = Math.round(Number(v));
+    return Number.isFinite(n) ? clamp(n, 0, 15) : 0;
+  }
+
+  function el(name, attrs, parent) {
+    const node = document.createElementNS(NS, name);
+    Object.keys(attrs || {}).forEach((k) => node.setAttribute(k, attrs[k]));
+    if (parent) parent.appendChild(node);
+    return node;
+  }
+
+  function txt(content, attrs, parent) {
+    const node = el('text', attrs, parent);
+    node.textContent = content;
+    return node;
+  }
+
+  // 只在数值变化时写属性（避免每帧重复写入）
+  const memo = new WeakMap();
+  function put(node, attr, value) {
+    let m = memo.get(node);
+    if (!m) {
+      m = new Map();
+      memo.set(node, m);
+    }
+    const v = String(value);
+    if (m.get(attr) === v) return;
+    m.set(attr, v);
+    node.setAttribute(attr, v);
+  }
+
+  function setText(node, s) {
+    if (node.textContent !== s) node.textContent = s;
+  }
+
+  // 两个十六进制颜色按 t 线性混合
+  function mix(a, b, t) {
+    const pa = parseInt(a.slice(1), 16);
+    const pb = parseInt(b.slice(1), 16);
+    const ch = (s) => [(s >> 16) & 255, (s >> 8) & 255, s & 255];
+    const A = ch(pa);
+    const B = ch(pb);
+    const out = A.map((v, k) => Math.round(v + (B[k] - v) * t));
+    return `#${out.map((v) => v.toString(16).padStart(2, '0')).join('')}`;
+  }
+
+  // 标签宽度按字符估算：中文约 13px，其余约 7px
+  function textWidth(s) {
+    let w = 0;
+    for (const ch of s) w += ch.charCodeAt(0) > 255 ? 13 : 7.2;
+    return w;
+  }
+
+  // ───── 静态舞台（只构建一次）─────
+
+  function build() {
+    const L = els.layer;
+    const defs = el('defs', {}, L);
+    const marker = el('marker', { id: 'arrow', markerWidth: 8, markerHeight: 8, refX: 8, refY: 4, orient: 'auto', markerUnits: 'userSpaceOnUse' }, defs);
+    el('path', { d: 'M0,0 L8,4 L0,8 Z', fill: INK }, marker);
+
+    // 1. 轮廓（A3）与分界线：联合右移时圈出整链，分界线是 ACC₀ 跨界的位置
+    V.contour = el('rect', { x: 178, y: 160, width: 670, height: 72, rx: 12, fill: 'none', stroke: BLUE, 'stroke-width': 1.5, 'stroke-dasharray': '6 5', opacity: 0 }, L);
+    el('path', { d: 'M550,158 L550,234', fill: 'none', stroke: WAIT, 'stroke-width': 1.5, 'stroke-dasharray': '3 4' }, L);
+    V.seam = el('path', { d: 'M550,158 L550,234', fill: 'none', stroke: BLUE, 'stroke-width': 3, opacity: 0 }, L);
+
+    // 2. 连线：基线常驻，蓝色覆盖线按进度描边生长（E1）
+    const wire = (d, extra) => el('path', Object.assign({ d, fill: 'none', stroke: INK, 'stroke-width': 2, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }, extra || {}), L);
+    const overlay = (d) => el('path', { d, fill: 'none', stroke: BLUE, 'stroke-width': 3, 'stroke-linecap': 'round', pathLength: 1, 'stroke-dasharray': '1 1', 'stroke-dashoffset': 1, opacity: 0 }, L);
+
+    const EN = 'M900,330 L930,330 L930,122 L187,122';
+    wire(EN);
+    wire('M402,122 L402,163', { 'marker-end': 'url(#arrow)' });
+    wire('M698,122 L698,163', { 'marker-end': 'url(#arrow)' });
+    V.enOver = overlay(EN);
+    wire('M300,226 L300,289', { 'marker-end': 'url(#arrow)' });           // ACC 反馈到 ALU
+    wire('M500,290 L500,227', { 'marker-end': 'url(#arrow)' });           // ALU 和写回 ACC
+    wire('M402,420 L402,353', { 'marker-end': 'url(#arrow)' });           // X 总线
+    wire('M640,330 L489,330', { 'marker-end': 'url(#arrow)' });           // 加法使能 “+”
+    V.plusOver = overlay('M640,330 L489,330');
+    V.sumOver = overlay('M500,290 L500,227');
+    wire('M809,226 L809,299', { 'marker-end': 'url(#arrow)' });           // MQ₀ 探测线
+    wire('M1040,370 L901,370', { 'marker-end': 'url(#arrow)' });          // CLK
+
+    // 3. 链：Cout、ACC、MQ 与移出位，同一节距排成一行
+    txt('Cout', { x: G.slotX[0], y: G.chainY - 10, class: 'label', fill: INK2 }, L);
+    txt('ACC', { x: G.slotX[1], y: G.chainY - 10, class: 'label', fill: INK2 }, L);
+    txt('MQ', { x: G.slotX[5], y: G.chainY - 10, class: 'label', fill: INK2 }, L);
+    txt('移出', { x: G.slotX[9], y: G.chainY - 10, class: 'label', fill: MUTED }, L);
+    txt('EN, >>', { x: 196, y: 110, class: 'label', fill: INK2 }, L);
+
+    V.cells = [];
+    V.bits = [];
+    for (let k = 0; k < 9; k++) {
+      V.cells.push(el('rect', { x: G.slotX[k], y: G.chainY, width: G.cell, height: G.cell, rx: 8, fill: WHITE, stroke: INK2, 'stroke-width': 1.5 }, L));
+      V.bits.push(txt('', { x: G.slotX[k] + G.cell / 2, y: G.chainY + G.cell / 2, 'text-anchor': 'middle', 'dominant-baseline': 'central', class: 'bit', fill: INK }, L));
+    }
+    el('rect', { x: G.slotX[9], y: G.chainY, width: G.cell, height: G.cell, rx: 8, fill: 'none', stroke: WAIT, 'stroke-width': 1.5, 'stroke-dasharray': '6 5' }, L);
+
+    // 4. X 寄存器（输入色）与 ALU
+    txt('被乘数 X', { x: 246, y: 452, 'text-anchor': 'end', class: 'label', fill: INK2 }, L);
+    V.xBits = [];
+    for (let j = 0; j < 4; j++) {
+      const x = G.slotX[1 + j];
+      el('rect', { x, y: 420, width: G.cell, height: G.cell, rx: 8, fill: WHITE, stroke: GREEN, 'stroke-width': 2 }, L);
+      V.xBits.push(txt('', { x: x + G.cell / 2, y: 450, 'text-anchor': 'middle', 'dominant-baseline': 'central', class: 'bit', fill: INK }, L));
+    }
+    V.alu = el('polygon', { points: '290,290 514,290 474,352 330,352', fill: WHITE, stroke: INK, 'stroke-width': 2, 'stroke-linejoin': 'round' }, L);
+    txt('ALU', { x: G.aluCx, y: 326, 'text-anchor': 'middle', class: 'alu-text', fill: INK }, L);
+
+    // 5. 控制逻辑与计数器
+    el('rect', { x: 640, y: 300, width: 260, height: 110, rx: 12, fill: PAPER2, stroke: INK, 'stroke-width': 1.5 }, L);
+    txt('控制逻辑 · 计数器', { x: 770, y: 330, 'text-anchor': 'middle', class: 'label', fill: INK2 }, L);
+    V.counter = txt('', { x: 770, y: 384, 'text-anchor': 'middle', 'dominant-baseline': 'central', class: 'counter-text', fill: INK }, L);
+    txt('+', { x: 566, y: 324, 'text-anchor': 'middle', class: 'plus-text', fill: INK }, L);
+    txt('MQ₀', { x: 818, y: 262, class: 'label', fill: INK2 }, L);
+    txt('CLK', { x: 1000, y: 362, 'text-anchor': 'middle', class: 'label', fill: INK2 }, L);
+
+    // 6. 位块（B1）：0–8 为联合右移的位块，9 为加法时飞入 ALU 的 X 字
+    V.chips = [];
+    for (let j = 0; j < 10; j++) {
+      const g = el('g', { visibility: 'hidden', opacity: 0 }, L);
+      const rect = el('rect', { x: 0, y: 0, width: G.chipW, height: G.chipH, rx: 8, fill: BLUE }, g);
+      const label = txt('', { x: G.chipW / 2, y: G.chipH / 2, 'text-anchor': 'middle', 'dominant-baseline': 'central', class: 'chip-text', fill: WHITE }, g);
+      V.chips.push({ g, rect, label });
+    }
+
+    // 7. 焦点环（A1）、浮标（D1）、结果行（E3）
+    V.ring = el('rect', { x: 0, y: 0, width: 0, height: 0, rx: 12, fill: 'none', stroke: BLUE, 'stroke-width': 2.5, opacity: 0 }, L);
+    V.tag = el('g', { visibility: 'hidden', opacity: 0 }, L);
+    V.tagRect = el('rect', { x: 0, y: -12, width: 0, height: 24, rx: 12, fill: WHITE, stroke: BLUE, 'stroke-width': 1.2 }, V.tag);
+    V.tagText = txt('', { x: 0, y: 0, 'text-anchor': 'middle', 'dominant-baseline': 'central', class: 'tag-text', fill: BLUE }, V.tag);
+    const clip = el('clipPath', { id: 'result-clip' }, defs);
+    V.resultClip = el('rect', { x: 150, y: 470, width: 0, height: 34 }, clip);
+    V.result = txt('', { x: 550, y: 494, 'text-anchor': 'middle', 'dominant-baseline': 'central', class: 'result-text', fill: GOLD_DEEP, 'clip-path': 'url(#result-clip)' }, L);
+
+    // 8. 舞台左上：状态灯、拍数；右上：输入算式
+    V.dot = el('circle', { cx: 34, cy: 34, r: 6, fill: WAIT }, L);
+    V.title = txt('', { x: 50, y: 39, class: 'status-title', fill: INK }, L);
+    V.cycle = txt('', { x: 34, y: 88, class: 'status-cycle', fill: INK2 }, L);
+    V.formula = txt('', { x: 1066, y: 40, 'text-anchor': 'end', class: 'formula', fill: INK2 }, L);
+    V.formulaY = txt('', { x: 1066, y: 62, 'text-anchor': 'end', class: 'formula', fill: INK2 }, L);
+  }
+
+  // ───── 每次参数变化后写入的静态信息 ─────
+
+  function fillStatic() {
+    const { X, Y, product } = S.run;
+    const bitsOf = (v) => M.bitsOf(v, 4).join('');
+    V.xBits.forEach((node, j) => setText(node, String(S.run.steps[0].x[j])));
+    setText(V.formula, `被乘数 X = ${bitsOf(X)} (${X})`);
+    setText(V.formulaY, `乘数 Y = ${bitsOf(Y)} (${Y})`);
+    V.resultText = `积 = ${M.bitsOf(product >> 4, 4).join('')} ${M.bitsOf(product & 15, 4).join('')} = ${product}`;
+    setText(V.result, V.resultText);
+  }
+
+  // ───── 画面 ─────
+
+  function paintWire(node, w) {
+    put(node, 'stroke-dashoffset', (1 - w.draw).toFixed(4));
+    put(node, 'opacity', w.alpha.toFixed(4));
+  }
+
+  function paintTag(tg) {
+    if (!tg.text || tg.alpha <= 0.001) {
+      put(V.tag, 'visibility', 'hidden');
+      return;
+    }
+    put(V.tag, 'visibility', 'visible');
+    put(V.tag, 'opacity', tg.alpha.toFixed(4));
+    if (V.tagText.textContent !== tg.text) {
+      const w = textWidth(tg.text) + 22;
+      setText(V.tagText, tg.text);
+      put(V.tagRect, 'x', (-w / 2).toFixed(2));
+      put(V.tagRect, 'width', w.toFixed(2));
+    }
+    const at = TAG_POS[tg.at];
+    put(V.tag, 'transform', `translate(${at.x} ${(at.y + tg.dy).toFixed(2)})`);
+  }
+
+  function paint(f, step) {
+    put(V.contour, 'opacity', f.contour.alpha.toFixed(4));
+    put(V.seam, 'opacity', f.seam.lit.toFixed(4));
+    paintWire(V.enOver, f.wires.en);
+    paintWire(V.plusOver, f.wires.plus);
+    paintWire(V.sumOver, f.wires.sum);
+
+    put(V.alu, 'fill', mix(WHITE, '#E3ECFD', f.alu.lit));
+    put(V.alu, 'stroke', mix(INK, BLUE, f.alu.lit));
+
+    for (let k = 0; k < 9; k++) {
+      const s = f.slots[k];
+      setText(V.bits[k], s.text);
+      put(V.bits[k], 'opacity', s.alpha.toFixed(4));
+      put(V.cells[k], 'fill', mix(WHITE, '#F3E4C2', s.tint));
+    }
+
+    f.chips.forEach((c, j) => {
+      const node = V.chips[j];
+      if (c.alpha <= 0.001) {
+        put(node.g, 'visibility', 'hidden');
+        return;
+      }
+      put(node.g, 'visibility', 'visible');
+      put(node.g, 'opacity', c.alpha.toFixed(4));
+      put(node.g, 'transform', `translate(${c.x.toFixed(2)} ${c.y.toFixed(2)})`);
+      put(node.rect, 'width', c.w);
+      put(node.label, 'x', c.w / 2);
+      setText(node.label, c.text);
     });
 
-    // Phase 2: ALU Addition (if mq0 == 1)
-    if (mq0 === 1) {
-      const accVal = parseInt(acc.join(''), 2);
-      const xVal = X;
-      const sumVal = accVal + xVal;
-      cout = (sumVal >> 4) & 1; // carry out
-      acc = toBinArr(sumVal & 0xF, 4); // 4-bit sum
+    const box = RING_BOX[f.ring.target];
+    if (box) {
+      put(V.ring, 'x', box.x);
+      put(V.ring, 'y', box.y);
+      put(V.ring, 'width', box.width);
+      put(V.ring, 'height', box.height);
+    }
+    put(V.ring, 'opacity', f.ring.alpha.toFixed(4));
 
-      steps.push({
-        stepId: `S${i}-P2`,
-        cycle: i,
-        phase: 'ADD',
-        title: `第 ${i} 拍 · ② ALU 算术相加并打入 ACC 与 Cout`,
-        actionDesc: `控制逻辑发出加法信号 (+) → ACC (${toBinArr(accVal, 4).join('')}) 与 X (${xArr.join('')}) 进入 ALU → 和数 (${acc.join('')}) 送回 ACC，进位 (${cout}) 送入 Cout`,
-        cout: cout,
-        acc: [...acc],
-        mq: [...mq],
-        x: [...xArr],
-        counter: counter,
-        isDone: false,
-        activeWires: ['wire-acc-loop', 'wire-x-to-alu', 'wire-ctrl-add', 'wire-alu-sum', 'wire-alu-cout'],
-        activeAlu: true,
-        activeCtrl: true,
-        activeShift: false,
-        probeMq0: true,
-        addActive: true,
-        clkPulse: false,
-        sumComputed: true
+    setText(V.counter, `C = ${f.counter.text}`);
+    put(V.counter, 'opacity', f.counter.alpha.toFixed(4));
+    put(V.counter, 'transform', `translate(0 ${f.counter.dy.toFixed(2)})`);
+
+    paintTag(f.tag);
+    put(V.resultClip, 'width', (800 * f.result.clip).toFixed(2));
+
+    setText(V.title, step.title);
+    setText(V.cycle, `${step.cycle} / ${S.run.n}`);
+    put(V.dot, 'fill', S.playing ? BLUE : WAIT);
+    V.dot.classList.toggle('is-running', S.playing);
+    setText(els.caption, step.caption);
+  }
+
+  // 第几步与步内进度 → 画面（减少动效时只给出起态与终态，不给中间帧）
+  function render() {
+    const steps = S.run.steps;
+    const shown = S.reduce ? (S.p > 0 ? 1 : 0) : S.p;
+    const step = steps[S.i];
+    const prev = S.i > 0 ? steps[S.i - 1] : null;
+    paint(C.frame(step, shown, prev), step);
+    paintControls();
+  }
+
+  function paintControls() {
+    const len = S.run.steps.length;
+    setText(els.timeOut, `第 ${Math.min(S.i + 1, len)} / ${len} 步`);
+    const v = (S.i + S.p).toFixed(2);
+    if (els.scrub.value !== v) els.scrub.value = v;
+    setText(els.play, S.playing ? '‖ 暂停' : '▶ 播放');
+    els.speedOut.textContent = `${S.speed.toFixed(1)}×`;
+    els.reduce.checked = S.reduce;
+    els.bar.querySelectorAll('.step').forEach((b) => {
+      const idx = Number(b.dataset.i);
+      const state = idx < S.i ? 'passed' : (idx === S.i ? 'current' : 'future');
+      if (b.dataset.state !== state) {
+        b.dataset.state = state;
+        if (state === 'current') b.setAttribute('aria-current', 'step');
+        else b.removeAttribute('aria-current');
+      }
+    });
+  }
+
+  // ───── 推演与导航 ─────
+
+  function buildBar() {
+    els.bar.textContent = '';
+    let group = null;
+    let key = null;
+    S.run.steps.forEach((st, idx) => {
+      const k = st.kind === 'init' ? 'init' : (st.kind === 'done' ? 'done' : `c${st.cycle}`);
+      if (k !== key) {
+        key = k;
+        group = document.createElement('div');
+        group.className = 'cycle';
+        const label = document.createElement('span');
+        label.className = 'cycle-label';
+        label.textContent = st.kind === 'init' ? '初始' : (st.kind === 'done' ? '结束' : `第 ${st.cycle} 拍`);
+        group.appendChild(label);
+        els.bar.appendChild(group);
+      }
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'step';
+      b.dataset.i = String(idx);
+      b.textContent = st.phase;
+      b.setAttribute('aria-label', st.title);
+      b.addEventListener('click', () => {
+        S.playing = false;
+        goTo(idx, 0);
       });
-    } else {
-      steps.push({
-        stepId: `S${i}-P2`,
-        cycle: i,
-        phase: 'PASS',
-        title: `第 ${i} 拍 · ② 跳过加法 (ACC + 0)`,
-        actionDesc: `MQ₀ = 0 → 控制逻辑不触发加法 (+) → ACC 与 Cout 保持原值不变，直接准备联合移位`,
-        cout: cout,
-        acc: [...acc],
-        mq: [...mq],
-        x: [...xArr],
-        counter: counter,
-        isDone: false,
-        activeWires: [],
-        activeAlu: false,
-        activeCtrl: false,
-        activeShift: false,
-        probeMq0: true,
-        addActive: false,
-        clkPulse: false
-      });
-    }
-
-    // Phase 3: Combined Right Shift [Cout -> ACC -> MQ]
-    const oldCout = cout;
-    const oldAcc = [...acc];
-    const oldMq = [...mq];
-
-    // Shift logic:
-    // Cout -> ACC[0] (which is acc[3] in array)
-    const newAcc3 = oldCout;
-    const newAcc2 = oldAcc[0];
-    const newAcc1 = oldAcc[1];
-    const newAcc0 = oldAcc[2];
-
-    const newMq3 = oldAcc[3]; // ACC lowest bit into MQ highest bit
-    const newMq2 = oldMq[0];
-    const newMq1 = oldMq[1];
-    const newMq0 = oldMq[2];
-
-    cout = 0; // Cout resets to 0 after shift
-    acc = [newAcc3, newAcc2, newAcc1, newAcc0];
-    mq = [newMq3, newMq2, newMq1, newMq0];
-
-    steps.push({
-      stepId: `S${i}-P3`,
-      cycle: i,
-      phase: 'SHIFT',
-      title: `第 ${i} 拍 · ③ [ACC, MQ] 联合向右移位 1 位`,
-      actionDesc: `控制逻辑发射 EN, >> 移位脉冲 → Cout(${oldCout}) 移入 ACC最高位 → ACC最低位(${oldAcc[3]}) 跨越注入 MQ最高位 → MQ最低位(${oldMq[3]}) 移出丢弃`,
-      cout: cout,
-      acc: [...acc],
-      mq: [...mq],
-      x: [...xArr],
-      counter: counter,
-      isDone: false,
-      activeWires: ['wire-ctrl-shift'],
-      activeAlu: false,
-      activeCtrl: true,
-      activeShift: true,
-      probeMq0: false,
-      addActive: false,
-      clkPulse: false,
-      isShiftTransition: true,
-      prevCout: oldCout,
-      prevAcc: oldAcc,
-      prevMq: oldMq
-    });
-
-    // Phase 4: CLK Pulse & Counter Decrement
-    counter -= 1;
-    steps.push({
-      stepId: `S${i}-P4`,
-      cycle: i,
-      phase: 'COUNT',
-      title: `第 ${i} 拍 · ④ CLK 脉冲与计数器递减 (Cn = ${counter})`,
-      actionDesc: `CLK 上升沿触发步数计数器递减：Cn ← Cn - 1 (${counter + 1} → ${counter})。${counter === 0 ? '计数器归零，乘法计算完成！' : '准备进入下一拍循环。'}`,
-      cout: cout,
-      acc: [...acc],
-      mq: [...mq],
-      x: [...xArr],
-      counter: counter,
-      isDone: counter === 0,
-      activeWires: ['wire-clk'],
-      activeAlu: false,
-      activeCtrl: true,
-      activeShift: false,
-      probeMq0: false,
-      addActive: false,
-      clkPulse: true
+      group.appendChild(b);
     });
   }
 
-  // Final Done Step
-  const finalAccVal = parseInt(acc.join(''), 2);
-  const finalMqVal = parseInt(mq.join(''), 2);
-  const finalProduct = (finalAccVal << 4) | finalMqVal;
+  function writeLinkNow() {
+    clearTimeout(S.linkTimer);
+    S.linkTimer = null;
+    try {
+      const q = new URLSearchParams({ x: String(S.X), y: String(S.Y), t: (S.i + S.p).toFixed(2) });
+      history.replaceState(null, '', `#${q.toString()}`);
+    } catch (e) {
+      // 某些本地环境不允许改写地址，演示照常可用
+    }
+  }
 
-  steps.push({
-    stepId: 'DONE',
-    cycle: 4,
-    phase: 'DONE',
-    title: '乘法全流程圆满完成 (Multiplication Complete)',
-    actionDesc: `计数器 Cn = 0 停止时钟！乘积高 4 位保存在 ACC (${acc.join('')})，低 4 位保存在 MQ (${mq.join('')})，拼接结果为 ${acc.join('')}${mq.join('')} (十进制: ${finalProduct})`,
-    cout: cout,
-    acc: [...acc],
-    mq: [...mq],
-    x: [...xArr],
-    counter: 0,
-    isDone: true,
-    activeWires: [],
-    activeAlu: false,
-    activeCtrl: false,
-    activeShift: false,
-    probeMq0: false,
-    addActive: false,
-    clkPulse: false
-  });
+  function scheduleLink() {
+    if (!S.linkTimer) S.linkTimer = setTimeout(writeLinkNow, LINK_DELAY);
+  }
 
-  return steps;
-}
+  function readLink() {
+    const out = { X: 13, Y: 11, t: 0 };
+    try {
+      const q = new URLSearchParams(location.hash.slice(1));
+      const x = q.has('x') ? Number(q.get('x')) : NaN;
+      const y = q.has('y') ? Number(q.get('y')) : NaN;
+      const t = q.has('t') ? Number(q.get('t')) : NaN;
+      if (Number.isInteger(x) && x >= 0 && x <= 15) out.X = x;
+      if (Number.isInteger(y) && y >= 0 && y <= 15) out.Y = y;
+      if (Number.isFinite(t) && t > 0) out.t = t;
+    } catch (e) {
+      // 地址栏不可读时按默认状态开始
+    }
+    return out;
+  }
 
-// ==========================================================================
-// 2. TIMELINE & UI RENDERING
-// ==========================================================================
+  function killTween() {
+    if (S.tween) {
+      S.tween.kill();
+      S.tween = null;
+    }
+  }
 
-function initTimeline() {
-  const container = document.getElementById('timeline-container');
-  container.innerHTML = '';
+  // 跳到第 i 步的第 p 进度，并停止播放；所有画面由 render 按这两个数重算。地址栏节流写回（拖动时不逐次改写）
+  function goTo(i, p) {
+    killTween();
+    S.i = clamp(Math.floor(Number(i)) || 0, 0, S.run.steps.length - 1);
+    S.p = clamp(Number(p) || 0, 0, 1);
+    render();
+    scheduleLink();
+  }
 
-  State.steps.forEach((st, idx) => {
-    const btn = document.createElement('button');
-    btn.className = `step-node px-2.5 py-1 rounded-lg border text-xs font-mono font-bold flex flex-col items-center min-w-[50px] ${idx === 0 ? 'current' : 'future'}`;
-    btn.dataset.index = idx;
-    btn.innerHTML = `
-      <span>${st.stepId}</span>
-    `;
-    btn.addEventListener('click', () => {
-      pausePlayback();
-      goToStep(idx);
+  function pause() {
+    S.playing = false;
+    if (S.tween) S.tween.pause();
+    render();
+    writeLinkNow();
+  }
+
+  function play() {
+    if (!hasGsap || !S.run) return;
+    const last = S.run.steps.length - 1;
+    if (S.i === last && S.p >= 1) goTo(0, 0);
+    S.playing = true;
+    if (S.tween) S.tween.play();
+    else animateStep();
+    render();
+  }
+
+  function togglePlay() {
+    if (S.playing) pause();
+    else play();
+  }
+
+  // 补间推进当前步的进度；减少动效时不做补间，直接跳到步末终态并停留一个步长
+  function animateStep() {
+    killTween();
+    if (S.reduce) {
+      S.p = 1;
+      render();
+      scheduleLink();
+      S.tween = window.gsap.delayedCall(STEP_SEC, finishStep);
+      S.tween.timeScale(S.speed);
+      return;
+    }
+    const obj = { p: S.p };
+    S.tween = window.gsap.to(obj, {
+      p: 1,
+      duration: STEP_SEC * (1 - S.p),
+      ease: 'none',
+      onUpdate: () => {
+        S.p = obj.p;
+        render();
+        scheduleLink();
+      },
+      onComplete: finishStep
     });
-    container.appendChild(btn);
-  });
-}
+    S.tween.timeScale(S.speed);
+  }
 
-function updateTimelineNodes(currIdx) {
-  const nodes = document.querySelectorAll('.step-node');
-  nodes.forEach((node, idx) => {
-    node.classList.remove('current', 'passed', 'future');
-    if (idx === currIdx) {
-      node.classList.add('current');
-    } else if (idx < currIdx) {
-      node.classList.add('passed');
-    } else {
-      node.classList.add('future');
+  // 一步结束：进入下一步起点（仍在播放时接着播），末步结束则停在终态
+  function finishStep() {
+    S.tween = null;
+    S.i += 1;
+    S.p = 0;
+    const last = S.run.steps.length - 1;
+    if (S.i > last) {
+      S.i = last;
+      S.p = 1;
+      S.playing = false;
     }
-  });
-}
-
-function clearCircuitHighlights() {
-  // Clear wire highlights
-  document.querySelectorAll('.wire-path, .wire-path-ctrl').forEach(wire => {
-    wire.classList.remove('active', 'wire-animating');
-  });
-
-  // Clear chip highlights
-  const alu = document.getElementById('alu-body');
-  if (alu) alu.classList.remove('active');
-
-  const ctrl = document.getElementById('ctrl-box');
-  if (ctrl) ctrl.classList.remove('active');
-
-  // Clear sliding tokens layer
-  const layer = document.getElementById('sliding-bits-layer');
-  if (layer) layer.innerHTML = '';
-}
-
-function renderStaticBitValues(step) {
-  document.getElementById('val-cout').textContent = step.cout;
-
-  document.getElementById('val-acc-3').textContent = step.acc[0];
-  document.getElementById('val-acc-2').textContent = step.acc[1];
-  document.getElementById('val-acc-1').textContent = step.acc[2];
-  document.getElementById('val-acc-0').textContent = step.acc[3];
-
-  document.getElementById('val-mq-3').textContent = step.mq[0];
-  document.getElementById('val-mq-2').textContent = step.mq[1];
-  document.getElementById('val-mq-1').textContent = step.mq[2];
-  document.getElementById('val-mq-0').textContent = step.mq[3];
-
-  document.getElementById('val-x-3').textContent = step.x[0];
-  document.getElementById('val-x-2').textContent = step.x[1];
-  document.getElementById('val-x-1').textContent = step.x[2];
-  document.getElementById('val-x-0').textContent = step.x[3];
-
-  // Counter text in Control Box
-  const counterSpan = document.getElementById('ctrl-counter-text');
-  counterSpan.innerHTML = `计数器C<tspan font-size="16" dy="4">n</tspan><tspan dy="-4"> = ${step.counter}</tspan>`;
-}
-
-function applyStep(step, animate = true) {
-  clearCircuitHighlights();
-
-  // 1. Text Status Banner
-  document.getElementById('status-step-title').textContent = step.title;
-  document.getElementById('status-step-action').textContent = step.actionDesc;
-  document.getElementById('status-math-result').textContent = `${State.X} × ${State.Y} = ${State.X * State.Y} (0x${(State.X * State.Y).toString(16).toUpperCase()})`;
-
-  // 2. Active Wires
-  step.activeWires.forEach(wireId => {
-    const el = document.getElementById(wireId);
-    if (el) el.classList.add('active', 'wire-animating');
-  });
-
-  // 3. Active Chips
-  if (step.activeAlu) {
-    document.getElementById('alu-body').classList.add('active');
-  }
-  if (step.activeCtrl) {
-    document.getElementById('ctrl-box').classList.add('active');
+    render();
+    if (S.playing) animateStep();
+    else writeLinkNow();
   }
 
-  // 4. Physical Bit Sliding Continuous Animation (During Shift Phase)
-  if (animate && step.isShiftTransition) {
-    animateContinuousBitShift(step);
-  } else {
-    renderStaticBitValues(step);
-  }
-}
-
-// 60fps Continuous Physical Bit Sliding Animation
-function animateContinuousBitShift(step) {
-  const layer = document.getElementById('sliding-bits-layer');
-  layer.innerHTML = '';
-
-  // Source positions:
-  // Cout: (100, 118)
-  // ACC[3..0]: (210, 118), (270, 118), (330, 118), (390, 118)
-  // MQ[3..0]: (520, 118), (580, 118), (640, 118), (700, 118)
-
-  const positions = [
-    { name: 'cout', x: 100, val: step.prevCout },
-    { name: 'a3', x: 210, val: step.prevAcc[0] },
-    { name: 'a2', x: 270, val: step.prevAcc[1] },
-    { name: 'a1', x: 330, val: step.prevAcc[2] },
-    { name: 'a0', x: 390, val: step.prevAcc[3] },
-    { name: 'm3', x: 520, val: step.prevMq[0] },
-    { name: 'm2', x: 580, val: step.prevMq[1] },
-    { name: 'm1', x: 640, val: step.prevMq[2] },
-    { name: 'm0', x: 700, val: step.prevMq[3] }
-  ];
-
-  // Target positions:
-  const targetX = [
-    210, // cout -> ACC[3]
-    270, // a3 -> a2
-    330, // a2 -> a1
-    390, // a1 -> a0
-    520, // a0 -> m3 (Cross wire gap!)
-    580, // m3 -> m2
-    640, // m2 -> m1
-    700, // m1 -> m0
-    760  // m0 -> out
-  ];
-
-  // Hide static text during transition
-  renderStaticBitValues(step);
-  document.getElementById('val-cout').textContent = '';
-  document.getElementById('val-acc-3').textContent = '';
-  document.getElementById('val-acc-2').textContent = '';
-  document.getElementById('val-acc-1').textContent = '';
-  document.getElementById('val-acc-0').textContent = '';
-  document.getElementById('val-mq-3').textContent = '';
-  document.getElementById('val-mq-2').textContent = '';
-  document.getElementById('val-mq-1').textContent = '';
-  document.getElementById('val-mq-0').textContent = '';
-
-  const tl = gsap.timeline({
-    onComplete: () => {
-      layer.innerHTML = '';
-      renderStaticBitValues(step);
+  // 下一步：一步正在进行时直接到下一步起点；否则把本步播完、停在下一步起点
+  function stepNext() {
+    if (!S.run) return;
+    const last = S.run.steps.length - 1;
+    if (S.i === last && S.p >= 1) return;
+    S.playing = false;
+    if (S.p > 0 || !hasGsap) {
+      if (S.i + 1 > last) goTo(last, 1);
+      else goTo(S.i + 1, 0);
+      return;
     }
-  });
-
-  const dur = (0.7 / State.playbackSpeed);
-
-  positions.forEach((pos, idx) => {
-    const textElem = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-    textElem.setAttribute('x', pos.x);
-    textElem.setAttribute('y', 118);
-    textElem.setAttribute('class', 'svg-bit-text sliding-token');
-    textElem.textContent = pos.val;
-
-    // A0 bit crossing into MQ gets extra amber highlight
-    if (pos.name === 'a0') {
-      textElem.setAttribute('fill', '#FEF08A');
-    }
-
-    layer.appendChild(textElem);
-
-    tl.to(textElem, {
-      attr: { x: targetX[idx] },
-      opacity: idx === 8 ? 0 : 1, // m0 fades out
-      duration: dur,
-      ease: 'power2.inOut'
-    }, 0);
-  });
-
-  State.activeTimeline = tl;
-}
-
-function goToStep(index, animate = true) {
-  if (index < 0 || index >= State.steps.length) return;
-  State.currentStepIndex = index;
-  updateTimelineNodes(index);
-  applyStep(State.steps[index], animate);
-}
-
-function nextStep() {
-  if (State.currentStepIndex < State.steps.length - 1) {
-    goToStep(State.currentStepIndex + 1, true);
-  } else {
-    if (State.isPlaying) {
-      goToStep(0, true);
-    }
+    animateStep();
   }
-}
 
-function prevStep() {
-  if (State.currentStepIndex > 0) {
-    goToStep(State.currentStepIndex - 1, true);
+  function stepPrev() {
+    if (!S.run) return;
+    S.playing = false;
+    goTo(S.p > 0 ? S.i : Math.max(0, S.i - 1), 0);
   }
-}
 
-function startPlayback() {
-  State.isPlaying = true;
-  document.getElementById('play-icon').textContent = '⏸';
-  document.getElementById('play-text').textContent = '暂停演示';
+  function replay() {
+    S.playing = false;
+    goTo(0, 0);
+  }
 
-  function playLoop() {
-    if (!State.isPlaying) return;
-    const stepDurationMs = (1400 / State.playbackSpeed);
+  function setSpeed(v) {
+    S.speed = v;
+    if (S.tween) S.tween.timeScale(v);
+    render();
+  }
 
-    if (State.currentStepIndex < State.steps.length - 1) {
-      nextStep();
-      State.playTimer = setTimeout(playLoop, stepDurationMs);
-    } else {
-      State.playTimer = setTimeout(() => {
-        if (!State.isPlaying) return;
-        goToStep(0, true);
-        State.playTimer = setTimeout(playLoop, stepDurationMs);
-      }, stepDurationMs * 1.5);
+  function setReduce(v) {
+    S.reduce = Boolean(v);
+    document.body.dataset.motion = S.reduce ? 'reduce' : 'full';
+    if (S.run) render();
+  }
+
+  // 改参数：保留当前时刻（超出新长度则取末尾），并暂停，便于对比改动前后的同一时刻
+  function applyParams(X, Y, tau) {
+    S.playing = false;
+    killTween();
+    S.X = X;
+    S.Y = Y;
+    S.run = M.buildTrace(X, Y, 4);
+    buildBar();
+    fillStatic();
+    els.scrub.max = String(S.run.steps.length);
+    els.inX.value = String(X);
+    els.inY.value = String(Y);
+    document.querySelectorAll('[data-x]').forEach((b) => {
+      b.setAttribute('aria-pressed', String(Number(b.dataset.x) === X && Number(b.dataset.y) === Y));
+    });
+    const at = C.locate(S.run.steps.length, tau);
+    goTo(at.i, at.p);
+  }
+
+  function onKey(e) {
+    const t = e.target;
+    if (t instanceof Element && t.closest('input, select, textarea, button, a, [contenteditable]')) return;
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    if (e.code === 'Space') {
+      e.preventDefault();
+      togglePlay();
+    } else if (e.code === 'ArrowRight') {
+      e.preventDefault();
+      stepNext();
+    } else if (e.code === 'ArrowLeft') {
+      e.preventDefault();
+      stepPrev();
+    } else if (e.code === 'Home') {
+      e.preventDefault();
+      replay();
     }
   }
 
-  playLoop();
-}
-
-function pausePlayback() {
-  State.isPlaying = false;
-  clearTimeout(State.playTimer);
-  document.getElementById('play-icon').textContent = '▶';
-  document.getElementById('play-text').textContent = '自动连续演示';
-}
-
-function togglePlayback() {
-  if (State.isPlaying) {
-    pausePlayback();
-  } else {
-    startPlayback();
+  function bind() {
+    els.play.addEventListener('click', togglePlay);
+    els.prev.addEventListener('click', stepPrev);
+    els.next.addEventListener('click', stepNext);
+    els.replay.addEventListener('click', replay);
+    els.speed.addEventListener('input', (e) => setSpeed(Number(e.target.value)));
+    els.reduce.addEventListener('change', (e) => setReduce(e.target.checked));
+    els.scrub.addEventListener('input', (e) => {
+      S.playing = false;
+      const at = C.locate(S.run.steps.length, Number(e.target.value));
+      goTo(at.i, at.p);
+    });
+    document.querySelectorAll('[data-x]').forEach((b) => {
+      b.addEventListener('click', () => applyParams(Number(b.dataset.x), Number(b.dataset.y), S.i + S.p));
+    });
+    els.form.addEventListener('submit', (e) => {
+      e.preventDefault();
+      applyParams(clampInt(els.inX.value), clampInt(els.inY.value), S.i + S.p);
+    });
+    document.addEventListener('keydown', onKey);
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden && S.playing) pause();
+    });
+    if (motionQuery && motionQuery.addEventListener) {
+      motionQuery.addEventListener('change', (e) => setReduce(e.matches));
+    }
   }
-}
 
-function recomputeMultiplication() {
-  State.steps = generateMultiplicationTrace(State.X, State.Y, State.n);
-  initTimeline();
-  goToStep(0, false);
-}
+  function init() {
+    build();
+    if (!hasGsap) {
+      els.play.disabled = true;
+      els.notice.hidden = false;
+      els.notice.textContent = '未能加载动画引擎（GSAP），播放已停用；单步、时刻滑块与参数仍可用。';
+    }
+    setReduce(motionQuery ? motionQuery.matches : false);
+    bind();
+    const link = readLink();
+    applyParams(link.X, link.Y, link.t);
+  }
 
-// ==========================================================================
-// 3. EVENT LISTENERS & INITIALIZATION
-// ==========================================================================
-
-document.addEventListener('DOMContentLoaded', () => {
-  recomputeMultiplication();
-
-  // Preset Formulas Change
-  document.getElementById('formula-select').addEventListener('change', (e) => {
-    pausePlayback();
-    const val = e.target.value;
-    if (val === '13x11') { State.X = 13; State.Y = 11; }
-    else if (val === '5x3') { State.X = 5; State.Y = 3; }
-    else if (val === '7x6') { State.X = 7; State.Y = 6; }
-    else if (val === '9x13') { State.X = 9; State.Y = 13; }
-    else if (val === '15x15') { State.X = 15; State.Y = 15; }
-
-    document.getElementById('input-x').value = State.X;
-    document.getElementById('input-y').value = State.Y;
-    recomputeMultiplication();
-  });
-
-  // Custom Input Apply
-  document.getElementById('btn-apply-custom').addEventListener('click', () => {
-    pausePlayback();
-    let x = parseInt(document.getElementById('input-x').value, 10);
-    let y = parseInt(document.getElementById('input-y').value, 10);
-    if (isNaN(x) || x < 0) x = 0;
-    if (x > 15) x = 15;
-    if (isNaN(y) || y < 0) y = 0;
-    if (y > 15) y = 15;
-
-    State.X = x;
-    State.Y = y;
-    document.getElementById('input-x').value = x;
-    document.getElementById('input-y').value = y;
-    recomputeMultiplication();
-  });
-
-  // Control Buttons
-  document.getElementById('btn-play-pause').addEventListener('click', togglePlayback);
-  document.getElementById('btn-step-next').addEventListener('click', () => {
-    pausePlayback();
-    nextStep();
-  });
-  document.getElementById('btn-step-prev').addEventListener('click', () => {
-    pausePlayback();
-    prevStep();
-  });
-  document.getElementById('btn-reset').addEventListener('click', () => {
-    pausePlayback();
-    goToStep(0, false);
-  });
-
-  // Speed Slider
-  const speedSlider = document.getElementById('speed-slider');
-  speedSlider.addEventListener('input', (e) => {
-    State.playbackSpeed = parseFloat(e.target.value);
-    document.getElementById('speed-val').textContent = State.playbackSpeed.toFixed(1) + 'x';
-  });
-});
+  init();
+})();

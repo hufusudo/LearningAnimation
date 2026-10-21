@@ -1,201 +1,287 @@
-/* ==========================================================================
-   Sequential Multiplier Circuit - High-Fidelity Interactive Visualizer
-   Replicating the reference circuit diagram with smooth 60fps continuous tweens
-   ========================================================================== */
+/* 顺序乘法电路：纸面舞台（令牌见 DESIGN_SYSTEM §2；组件取自 ui-recipes 的光束按钮、微按键、纸质滑块） */
 
 :root {
-  --bg-page: #FAF9F5;
-  --bg-card: #FFFFFF;
-  --bg-subtle: #F5F4EE;
-  --border-main: #E5E4DC;
+  --paper: #FAF9F5;
+  --white: #FFFFFF;
+  --border: #E5E4DC;
   --border-strong: #D6D3CD;
-  --text-main: #1C1917;
-  --text-muted: #57534E;
-  --text-dim: #A8A29E;
-
-  /* Diagram Palette Colors */
-  --c-cout: #7C3AED;      /* Cout: 紫色 */
-  --c-cout-bg: #8B5CF6;
-  --c-acc: #0284C7;       /* ACC: 亮天蓝 */
-  --c-acc-cell: #38BDF8;
-  --c-mq: #059669;        /* MQ: 碧绿/翡翠 */
-  --c-mq-cell: #10B981;
-  --c-mq0-hatch: #CCFBF1;
-  --c-alu: #F59E0B;       /* ALU: 暖橙黄 */
-  --c-ctrl: #EF4444;      /* 控制逻辑: 鲜红 */
-  --c-x: #334155;         /* X: 深灰蓝 */
+  --ink: #343C38;
+  --ink-2: #5D655F;
+  --muted: #6B7066;
+  --blue: #2563EB;
+  --green: #399B7B;
+  --gold-deep: #8F6619;
+  --wait: #9AA096;
+  --mono: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+  --sans: -apple-system, "SF Pro Display", "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
 }
 
+*, *::before, *::after { box-sizing: border-box; }
+[hidden] { display: none !important; }
+
+html, body { margin: 0; background: var(--paper); }
 body {
-  background-color: var(--bg-page);
-  color: var(--text-main);
-  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, sans-serif;
-  overflow-x: hidden;
+  color: var(--ink);
+  font: 14px/1.6 var(--sans);
+  -webkit-font-smoothing: antialiased;
 }
 
-.font-mono-num {
-  font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', monospace;
-  font-variant-numeric: tabular-nums;
+.page {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 20px 16px 28px;
+  display: grid;
+  gap: 14px;
 }
 
-.card-panel {
-  background: var(--bg-card);
-  border: 1px solid var(--border-main);
-  border-radius: 16px;
-  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.02);
+.head { display: grid; gap: 6px; }
+.back { font: 12px var(--mono); color: var(--muted); text-decoration: none; justify-self: start; }
+.back:hover { color: var(--ink); }
+h1 {
+  margin: 0;
+  font: 650 clamp(22px, 2.6vw, 30px)/1.25 var(--sans);
+  letter-spacing: -0.04em;
+  text-wrap: balance;
+}
+.sub { margin: 0; color: var(--muted); font-size: 13px; text-wrap: pretty; }
+
+/* 舞台：工程微网格 + 不对称圆角（DESIGN_SYSTEM §3、§9） */
+.stage {
+  border: 1px solid var(--border);
+  border-radius: 16px 16px 24px 16px;
+  background-color: var(--paper);
+  background-image:
+    linear-gradient(to right, rgba(0, 0, 0, 0.035) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(0, 0, 0, 0.035) 1px, transparent 1px);
+  background-size: 18px 18px;
+  overflow: hidden;
+}
+.stage svg { display: block; width: 100%; height: auto; user-select: none; }
+
+.caption {
+  margin: 0;
+  padding: 12px 18px 14px;
+  min-height: 3.2em;
+  border-top: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.72);
+  font-size: 15px;
+  text-wrap: pretty;
 }
 
-/* SVG Elements & Circuit Styling */
-#circuit-svg {
-  user-select: none;
+.notice {
+  margin: 0;
+  padding: 10px 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background: var(--white);
+  color: var(--ink-2);
+  font-size: 13px;
 }
 
-/* Register Bit Boxes in SVG */
-.svg-bit-cell {
-  transition: fill 0.3s ease, stroke 0.3s ease, filter 0.3s ease;
+.card {
+  background: var(--white);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 14px 16px;
+  display: grid;
+  gap: 12px;
 }
 
-.svg-bit-text {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 26px;
-  font-weight: 800;
-  fill: #FFFFFF;
-  text-anchor: middle;
-  dominant-baseline: central;
+.row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; }
+.params { align-items: center; }
+.custom { gap: 8px; }
+.grow { flex: 1 1 260px; }
+.label { color: var(--ink-2); font-size: 13px; }
+.mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+
+.slider-label { display: inline-flex; align-items: center; gap: 10px; color: var(--ink-2); font-size: 13px; white-space: nowrap; }
+.slider-label .paper-slider { flex: 1 1 140px; min-width: 120px; }
+.check { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-2); font-size: 13px; cursor: pointer; }
+.check input { accent-color: var(--blue); }
+
+/* 光束按钮：页面唯一的主动作（ui-recipes 组件 2） */
+.beam-cta {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+  border: 0;
+  border-radius: 999px;
+  padding: 9px 20px;
+  background: var(--white);
+  color: var(--ink);
+  font: 600 13px var(--mono);
+  box-shadow: 0 4px 16px rgba(37, 99, 235, 0.1);
+  cursor: pointer;
+  transition: box-shadow 0.25s ease, transform 0.1s ease;
+}
+.beam-cta::before {
+  content: "";
+  position: absolute;
+  inset: -150%;
+  z-index: -2;
+  background: conic-gradient(from 0deg, transparent 0 300deg, rgba(37, 99, 235, 0.45) 340deg, transparent 360deg);
+  animation: beam-spin 4s linear infinite;
   pointer-events: none;
 }
-
-/* ALU Shape */
-.svg-alu-body {
-  fill: #F59E0B;
-  stroke: #B45309;
-  stroke-width: 2.5px;
-  filter: drop-shadow(0 4px 10px rgba(245, 158, 11, 0.25));
-  transition: all 0.3s ease;
+.beam-cta::after {
+  content: "";
+  position: absolute;
+  inset: 1px;
+  z-index: -1;
+  border-radius: 999px;
+  background: var(--white);
 }
+.beam-cta:hover { box-shadow: 0 6px 24px rgba(37, 99, 235, 0.18); }
+.beam-cta:active { transform: scale(0.98); }
+@keyframes beam-spin { to { transform: rotate(360deg); } }
 
-.svg-alu-body.active {
-  fill: #FBBF24;
-  stroke: #D97706;
-  filter: drop-shadow(0 0 16px rgba(245, 158, 11, 0.55));
-}
-
-/* Control Unit Box */
-.svg-ctrl-box {
-  fill: #EF4444;
-  stroke: #B91C1C;
-  stroke-width: 2.5px;
-  filter: drop-shadow(0 4px 10px rgba(239, 68, 68, 0.25));
-  transition: all 0.3s ease;
-}
-
-.svg-ctrl-box.active {
-  fill: #F87171;
-  stroke: #DC2626;
-  filter: drop-shadow(0 0 16px rgba(239, 68, 68, 0.5));
-}
-
-/* Wire Paths */
-.wire-path {
-  stroke: #1E293B;
-  stroke-width: 2.5px;
-  fill: none;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  transition: stroke 0.25s ease, stroke-width 0.25s ease, filter 0.25s ease;
-}
-
-.wire-path.active {
-  stroke: #2563EB;
-  stroke-width: 4px;
-  filter: drop-shadow(0 0 6px rgba(37, 99, 235, 0.5));
-}
-
-.wire-path-ctrl {
-  stroke: #1E293B;
-  stroke-width: 3.5px;
-  fill: none;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  transition: all 0.25s ease;
-}
-
-.wire-path-ctrl.active {
-  stroke: #EF4444;
-  stroke-width: 4.5px;
-  filter: drop-shadow(0 0 8px rgba(239, 68, 68, 0.6));
-}
-
-.wire-bus-thick {
-  stroke: #1E293B;
-  stroke-width: 4px;
-  fill: none;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-
-/* Flow Dash Animation */
-@keyframes flowDash {
-  to {
-    stroke-dashoffset: -20;
-  }
-}
-
-.wire-animating {
-  stroke-dasharray: 6 4;
-  animation: flowDash 0.7s linear infinite;
-}
-
-/* Hatched pattern for MQ0 */
-.hatch-pattern {
-  stroke: #047857;
-  stroke-width: 1.5;
-}
-
-/* Step Node in Timeline */
-.step-node {
+/* 陶瓷触感微按键（ui-recipes 组件 3） */
+.tactile {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: linear-gradient(to bottom, #FFFFFF, #F7F6F0);
+  box-shadow: 0 1.5px 0 var(--border-strong);
+  color: var(--ink);
+  font: 600 12px var(--mono);
   cursor: pointer;
-  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  user-select: none;
+  transition: background-color 0.1s ease;
 }
-.step-node.current {
-  background: #1C1917;
-  color: #FFFFFF;
-  border-color: #1C1917;
-  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.15);
-}
-.step-node.passed {
-  background: #F5F4EE;
-  color: #57534E;
-  border-color: #D6D3CD;
-}
-.step-node.future {
-  background: #FFFFFF;
-  color: #A8A29E;
-  border-color: #E5E4DC;
+.tactile:hover { background: var(--white); }
+.tactile:active { box-shadow: none; transform: translateY(1.5px); }
+
+button:focus-visible,
+input:focus-visible,
+.step:focus-visible,
+.back:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 3px;
 }
 
-/* Micro-phase Step Tabs */
-.phase-pill {
-  transition: all 0.2s ease;
+button:disabled,
+input:disabled { opacity: 0.4; cursor: not-allowed; }
+button:disabled { pointer-events: none; }
+
+/* 分段按钮：预设算式 */
+.seg {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--paper);
+}
+.seg-btn {
+  padding: 4px 12px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--ink-2);
+  font: 600 12px var(--mono);
   cursor: pointer;
 }
-.phase-pill.active {
-  background-color: #1C1917;
-  color: #FFFFFF;
-  font-weight: 600;
-}
-.phase-pill.inactive {
-  background-color: #F5F4EE;
-  color: #78716C;
+.seg-btn:hover { color: var(--ink); background: var(--white); }
+.seg-btn[aria-pressed="true"] { background: var(--ink); color: var(--white); }
+
+.num {
+  width: 60px;
+  padding: 4px 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--white);
+  color: var(--ink);
+  font: 600 13px var(--mono);
+  text-align: center;
 }
 
-/* Sliding Floating Bit Token */
-.sliding-token {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 24px;
-  font-weight: 800;
-  fill: #FFFFFF;
-  text-anchor: middle;
-  dominant-baseline: central;
-  filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.35));
+/* 纸质滑块：3px 细轨、白色圆头（ui-recipes 组件 6） */
+.paper-slider {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 100%;
+  min-height: 32px;
+  margin: 0;
+  background: transparent;
+  accent-color: var(--blue);
+  cursor: pointer;
+}
+.paper-slider::-webkit-slider-runnable-track { height: 3px; border-radius: 999px; background: var(--border-strong); }
+.paper-slider::-moz-range-track { height: 3px; border-radius: 999px; background: var(--border-strong); }
+.paper-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  margin-top: -6.5px;
+  border: 1px solid var(--ink);
+  border-radius: 50%;
+  background: var(--white);
+}
+.paper-slider::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border: 1px solid var(--ink);
+  border-radius: 50%;
+  background: var(--white);
+}
+
+/* 阶段条：每一步一个按钮，按拍分组；长序列在自身容器内横向滑动，页面不滚动 */
+.stage-bar {
+  display: flex;
+  align-items: flex-end;
+  gap: 16px;
+  overflow-x: auto;
+  padding: 2px 2px 6px;
+}
+.cycle { display: inline-flex; align-items: center; gap: 4px; flex: none; padding-right: 14px; border-right: 1px solid var(--border); }
+.cycle:last-child { border-right: 0; }
+.cycle-label { font: 600 11px var(--mono); color: var(--muted); padding-right: 4px; white-space: nowrap; }
+.step {
+  padding: 5px 9px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--white);
+  color: var(--muted);
+  font: 600 12px var(--sans);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+.step:hover { color: var(--ink); }
+.step[data-state="passed"] { background: var(--paper); color: var(--ink-2); border-color: var(--border-strong); }
+.step[data-state="current"] { background: var(--ink); color: var(--white); border-color: var(--ink); }
+
+.footnote { margin: 0; color: var(--muted); font-size: 12px; text-wrap: pretty; }
+
+/* 舞台内的文字（字号与字重用 CSS；颜色与位置由脚本的属性写入） */
+.label { font: 600 13px var(--sans); }
+.bit { font: 700 26px var(--mono); font-variant-numeric: tabular-nums; }
+.chip-text { font: 700 20px var(--mono); font-variant-numeric: tabular-nums; }
+.alu-text { font: 700 16px var(--sans); }
+.plus-text { font: 700 22px var(--mono); }
+.counter-text { font: 700 30px var(--mono); font-variant-numeric: tabular-nums; }
+.tag-text { font: 600 13px var(--sans); }
+.result-text { font: 600 19px var(--mono); }
+.status-title { font: 650 17px var(--sans); }
+.status-cycle { font: 700 30px var(--mono); font-variant-numeric: tabular-nums; }
+.formula { font: 500 14px var(--mono); }
+
+/* 状态灯只在真正播放时呼吸（约 2.4 s）；减少动效时不呼吸 */
+.is-running { animation: breathe 2.4s ease-in-out infinite; }
+@keyframes breathe { 0%, 100% { opacity: 0.45; } 50% { opacity: 1; } }
+
+body[data-motion="reduce"] .beam-cta::before,
+body[data-motion="reduce"] .is-running { animation: none; }
+body[data-motion="reduce"] .beam-cta,
+body[data-motion="reduce"] .tactile { transition: none; }
+
+@media (max-width: 720px) {
+  .page { padding: 14px 12px 22px; }
+  .row { gap: 8px 10px; }
+  .slider-label .paper-slider { flex-basis: 100%; }
 }
